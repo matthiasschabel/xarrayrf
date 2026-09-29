@@ -39,10 +39,11 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   ([geometry and resampling](architecture/geometry_and_resampling_design.md)).
 - **Viewer support.** Selection overhead, backend neutrality, pixel-free target domains and
   checked on-plane inversion ([viewer boundary plan](architecture/viewer_boundary_plan.md)).
-- **Angular coordinate systems**, then a bounded nonlinear transform provider through the
-  existing capability protocols. Both change core value objects and need a reviewed plan
-  ([prior-art study](architecture/prior_art_coverage_study.md),
-  [relativity notes](architecture/relativity_notes.md)).
+- **Nonlinear geometry**, staged in the
+  [draft plan](architecture/nonlinear_geometry_plan.md): field-backed transforms for deformable
+  registration, then angular coordinate systems with a minimal CF reader (rectilinear GCM and
+  celestial grids), then curvilinear coordinate fields, then provider adapters (pyproj, Astropy).
+  Angular systems change core value objects and need their own reviewed plan.
 - **Small follow-ups.** `xarrayrf.native` imports the private
   `xarray.namedarray._typing.duckarray` for its `DuckArray` alias; DICOM localizer
   (mixed-orientation) splitting; a NIfTI writer on top of `nifti.to_header`.
