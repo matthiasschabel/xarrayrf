@@ -5,7 +5,7 @@
 #   tools/xrpr <tree> -c '<code>'
 # <tree>: base | 11616 | 11617 | 11621 | main | patched | /abs/path/to/tree
 # The tree's source shadows the installed xarray via PYTHONPATH; the interpreter is
-# ~/GitHub/xarray-upstream/.venv/bin/python. Reproducers live in explorations/upstream_reproducers.
+# ~/GitHub/xarray-upstream/.venv/bin/python. Reproducers live in tools/upstream_reproducers.
 set -e
 case "$1" in
   base)    TREE=$HOME/GitHub/xarray-base ;;
@@ -18,7 +18,7 @@ case "$1" in
   *) sed -n 2,8p "$0"; exit 2 ;;
 esac
 shift
-REPRO=$(cd "$(dirname "$0")/.." && pwd)/explorations/upstream_reproducers
+REPRO=$(cd "$(dirname "$0")/.." && pwd)/tools/upstream_reproducers
 export PYTHONPATH="$TREE:$REPRO${PYTHONPATH:+:$PYTHONPATH}"
 PY=$HOME/GitHub/xarray-upstream/.venv/bin/python
 if [ $# -eq 0 ]; then

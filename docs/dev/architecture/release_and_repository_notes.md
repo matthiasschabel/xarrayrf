@@ -46,7 +46,7 @@ was raised rather than loosening tolerances.
 | locked | 3.12 | `uv sync --locked --extra dev` | `make check test build` |
 | minimum-resample | 3.12 | NumPy 2.0.0, SciPy 1.18.0, xarray 2026.7.0 | `make check test build` |
 | current | 3.13 | latest resolution of `.[dev]` | `make check test build` |
-| minimum-core | 3.12 | NumPy 1.26.0, xarray 2026.7.0, adapter extras, pytest, Dask; SciPy absent | `pytest tests explorations` |
+| minimum-core | 3.12 | NumPy 1.26.0, xarray 2026.7.0, adapter extras, pytest, Dask; SciPy absent | `pytest tests` |
 
 Non-locked lanes resolve the full editable extra in a clean environment (downgrading only NumPy
 had left SciPy and Zarr versions requiring NumPy 2) and every lane runs `uv pip check`.

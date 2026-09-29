@@ -105,7 +105,7 @@ PYTHONPATH=$PWD ~/GitHub/xarray-upstream/.venv/bin/pytest xarray/tests -n 6 -q
 # xarrayrf against the new tree
 PYTHONPATH=$HOME/GitHub/<new-worktree> uv run --no-sync pytest
 PYTHONPATH=$HOME/GitHub/<new-worktree> uv run --no-sync \
-  python explorations/binding_operation_probe.py
+  python tools/binding_operation_probe.py
 make check
 ```
 
@@ -122,8 +122,8 @@ else uses this". Target: at least two extension-backed reproducers per hook, or 
 that fewer exist and what that means.
 
 Observations already verified in
-[prior_art_coverage_study.md](../architecture/prior_art_coverage_study.md) and pinned by
-`explorations/test_geo_failure_modes.py`. The hook column is a hypothesis per row:
+[prior_art_coverage_study.md](../architecture/prior_art_coverage_study.md) and reproduced by
+`tools/geo_failure_modes.py`. The hook column is a hypothesis per row:
 
 | Observed failure | Library | Candidate hook |
 |---|---|---|

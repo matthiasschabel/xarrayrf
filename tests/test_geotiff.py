@@ -9,6 +9,7 @@ import numpy as np
 import pyproj
 import pytest
 import rasterio  # type: ignore[import-untyped]
+import xarray as xr
 from dask.callbacks import Callback
 from numpy.testing import assert_allclose, assert_array_equal
 from rasterio.io import MemoryFile  # type: ignore[import-untyped]
@@ -260,3 +261,46 @@ def test_source_axes_are_typed_as_space() -> None:
     assert source == ArrayCoordinates(
         ("row", "column"), ("1", "1"), axis_types=("space", "space"), sample_offset=(0.5, 0.5)
     )
+
+
+_MEMORY_AFFINE = Affine(2, 0, 100, 0, -3, 200)
+
+
+def _open_in_memory(crs: str) -> xr.DataArray:
+    with MemoryFile() as memory:
+        with memory.open(
+            driver="GTiff",
+            width=4,
+            height=3,
+            count=1,
+            dtype="float64",
+            crs=crs,
+            transform=_MEMORY_AFFINE,
+        ) as dataset:
+            dataset.write(np.arange(12, dtype=np.float64).reshape(1, 3, 4))
+        return geotiff.open(memory.name, chunks=None)
+
+
+def test_strided_selection_keeps_pixel_locations() -> None:
+    stride = _open_in_memory("EPSG:32633").isel(column=slice(None, None, 2))
+    expected = [rasterio.transform.xy(_MEMORY_AFFINE, 0, column) for column in (0, 2)]
+    assert_allclose(stride.rf.geometry.points().data[0], expected, rtol=0, atol=1e-10)
+
+
+def test_join_keeps_the_frame_and_concatenation_is_refused() -> None:
+    array = _open_in_memory("EPSG:32633")
+    joined = xr.align(array, array.isel(column=slice(1, None)), join="inner")[0]
+    assert joined.rf.reference_frame == array.rf.reference_frame
+    with pytest.raises(ValueError, match="concatenation of framed arrays"):
+        xr.concat([array, array], dim="column")
+
+
+@pytest.mark.xfail(
+    not hasattr(xr.Index, "check_override"),
+    strict=True,
+    raises=pytest.fail.Exception,
+    reason="this xarray lane lacks the check_override Index hook (known align_override hole)",
+)
+def test_override_alignment_across_crs_is_refused() -> None:
+    with pytest.raises(ValueError, match=r"frame|reference|conflict"):
+        xr.align(_open_in_memory("EPSG:32633"), _open_in_memory("EPSG:32634"), join="override")

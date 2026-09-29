@@ -5,9 +5,7 @@
 **Scope:** Lorentz and Poincaré transformations on spacetime arrays (implemented as examples and
 tests, no physics in the core), measured contraction in 1+1-D and 3+1-D, and the deferred design
 for relativistic viewing and angular coordinates. Executable companions:
-`tests/test_relativity.py`, `explorations/relativity_contraction_demo.py`,
-`explorations/relativity_measured_shape_3d.py` (with their `test_` files) and
-`examples/relativity.ipynb`.
+`tests/test_relativity.py` and `examples/relativity.ipynb`.
 
 ## Context
 

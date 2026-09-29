@@ -1,8 +1,10 @@
+# The compared libraries are optional (the "priorart" dependency group) and mostly unannotated.
+# mypy: disable-error-code="import-untyped,import-not-found,no-any-return"
 """Reproduce selected geospatial identity and pixel-location failure modes.
 
-This is a development comparison, not a claim that xarrayrf replaces these engines.
-A changed other-library result is reported as ``fixed`` and causes the paired test
-expecting the pinned observation to fail.
+This is a development comparison, not a claim that xarrayrf replaces these engines. A
+case another library has since fixed is reported as ``fixed``. Run it with the optional
+libraries installed: ``uv run --group priorart python tools/geo_failure_modes.py``.
 """
 
 from __future__ import annotations

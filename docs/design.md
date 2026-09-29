@@ -752,5 +752,4 @@ Primary documentation consulted for the extension boundaries:
 - [Astropy shared WCS interface](https://docs.astropy.org/en/stable/wcs/wcsapi.html).
 
 Local evidence: xarray 2026.7.0 stock, upstream `main` and the pinned patch series, measured by
-`explorations/binding_operation_probe.py` and recorded in the operation inventory; the rejected
-scalar-carrier experiment survives in `explorations/scalar_binding_probe.py` as history.
+`tools/binding_operation_probe.py` and recorded in the operation inventory.

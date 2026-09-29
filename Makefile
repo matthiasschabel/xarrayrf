@@ -28,12 +28,7 @@ relativity:
 	cd examples && UV_PROJECT_ENVIRONMENT=../.venv-patched $(UV) run --extra dev --group patched --group docs python ../tools/build_relativity.py relativity.ipynb
 
 probe:
-	$(UV) run --no-sync python explorations/binding_operation_probe.py
-	$(UV) run --no-sync python explorations/scalar_binding_probe.py
-	$(UV) run --no-sync python explorations/index_hook_probe.py
-	$(UV) run --no-sync python explorations/ownership_comparison_probe.py
-	$(UV) run --no-sync python explorations/operation_trace_probe.py
-	$(UV) run --no-sync python explorations/operand_check_probe.py
+	$(UV) run --no-sync python tools/binding_operation_probe.py
 
 build:
 	$(UV) build

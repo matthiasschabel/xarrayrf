@@ -86,6 +86,8 @@ ignore = ["E501"]
 python_version = "3.12"
 strict = true
 files = ["src", "tests", "tools", "benchmarks"]
+# Upstream reproducers are plain scripts written to be pasted into xarray issues and PRs.
+exclude = ["^tools/upstream_reproducers/"]
 mypy_path = "src"
 
 # Dask is used only by the lazy-evaluation tests, to prove no pixel task runs. It does not
@@ -100,11 +102,9 @@ module = ["build_tour", "build_relativity"]
 disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "explorations"]
+testpaths = ["tests"]
 # Tests import the installed editable package, so "src" is deliberately absent: a source
 # path here would hide a packaging mistake by importing code that was never installed.
-# "explorations" stays because those development-only probes are not packaged at all.
-pythonpath = ["explorations"]
 addopts = "-ra --strict-markers"
 xfail_strict = true
 
@@ -124,7 +124,7 @@ docs = [
     "requests>=2.32",
 ]
 patched = ["xarray"]
-# Dev-only: the geospatial extensions compared in explorations/geo_failure_modes.py.
+# Dev-only: the geospatial extensions compared in tools/geo_failure_modes.py.
 priorart = [
     "rasterix>=0.2.2",
     "rioxarray>=0.23",

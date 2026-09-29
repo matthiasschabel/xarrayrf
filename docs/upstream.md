@@ -43,10 +43,10 @@ PRs. A reproducer can run on both sides without touching the `main` checkout tha
 that tree's source shadows the installed xarray:
 
 ```sh
-tools/xrpr base explorations/upstream_reproducers/pr_11621.py    # before: run, then stay in the console
-tools/xrpr 11621 explorations/upstream_reproducers/pr_11621.py   # after: same script on the PR branch
+tools/xrpr base tools/upstream_reproducers/pr_11621.py    # before: run, then stay in the console
+tools/xrpr 11621 tools/upstream_reproducers/pr_11621.py   # after: same script on the PR branch
 tools/xrpr 11616                                                 # bare console, np and xr preloaded
-tools/xrpr main explorations/upstream_reproducers/pr_11615.py   # merged fix; no PR worktree
+tools/xrpr main tools/upstream_reproducers/pr_11615.py   # merged fix; no PR worktree
 tools/xrpr base -c "import xarray; print(xarray.__file__)"       # confirm which tree answers
 ```
 
@@ -54,7 +54,7 @@ Trees are named by PR number (the mapping is in the script header), plus `base`,
 unmodified comparison checkout) and `patched` (the local series 4 tree, `index-hooks-4`), or
 an absolute path to any xarray checkout. Every reproducer prints `xarray.__file__` first.
 
-`explorations/upstream_reproducers/` holds one self-contained script per PR, including merged
+`tools/upstream_reproducers/` holds one self-contained script per PR, including merged
 #11613 and #11615, written around a public example (the `RasterIndex` from xarray's
 custom-index guide) so a maintainer can paste it. Add one when preparing a PR and record its
 before/after output in the PR's section of `docs/dev/xarray-upstream/upstream_prs.md`.

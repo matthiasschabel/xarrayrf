@@ -39,10 +39,9 @@
 |---|---|
 | `src/xarrayrf/` | The shipped package |
 | `tests/` | Tests of the public API |
-| `explorations/` | Development-only probes and conformance experiments; never shipped |
 | `benchmarks/` | Development-only performance measurements |
 | `examples/` | Example notebooks and their data helpers |
-| `tools/` | Notebook builders and maintainer scripts |
+| `tools/` | Notebook builders, the native-operation probe, upstream reproducers and other maintainer scripts |
 | `docs/` | Design, interface specification and development notes |
 
 ## Development setup

@@ -14,7 +14,7 @@ see [xarray_patches.md](xarray_patches.md).
 
 Each PR is one commit from a `pr/<name>` branch on the fork, in its own worktree
 `~/GitHub/xarray-pr-<name>` cut from upstream `main`. PR bodies on GitHub are the record of the
-posted text. Reproducers are in `explorations/upstream_reproducers/pr_<number>.py`, built on the
+posted text. Reproducers are in `tools/upstream_reproducers/pr_<number>.py`, built on the
 `RasterIndex` from xarray's custom-index guide; run them with `tools/xrpr <base|number|main>`
 ([docs/upstream.md](../../upstream.md)). `base` is `dfd25c72`.
 

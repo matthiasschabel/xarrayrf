@@ -203,8 +203,7 @@ lifecycle is governed by [the architecture](../../design.md) §5: the target is 
 ownership over a named minimum native subset, and every operation must enforce, reject, or leave a
 detectably invalid declaration. A scalar-index carrier alone was measured and rejected: a
 fixed-plane sum silently lost a bound coordinate while keeping the declaration, and a guarded
-declaration silently won over a conflicting unguarded one
-(`explorations/scalar_binding_probe.py`). Binding work is recorded under `docs/dev/binding/`.
+declaration silently won over a conflicting unguarded one. Binding work is recorded under `docs/dev/binding/`.
 
 ### Affine classes
 

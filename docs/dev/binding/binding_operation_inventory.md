@@ -7,7 +7,7 @@ xarray, upstream `main` and the patched series; the release gate for the private
 
 ## Context
 
-The probe is `explorations/binding_operation_probe.py` (`make probe`; it prints JSON, and this
+The probe is `tools/binding_operation_probe.py` (`make probe`; it prints JSON, and this
 table is transcribed from it). Lanes at measurement: stock xarray 2026.7.0; upstream `main` at
 `dfd25c72`; patched series 4 (tag `xarrayrf-patches-4`, `5db75d53`). The reported xarray
 version can be stale editable-install metadata under `PYTHONPATH`; the probe's import paths

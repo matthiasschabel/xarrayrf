@@ -406,7 +406,7 @@ except ValueError as error:
     ),
     md(
         """The same situations in popular geospatial extensions (reproduced by
-`explorations/geo_failure_modes.py`):
+`tools/geo_failure_modes.py`):
 
 | Operation | rioxarray 0.23 / rasterix 0.2 / xproj 0.2 | xarrayrf |
 |---|---|---|

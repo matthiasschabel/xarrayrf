@@ -245,7 +245,7 @@ Reads projected GeoTIFF/COG. No export.
 - **Reader.** One delayed windowed read per dask chunk, each task opening the file (rasterio
   handles are not thread-safe). `bands` selects 1-based bands. `nodata` goes to `attrs`; masks
   and scale/offset are not applied.
-- **Failure-mode comparison.** `explorations/geo_failure_modes.py` runs known rioxarray, xproj
+- **Failure-mode comparison.** `tools/geo_failure_modes.py` runs known rioxarray, xproj
   and rasterix lifecycle failures (stale transform after strided `isel`, silent CRS mixing, CRS
   lost in joins, `join="override"` rewriting a CRS) beside xarrayrf, recording each other-library
   outcome as `reproduced`, `fixed` or `could-not-run`. On stock xarray the override case rebinds
@@ -295,5 +295,5 @@ Reads projected GeoTIFF/COG. No export.
 
 ## Next Steps
 
-None beyond the deferred items. `explorations/real_data_check.py` (read-only, takes paths) is the
+None beyond the deferred items. `tools/real_data_check.py` (read-only, takes paths) is the
 manual check against real NIfTI, DICOM and OME-Zarr data after adapter changes.

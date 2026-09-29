@@ -1,3 +1,5 @@
+# xarray.where and dask.array.from_array are unannotated upstream.
+# mypy: disable-error-code="no-untyped-call"
 """Inventory native xarray operations against the private reference-frame binding.
 
 The absolute 1e-12 tolerance is far below the unit-spaced synthetic grid and covers
@@ -9,6 +11,7 @@ from __future__ import annotations
 import json
 import pickle
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import dask.array as da
@@ -210,7 +213,7 @@ def run() -> dict[str, object]:
     for how in ("inner", "outer", "exact", "override"):
         add(
             f"align_{how}",
-            lambda how=how: xr.align(image, shifted, join=how),
+            partial(xr.align, image, shifted, join=how),
             "must_refuse" if how == "override" else "may_refuse",
         )
     add("align_unframed", lambda: xr.align(image, labelled))

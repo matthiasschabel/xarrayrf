@@ -40,4 +40,4 @@ jobs:
       - run: uv pip install -e '.[nifti,dicom,ngff,geotiff]' pytest 'dask[array]' 'numpy==1.26.0' 'xarray==2026.7.0'
       - run: uv pip check
       - run: .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('scipy') is None"
-      - run: .venv/bin/python -m pytest tests explorations
+      - run: .venv/bin/python -m pytest tests

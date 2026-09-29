@@ -112,8 +112,7 @@ indexes that do not implement it; no domain rule lives in xarray.
 ### Coordinate ownership: why a joint index
 
 Before adoption, bare, scalar-guard and joint-index carriers were measured on released xarray
-and upstream `main` (`explorations/ownership_comparison_probe.py`,
-`explorations/test_joint_coordinate_index.py`):
+and upstream `main` with development-only prototypes, since removed:
 
 | Operation | Bare / scalar guard | Joint index |
 |---|---|---|
@@ -127,7 +126,7 @@ and upstream `main` (`explorations/ownership_comparison_probe.py`,
 A joint index was the only carrier that can see selection and renames. Its remaining failures
 (mixed alignment, `drop=True`, override, sibling association) became the stage 3b work.
 
-`explorations/operation_trace_probe.py` traced the call chains with `sys.setprofile`. Binary
+A `sys.setprofile` trace of the call chains showed the following. Binary
 arithmetic, NumPy ufuncs and `where` converge on alignment then `merge_collected`, where
 operand identity is already lost; `align(join="override")` goes through
 `Aligner.override_indexes` without any merge; array-plus-scalar bypasses both alignment and
@@ -136,8 +135,7 @@ override separately, and scalar operands have nothing to conflict with.
 
 ### Operand-conflict checks
 
-An xarray-only measurement (`explorations/operand_check_probe.py`, pinned by
-`explorations/test_operand_check_probe.py`) used a ~60-line scalar custom index whose `equals`,
+An xarray-only measurement (`tools/upstream_reproducers/issue_11607_operand_check.py`) used a ~60-line scalar custom index whose `equals`,
 `join`, `reindex_like` and `concat` raise on a value mismatch. It ran 135 cells per lane
 (11 pair operations x 6 cases x 2 orders, plus 3 scalar operations); released xarray and
 upstream `main` gave identical results.
@@ -227,12 +225,12 @@ encoding.
 
 ## Alternatives Considered
 
-- **Attrs carrier** (`explorations/attrs_carrier.py`): carries metadata well where coordinates
+- **Attrs carrier:** carries metadata well where coordinates
   carry geometry (crops, strides, gathers, coarsening and netCDF stay correct), but enforces
   nothing. Cross-frame arithmetic silently unframes or keeps the first operand's attrs
   depending on path (`np.add`, `xr.where`, `concat`); integer selection and renames of a
   geometry dimension break the declaration. Not a carrier.
-- **Declaration coordinate plus scalar guard index** (`explorations/scalar_binding_probe.py`):
+- **Declaration coordinate plus scalar guard index:**
   `drop_indexes`, `reset_index`, `set_xindex`, save/load, vectorized selection and `coarsen`
   leave the label without its guard, and a same-dimension Dataset sibling inherits it. The
   label outliving the guard is exactly the half-state to avoid.
