@@ -57,3 +57,6 @@ reasons. The stable documents are [the design](../design.md),
 
 - [adapters_design.md](adapters/adapters_design.md): the shared adapter contract, frame
   identity, and the NIfTI, DICOM, OME-NGFF and GeoTIFF adapters.
+- [transform_adapters_design.md](adapters/transform_adapters_design.md): proposed adapters that
+  wrap registration results from CASTalign, ITK, ANTs and elastix as xarrayrf transforms,
+  without running an optimizer.

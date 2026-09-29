@@ -111,7 +111,8 @@ any adapter must not inherit them.
 ## Deferred Work
 
 - An adapter prototype as an example (not in `src/`): wrap `LaminarTriangulation` and resample
-  a framed array onto a target through it.
+  a framed array onto a target through it. Designed in the
+  [transform adapters note](../adapters/transform_adapters_design.md).
 - Whether an explicit frame graph should ship as an optional xarrayrf module or stay with
   applications. Decide when a second consumer asks for one.
 - A CASTalign row in the [prior-art study](../architecture/prior_art_coverage_study.md).
