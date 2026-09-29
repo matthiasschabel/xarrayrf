@@ -1,7 +1,7 @@
 # Viewer boundary: what xarrayrf owes napari
 
 **Status:** Active
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-29
 **Scope:** Core (`Geometry`, `resample`, units, endpoints) and the NGFF reader, as needed by a
 napari integration. napari's own work is listed only to fix the boundary.
 
@@ -11,7 +11,9 @@ napari's transformations issue (napari/napari#3783) asks for named spaces, arbit
 data-to-world transforms, dimension roles, slicing that keeps geometry, and resampling outside the
 GPU. xarrayrf already covers the data side: endpoint-named transforms, nonspatial dimensions by
 rule, rectangular affines for a plane in a volume, scalar selection that keeps the plane's
-position, `positions_at` and `rf.resample_to`. The items below are what only xarrayrf can supply.
+position, `positions_at` and `rf.resample_to`; the item-by-item assessment is the
+[napari #3783 coverage review](../napari-3783/transformations_wishlist_review.md). The items below
+are what only xarrayrf can supply.
 
 ## Current Decision
 
