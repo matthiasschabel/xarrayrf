@@ -1,0 +1,577 @@
+# Core interface and nomenclature
+
+**Status:** Active (normative)
+**Last updated:** 2026-09-28
+**Scope:** The public vocabulary, value objects, transform protocol, calling conventions and
+adapter contract of xarrayrf. Every public name follows this document. Where
+[the core model design](dev/architecture/core_model_design.md) or [the architecture](design.md) disagree with it,
+this document wins.
+
+## Native binding
+
+Import `xarrayrf.native` to register the DataArray `.rf` accessor; importing `xarrayrf` alone
+does not register it. `array.rf.frame(coordinate_transform, *, dims)` validates the pairing
+with `Geometry` and attaches a private index owning the coordinate transform's source
+coordinates. Its `ArrayCoordinates` source maps the array's coordinates into the target
+`ReferenceFrame`. The returned array is **framed**. `array.rf.is_framed` reports the state, and
+raises, as does every other member except `rf.unframe()`, when an operation left the binding
+index on only some of its coordinates (a Dataset reduction on stock xarray, `expand_dims` of a
+retained scalar); `rf.unframe()` clears that;
+`array.rf.reference_frame`, `array.rf.coordinate_transform`, and `array.rf.geometry_dims`
+expose the binding declaration.
+`array.rf.geometry` builds a fresh `Geometry` from the current array, and
+`array.rf.unframe()` removes the binding while retaining ordinary coordinate values and
+indexes. The binding has no declaration coordinate.
+
+With the [pinned native-operation patches](dev/xarray-upstream/xarray_patches.md#series-4-current-published),
+stacking, padding (including zero width), or coarsening a geometry dimension raises
+`ValueError` before losing its binding; the message directs callers to `rf.unframe()`.
+This includes stacking a geometry dimension together with a nongeometry dimension and
+constructing coarsen windows along geometry dimensions. Stack/unstack and pad of only
+nongeometry dimensions preserve the binding. Nongeometry coarsen reductions and `construct`
+preserve the exact binding on both DataArray and Dataset. Indexed empty rolls preserve the
+empty geometry with either `roll_coords` setting. These fixes are included in the
+`xarrayrf-patches-4` tag (the empty-roll and broadcast fixes are also on upstream xarray
+`main`); strict conditional xfails record absent capabilities on other lanes.
+
+`array.rf.encode()` returns an unframed copy sharing pixel data, with the reserved
+`attrs["xarrayrf_binding"]` set to canonical schema-1 JSON text containing the encoded
+transform and ordered geometry dimensions. It replaces any earlier value under that key.
+`array.rf.decode(*, decoders=None)` removes the attribute and calls `rf.frame` with
+the decoded coordinate transform and geometry dimensions. This validates the binding against
+the array's current coordinates. A raw netCDF or Zarr read remains unframed until explicitly
+decoded. A missing attribute,
+malformed payload or already framed input raises; custom transform decoders are caller supplied.
+Schema 1 remains provisional.
+
+The stage-2 suite marks known xarray gaps with strict xfails. A test for mixed labelled
+operands requiring xarray PR #11532 is marked only when xarray is imported from the locked
+2026.7.0 environment; it must pass against upstream main. Other strict xfails remain on both
+lanes until the later xarray hook stage.
+
+## Glossary
+
+Each term has one meaning. Public names, docstrings, errors and docs use these meanings only.
+
+| Term | Definition |
+|---|---|
+| **Reference frame** | An identity: what coordinates are relative to, such as one patient's DICOM Frame of Reference or one microscope stage. `ReferenceFrame`. |
+| **Coordinate system** | Ordered axes with units, optional axis types, a representation and optional orientation, in which a frame's coordinates are expressed. Carries no identity. `CoordinateSystem`. |
+| **Array coordinates** | An array's own coordinate values along named dimensions, with units and no identity: the NGFF array coordinate system, napari's data coordinates. `ArrayCoordinates`. |
+| **Local frame** | A frame whose identity xarrayrf created (`ReferenceFrame.local()`), with no external identifier. It says nothing about how the frame relates to other frames; relations are always explicit transforms. |
+| **Endpoint** | The source or target of a transform: a reference frame or array coordinates. |
+| **Axis** | One named, ordered entry of a coordinate system or of array coordinates, with a unit and an optional type. ("Component" is not used.) |
+| **Unit** | An open CF/UDUNITS string compared exactly, or `None` where no unit is declared. `None` is not `"1"` (dimensionless) and implies nothing else about the axis. |
+| **Axis type** | An optional open string naming what kind of axis it is, such as NGFF's `"space"`, `"time"` and `"channel"`, Astropy's `SPECTRAL`, or a UCD. Declarative: nothing in the core depends on it, so no axis names or kinds are blessed. |
+| **Position** | An integer index along an array dimension, zero-based, restarting at 0 after a crop. |
+| **Coordinate** | A value along an axis, as xarray uses the word. At import an adapter usually sets coordinates equal to positions; after a crop xarray keeps the original values. A coordinate is where its sample is. |
+| **Cell** | The region an element stands for, such as a voxel, a pixel or a time bin: its nominal support, not its point-spread function or slice profile. By default cells are dense, tiling each axis from the current samples and the sample offset. Declared cells (designed, not yet implemented) may leave gaps or overlap, as slices of a multislice 2D MRI stack do; a cell width derived from spacing never stands in for slice thickness. |
+| **Sample offset** | Where a sample sits in its cell along one axis, in position units: a fraction in `[0, 1]` measured from the cell's edge at lower coordinate values, `0.5` for a centred voxel; `None` for point samples, which have no cells. The cell of position p spans positions p − s to p + 1 − s, mapped to coordinates as positions are (piecewise linearly for nonuniform values), so on a nonuniform axis the fraction holds in positions, not in coordinate distance. |
+| **Domain** | Where `resample` and `positions_at` define values: `"samples"`, between the outer samples; `"cells"`, the sample hull extended to the outer edges of the outer samples' cells. Gaps between declared cells inside the hull are interpolated across in both. |
+| **Point** | A tuple of coordinates, one per axis of an endpoint. |
+| **Vector** | A displacement between points; transformed by the Jacobian J. |
+| **Covariant vector** | A gradient or normal; transformed by J⁻ᵀ, never normalized. |
+| **Transform** | A map from points of a source endpoint to points of a target endpoint. |
+| **Coordinate transform** | A framed array's map from its `ArrayCoordinates` source to its target `ReferenceFrame`; exposed as `rf.coordinate_transform`. |
+| **Affine** | A transform x ↦ Mx + t with constant M and t. "Linear" means t = 0 and is used only in that sense. |
+| **Inverse** | The exact inverse where it is mathematically determined. Approximate or declared inverses are not inverses in this vocabulary (deferred). |
+| **Direction** | A token `<from>-to-<to>` naming the way an axis increases, from a direction vocabulary. |
+| **Role** | The descriptive label `"world"` or `"object"` on a frame. The word "world" is used for nothing else. |
+| **Geometry dimensions** | The array dimensions a `Geometry`'s source axes vary along (`Geometry.dims`), which may include time, as for a spacetime or fMRI array. Every other dimension, such as echo or channel, is a non-geometry dimension, carried through unchanged. |
+| **Binding** | The association of a transform from array coordinates with a particular array, held by a private index that owns the source coordinates (`array.rf.frame`). |
+| **Unframed** | An array with no binding. |
+
+### Exported names and constants
+
+Besides the classes and functions above, `xarrayrf` exports: `Endpoint` (the union type
+`ReferenceFrame | ArrayCoordinates`), `Role` (the literal `"world" | "object"`), `AxisCode` (the
+`axis`/`direction`/`angle` record `CoordinateSystem.axis_codes` returns), `Domain` (`"samples" | "cells"`),
+`Method` (`"nearest" | "linear" | "cubic"`), `CARTESIAN` (the only representation), `LOCAL_NAMESPACE`
+(the identifier namespace `ReferenceFrame.local` mints in), `SCHEMA_VERSION` (the persistence
+schema, 1) and `INVERSE_CONDITION_LIMIT`. `xarrayrf.units.SYMBOLS` is the read-only spelling table;
+`xarrayrf.ngff.NAMESPACE` (`"ome-zarr"`) is the identifier namespace of frames read from a store.
+The numerical thresholds are module constants, not parameters: `LATTICE_TOLERANCE` (1e-6 of a step,
+the default for `lattice`), `POSITION_SLACK` (1e-9 of a step, the edge slack when locating points),
+`SINGLE_SAMPLE_TOLERANCE` (1e-9 relative to the sample's magnitude, with an absolute floor of
+1e-9, matching a coordinate to a lone sample),
+`EXACT_STEP_TOLERANCE` (1e-12 of a step, the exact-arithmetic inversion fast path) and
+`BLOCK_POINTS` (the default `resample(block_points=)`, 2**20 target samples per block). Each adapter
+package defines `__all__`; star imports expose only its public API.
+
+## Value objects
+
+**`CoordinateSystem(axes, units, *, axis_types=None, representation="cartesian",
+vocabulary=None, orientation=None)`**. Units may be `None` (undeclared); an oriented axis must
+declare a unit, since a direction needs the axis's quantity. Axis types join strict equality, and
+`coordinate_system_change` requires matched axes to keep their type. Format-specific rules, such
+as NGFF RFC-4's orientation only on spatial axes, are checked by adapters.
+
+**`ReferenceFrame`**: identifier, `coordinate_system`, optional `role`, `definition`, `context`,
+`display`; constructed by `ReferenceFrame.local(coordinate_system, ...)` or
+`ReferenceFrame.declared(identifier, coordinate_system, ...)`. Comparisons:
+`is_equivalent_frame`, `conflicts_with`, strict `==`; role and display never count.
+`with_coordinate_system(coordinate_system)` re-expresses the same frame (same identity) in
+another coordinate system, which adapters use to present a stored frame in their own axes.
+
+**`ArrayCoordinates(axes, units, *, axis_types=None, sample_offset=None)`**: axis names equal to
+the array coordinate names a transform reads, one unit (or `None`) and optional type per axis,
+and one sample offset per axis
+(`None` or a fraction in `[0, 1]`; omitted, all `None`). Immutable, structurally compared and
+hashed, sample offsets included. No orientation, representation or identity.
+
+Sample offsets are oriented by coordinate value, not by position order, so reversing, cropping or
+striding an array leaves them true, while the cells are recomputed from the current samples
+(striding widens them); operations that recompute coordinates, such as `coarsen`,
+keep only a centred offset true. The offset never changes where a sample is: the transform
+already maps each coordinate to its sample. It says where the sample's cell lies, which matters
+only beyond the outer samples and when converting to conventions that count voxel edges.
+Adapters set it from the format's specification (`0.5` for DICOM, NIfTI, ITK and NGFF), and
+convert foreign coordinate conventions, such as corner-referenced ROI vertices, once on import.
+
+**`DirectionVocabulary(identifier, directions)`**. Vocabularies are
+data. The canonical anatomical vocabulary is RFC-4's pairs under one published identifier, defined
+as `xarrayrf.anatomy.VOCABULARY` and checked by a conformance test. That module also exposes
+the `RAS` and `LPS` orientation tuples and
+`patient_coordinate_system(orientation, unit, *, axes=("x", "y", "z"))` for a three-axis
+oriented spatial `CoordinateSystem`.
+
+## Transforms
+
+### Protocol
+
+Every transform declares two endpoints and implements `SupportsPoints`, plus any of the other
+capabilities; `check_transform` requires point mapping, so a Jacobian-only object is not a
+transform here:
+
+| Member | Meaning |
+|---|---|
+| `source` | A `ReferenceFrame` or `ArrayCoordinates`. Required; there is no default. |
+| `target` | A `ReferenceFrame` or `ArrayCoordinates`. |
+
+The input axes and units are the source endpoint's axes and units (a frame's coordinate system,
+or the array coordinates'). There are no separate `inputs` or `input_units` members, so they
+cannot disagree with the source.
+
+| Capability protocol | Members | Meaning |
+|---|---|---|
+| `SupportsPoints` | `transform_point(points)` | Maps points; raises outside a valid domain, never extrapolates |
+| `SupportsJacobian` | `jacobian(at=None)` | Local linear part, target axes by source axes; `at` required unless the transform is affine |
+| `SupportsAffine` | `matrix`, `translation`, plus the two above | Constant M and t |
+| `SupportsInverse` | `inverse()` | Exact inverse with endpoints swapped |
+
+`AffineTransform(*, source, target, matrix, translation)` (keyword-only) implements `SupportsAffine` and
+`SupportsInverse`. Its `inverse()` is computed only for a square matrix whose condition number,
+measured after row and column equilibration so the choice of units does not matter, is within
+`INVERSE_CONDITION_LIMIT` (1/(10·eps)), and raises `ValueError` otherwise:
+a rectangular affine has no inverse, and projecting onto its image is a separate operation.
+`with_endpoints(*, source=None, target=None)` returns the same coefficients between replaced
+endpoints, for renaming source axes or adopting another frame's identity.
+
+`affine_class(affine, *, tolerance=1e-6, offset_tolerance=1e-9) -> AffineClass` classifies a
+`SupportsAffine` transform or `Lattice` by the resulting matrix, independent of how it was
+estimated. The frozen result names the narrowest class: `identity`, `translation`, `rotation`,
+`rigid`, `similarity`, `scaled_rigid`, `affine`, `singular` or `rectangular`. It also gives
+`proper` (`det > 0` for a nonsingular square matrix), per-column `scales` and a dimensionless
+`residual` for constrained classes, and `same_units`. A lattice's source positions are
+dimensionless, so its class describes the matrix rather than a physical rigid motion unless
+the frame axes are also dimensionless. `AffineClass.at_most(name)` tests containment:
+`identity` belongs to both the translation and rotation branches, which meet at `rigid`;
+`rigid ⊂ similarity ⊂ scaled_rigid ⊂ affine`. Singular and rectangular maps contain only
+themselves. Unknown names raise `ValueError`.
+
+A capability protocol states that the method exists. Where a particular instance cannot provide
+it (a non-square affine's inverse, a chain whose member has no Jacobian) the method raises; it
+never approximates.
+
+User-defined transforms satisfy the protocols structurally; there is no registry. A transform
+used in a binding must implement exact structural `__eq__` and `__hash__`, and persists only
+through a versioned, data-only encoding.
+
+### Endpoint rules
+
+- `Geometry` and bindings require `source` to be `ArrayCoordinates` and `target` a
+  `ReferenceFrame`.
+- A transform between frames has two `ReferenceFrame` endpoints (registration, patient to
+  equipment, coordinate-system change).
+- The inverse of an array-coordinates transform maps a frame to `ArrayCoordinates`: the exact part
+  of a world-to-sample lookup, followed by a coordinate-to-position lookup in the array.
+- **Array coordinates may only begin or end a chain.** `ArrayCoordinates` has no identity, so two
+  images with equally named coordinates compare equal. Composing through an `ArrayCoordinates`
+  intermediate would connect unrelated arrays and is refused.
+
+### Composition
+
+`CompositeTransform(first, second, ...)` applies transforms first to last, requires each
+`target == next.source` exactly, and refuses `ArrayCoordinates` intermediates. Its Jacobian
+follows the chain rule and needs `at` unless every member is affine; its inverse is the members'
+inverses in reverse order. ITK, SimpleITK and VTK's default PreMultiply apply the last added
+transform first; the docstring says so.
+
+`compose(first, second, ...)` returns a single collapsed `AffineTransform` when every member is
+affine, so resampling and export can ask `isinstance(t, SupportsAffine)` of a chain, and a
+`CompositeTransform` otherwise.
+
+### Quantity rules
+
+Specified, not yet implemented: `point`, `vector`, `covariant_vector`, `second_rank_tensor` (J·T·Jᵀ) and
+`polar_rotation`, as plain callables over a trailing component axis in source-axis order. Domain
+rules (diffusion PPD, ITK's J·T·J⁻¹) live downstream.
+
+## Naming conventions
+
+- `Supports…` names a capability protocol (`SupportsPoints`, `SupportsJacobian`,
+  `SupportsAffine`, `SupportsInverse`), following Python's `typing.SupportsInt` convention.
+- `…Transform` names the base protocol (`Transform`) or a concrete class (`AffineTransform`,
+  later `CompositeTransform`).
+- Python names are snake_case per PEP 8; ITK/VTK concepts are mirrored, not their CamelCase.
+
+## Calling conventions
+
+1. **Points are positional arrays** at the transform and coordinate-system level: a trailing axis
+   in the endpoint's declared axis order.
+2. **Names belong to the xarray layer and to functions named for them.** `Geometry` returns
+   `DataArray`s whose axis dimension is labelled by axis names; `transform_named` evaluates any
+   point transform from a mapping of axis name to values.
+3. **Free functions for protocol-generic operations** that must work for user-defined transforms:
+   `transform_named`, `check_transform`, `coordinate_system_change`, `compose`. **Methods for
+   queries on a concrete value object**: `CoordinateSystem.axis_codes(vector)` replaces the free
+   function `nearest_axis_codes(vector, coordinate_system)`.
+4. **Positions only enter through `Geometry`**, which reads coordinates at positions and then
+   applies the transform: `Geometry.point_at(**positions)` replaces `world_at_indices`.
+
+## Geometry queries
+
+`Geometry(array, transform, dims=...)` pairs an array with its transform from array
+coordinates. Beyond `point_at`:
+
+- `points()`: every sample's point as a `DataArray` over the geometry dimensions and `axis`,
+  labelled with units; lazy and chunked like the array when it is Dask-backed.
+- `lattice(dims=None, *, tolerance=...)`: a `Lattice` (origin, spacing, direction, matrix and
+  `affine`, the homogeneous index-to-frame matrix such as a NIfTI 4x4) when the transform is affine and every source axis is a retained
+  scalar or a uniformly spaced one-dimensional coordinate. `dims` orders the columns, for
+  example `("i", "j", "k")` for ITK and NIfTI. Nonuniform, single-sample or field coordinates
+  form no lattice. Coordinates defined by an xarray `RangeIndex` contribute their exact step.
+  A `Lattice` maps positions to points with `transform_point(positions)` and is a value object
+  (validated, compared and hashed by frame, dims, origin and matrix).
+- `frame_coordinates(names=None, *, domain="samples")`: exact lazy xarray coordinates of
+  each sample's frame coordinates, backed by a `CoordinateTransformIndex` that survives slicing;
+  an interoperability aid for xarray, plotting and viewers, not an attachment. Selection is
+  point-wise, with `DataArray` or `Variable` labels and `method="nearest"` (xarray's transform
+  indexes accept no scalar labels), and alignment is exact only: equal frame coordinates align,
+  and any other join raises xarray's `NotImplementedError`. Nonuniform strictly monotonic source coordinates are supported; no lattice is
+  required. Reverse mapping through the actual source coordinates agrees exactly with
+  `positions_at`, including its `domain` rule. Admitted outer-cell positions are clipped to
+  the edge sample before rounding for nearest selection. Retained scalars support forward
+  mapping only; a single-sample dimension admits only its own coordinate in reverse.
+- `positions_at(points, *, outside="raise", domain="samples")`: frame points to fractional
+  positions, through the exact inverse and a per-axis coordinate-to-position inversion
+  (arithmetic for uniform coordinates, monotonic interpolation for nonuniform ones, extended by
+  the outer steps). A retained scalar axis, a field, or two axes along one dimension are refused.
+  With `domain="cells"`, positions in the outer cells lie outside `[0, n - 1]`, such as `-0.5`,
+  and are returned as they are.
+- `is_coincident(other, *, tolerance=1e-6)`: whether both arrays sample the same points of the
+  same frame, element for element, so one's values stand for the other's without resampling.
+  The explicit tolerant comparison; `==` on transforms and frames stays exact. Frames must be
+  equal or equivalent (compared through `coordinate_system_change`); different frames are never
+  coincident. Geometry dimensions pair by name and must have equal sizes. The tolerance is in
+  steps (local spacing), as ITK's coordinate tolerance is a fraction of spacing, so it is
+  unit-independent. With affine transforms the check is exact and linear in the samples per
+  dimension; otherwise every sample is checked in blocks. A single-sample dimension must agree
+  to rounding until declared cells give it a width. Cells, offsets and values are not compared.
+
+## Resampling
+
+`resample` is explicit and lives in the xarray layer. For each target sample it computes the point
+in the target frame, maps it into the source frame, then through the inverse of the source's
+transform into source array coordinates; converts each coordinate value to a fractional position
+(directly for index coordinates, by monotonic inversion for one-dimensional auxiliary coordinates;
+multidimensional coordinate fields are refused); and interpolates values at those positions,
+carrying non-geometry dimensions through. It is format-neutral and lazy.
+
+`source.rf.resample_to(target, *, transform=None, method="linear", fill_value=np.nan,
+domain="samples")` accepts a framed DataArray or `Geometry`, calls the core `resample`, and binds
+the result to the target's coordinate transform and geometry dimensions. Target pixels are ignored.
+The result retains the source's name, ordinary attributes and non-geometry coordinates; a
+reserved `xarrayrf_binding` attribute is not carried, and `rf.frame` refuses an array that still
+has one (decode it or drop it first). `rf.unframe()` drops it as stale. The core
+`resample` continues to return an unframed array. `array.rf.assume_frame(other)` accepts a
+`ReferenceFrame` or framed DataArray and adopts its complete identity, definition and context
+without moving samples. It requires equal coordinate systems and an affine array transform;
+subsequent combination still checks mapping compatibility.
+
+Performance is part of the contract:
+
+- When both arrays form lattices and every transform is affine, target positions map to source
+  positions through one composed affine. Signed-permutation maps with integral offset, bounded
+  within `1e-6` source samples at every target-box corner, gather source samples without
+  interpolation; samples outside the source use the selected domain's fill or edge rule.
+  Other maps use `scipy.ndimage.affine_transform` in a single compiled pass per non-geometry
+  slice, with a separable outside mask. At 128³ with a rotation, linear runs within about 15% and cubic within
+  about 5% of scipy applying the same composed map; the mask adds about 0.01 s
+  (`benchmarks/resample_benchmark.py`).
+- Otherwise target positions are processed in blocks of `block_points` samples (bounded
+  memory), positions are computed once per block and reused for every non-geometry slice, and
+  values are interpolated by `scipy.ndimage.map_coordinates`.
+- Cubic spline coefficients are computed for one slice at a time, so memory does not grow with the
+  number of non-geometry slices. A Dask-backed source is processed lazily, one task per chunk of
+  its non-geometry dimensions; positions and masks are shared within a task, not across tasks.
+- A single-sample target dimension (a one-slice target) keeps the fast path. Complex sources
+  are resampled as complex128.
+- scipy is the optional `resample` extra; the core does not import it.
+
+- Equivalent frames in the same coordinate system need no frame transform.
+- Equivalent frames in different coordinate systems (LPS and RAS) use the derived
+  `coordinate_system_change` automatically: it is exact, and the call is already explicit.
+- Frames that are not equivalent require a caller-supplied frame-to-frame transform; numerically
+  identical declarations never substitute for identity.
+
+The domain is explicit. By default values are defined between the outer source samples and
+`fill_value` marks the rest, as xarray's `interp` and scipy's constant mode do. With
+`domain="cells"` values are also defined in the outer samples' cells, holding the edge sample's
+value for every method. ITK's domain is the same, and its nearest and linear
+interpolators also hold the edge, while its B-spline mirrors. An axis declaring point samples
+has no cells and reaches no further than its samples, as for echo times or time points alongside
+voxel axes. An axis declaring cells with a single sample, such as one image slice, is refused:
+no neighbour determines its cell width, and declaring it point-sampled would misdescribe a slice
+that has thickness. Interpolation between samples is the same in both domains.
+The cells domain adds nothing for nearest and linear; cubic re-evaluates the shell samples at
+clamped positions, at a cost proportional to the shell.
+
+## Persistence
+
+`encode(value)` and `decode(data, *, decoders=None)` convert vocabularies, coordinate systems,
+frames, array coordinates, affine and composite transforms, and user-defined transforms to and from
+versioned, plain JSON data. Decoding rebuilds through the public constructors; frame identity,
+metadata types and float64 coefficients survive exactly. User-defined transforms implement
+`SupportsEncoding` (namespaced `kind`, own `version`, `to_data()`) and decode only through
+caller-supplied `decoders`; nothing in the data selects code. Failures are `EncodingError`
+subclasses: `UnsupportedVersionError`, `UnknownKindError`, `MissingDecoderError`,
+`MalformedDataError`, `DecoderResultError`. The schema is provisional until the NGFF boundary
+fixtures pass (`docs/dev/architecture/persistence_design.md`).
+
+## Units
+
+Open CF/UDUNITS strings compared exactly; no conversion; Cartesian axes refuse known angular
+spellings including CF geographic degrees. Pint-backed conversion is an optional later helper.
+`xarrayrf.units.canonical(unit)` maps the UDUNITS-2 names and plurals that OME-NGFF prefers to
+the CF symbols every adapter emits (`"micrometer"` to `"um"`), and `udunits_name(unit)` maps
+back for export; unknown spellings pass through. Adapters apply it at their boundary so frames
+read from different formats compare equal; the core itself never relabels a unit.
+
+## Adapters
+
+Format adapters are optional subpackages of the xarrayrf distribution, each with an extra
+(`xarrayrf[dicom]`, `xarrayrf[nifti]`, `xarrayrf[ngff]`, `xarrayrf[geotiff]`). They share
+`xarrayrf.native.frame_dataarray` (duck-array and shape check, then `rf.frame` on the
+dimensions the transform's source axes depend on), `index_coordinate`, and the `CoordinateSpec`,
+`Report` and `DuckArray` aliases.
+`xarrayrf.anatomy` holds the
+canonical anatomical vocabulary and is dependency-free.
+
+- The core never imports an adapter; an adapter imports only the core (including
+  `xarrayrf.native`), `xarrayrf.anatomy` and its own format library. The import-boundary test
+  enforces both directions.
+- Metadata functions consume format-library objects without reading pixels. Each adapter's
+  `open` reads metadata and binds pixels through its existing `to_dataarray`; by default,
+  pixel reads are deferred through dask until compute. `chunks=None` reads eagerly. Adapters
+  do not depend on application objects.
+- **Import** returns frames, the coordinates to place on the array (with `units` attributes), the
+  transform from those array coordinates into the frame, any transforms between frames, and a
+  report of every normalization applied and its tolerance.
+- **Framing** takes an import result and caller-supplied duck-array pixels, checks their type and
+  shape, constructs a `DataArray` from its `dims` and `coords`, and calls `array.rf.frame` with its
+  coordinate transform. Dask pixels remain lazy. DICOM sorts or selects source-order slices using `order`.
+- **Export** writes native metadata from a frame, a transform and the array's current
+  coordinates, and refuses what the format cannot represent. It never resamples.
+- After import, xarrayrf never calls back into the format.
+
+**File readers:** `xarrayrf.nifti.open(path, *, frame=None, template=None, xform="best",
+spatial_unit="mm", time=False, chunks="auto")`, `xarrayrf.dicom.open(paths, *,
+series_uid=None, frames=None, modality_lut=True, orientation_tolerance=1e-4,
+slice_tolerance=0.01, chunks="auto")`, and `xarrayrf.ngff.open(store, *, group="",
+multiscale=None, level=None, chunks="auto")` each return one framed `DataArray`. Default
+pixels are lazy dask arrays. NIfTI uses nibabel's scaled proxy dtype and values. DICOM accepts
+a directory, file, or explicit file sequence; one enhanced object or one classic series is
+selected. Modality LUT output is float64 when requested, and MONOCHROME1 values are not display
+inverted. Compressed DICOM decoding may require `pylibjpeg`, `pylibjpeg-libjpeg`,
+`pylibjpeg-openjpeg`, or `python-gdcm`; decoder errors arise at compute time. NGFF selects the
+first level unless a dataset path is supplied. If several multiscales exist, select one by index
+or name.
+
+NGFF 0.4 and 0.5 multiscales are parsed with `ome_zarr_models`, evaluated through its 0.6
+conversion, and imported through `from_multiscale` after folding multiscale-level scale and
+translation into each level's single intrinsic transform. This preserves time calibration and
+omits channel axes from geometry. Path-based transforms are unsupported. For 0.6, `open` binds
+the intrinsic system; additional transforms remain available through `from_multiscale`.
+
+**DICOM import:** `xarrayrf.dicom.from_datasets(datasets, *, orientation_tolerance=1e-4,
+slice_tolerance=0.01) -> DicomGeometry` imports a classic single-frame stack, and
+`xarrayrf.dicom.from_enhanced(dataset, *, frames=None, orientation_tolerance=1e-4,
+slice_tolerance=0.01) -> DicomGeometry` imports one enhanced multiframe object. `frames`
+selects frame indices forming one stack. Both consume metadata-only pydicom datasets and refuse
+duplicate positions. `DicomGeometry` is a frozen declaration with `dims`, `coords`, `transform`,
+`frame`, `order`, `patient_position`, `slice_intervals` and `report`. `order` maps sorted slices to
+input dataset or frame indices. The frame is declared as
+`("dicom-frame-of-reference", FrameOfReferenceUID)` (`xarrayrf.dicom.FRAME_OF_REFERENCE_NAMESPACE`)
+when the UID is present and is otherwise local; Patient Position is a result field, not defining frame context.
+
+`xarrayrf.dicom.to_dataarray(geometry, data) -> DataArray` takes a source pixel stack with slice
+axis 0 (`k`). For `from_datasets`, it has one slice per dataset in the supplied order. For
+`from_enhanced`, it is the full pixel array in original frame order, including unselected frames.
+The function applies `order` before binding; `slice_intervals` are not attached pending cells.
+
+Dimensions are `(k, j, i)`. Uniform stacks have an index `k`; nonuniform and single-slice
+stacks carry a `slice_offset` coordinate in mm on dimension `k`. `slice_intervals` contains each
+slice's thickness interval in the slice coordinate's units, or `None` when any positive
+`SliceThickness` is unavailable. In-plane columns follow DICOM Pixel Spacing's row, column
+order. The report records orientation correction, slice-axis choice and missing or differing
+metadata. Quadruped orientation is unsupported.
+
+`xarrayrf.dicom.patient_frame(frame_of_reference_uid)` returns the shared LPS patient frame for
+a UID, or a fresh local frame when the UID is absent. Application readers can use it to frame
+their own spatial stacks in the same patient world. `dicom.open` remains a single-stack reader;
+when several images occupy one slice position, an application-level reader must assemble the
+extra echo, diffusion or time dimension and frame each spatial stack.
+
+`xarrayrf.dicom.equipment_transform(dataset, *, orientation_tolerance=1e-4) ->
+AffineTransform | None` imports an Image to Equipment Mapping Matrix, or returns `None` when it is
+absent. Its source is the dataset's LPS mm patient frame, declared by Frame of Reference UID when
+present and otherwise local. Its target is a fresh local equipment frame with unoriented `x`, `y`,
+`z` axes in mm; its definition records `EquipmentCoordinateSystemIdentification` and available
+`Manufacturer` and `DeviceSerialNumber`. Only `ISOCENTER` and a finite rigid matrix with proper
+rotation and homogeneous last row are accepted. Equipment frames from separate datasets do not
+share an identity.
+
+`xarrayrf.dicom.registrations(dataset, *, orientation_tolerance=1e-4) ->
+tuple[AffineTransform, ...]` imports one transform per Spatial Registration
+`RegistrationSequence` item, from that item's Frame of Reference UID to the dataset's own Frame
+of Reference UID. Each item's Matrix Sequence is multiplied in listed order (`M1 @ M2 @ ...` on
+column vectors), so the last matrix acts first. An item must contain one Matrix Registration
+Sequence item with a nonempty Matrix Sequence. `RIGID` requires a proper orthonormal rotation;
+`RIGID_SCALE` requires orthogonal nonzero columns; `AFFINE` allows any finite linear part. All
+require a homogeneous last row within `orientation_tolerance`. Missing own or item Frame of
+Reference UIDs, referenced-image-only items, unsupported matrix types and Deformable Spatial
+Registration objects are refused; resolving referenced images is the caller's responsibility.
+
+**NIfTI import:** `xarrayrf.nifti.from_header(header, *, frame=None, template=None, xform="best",
+spatial_unit="mm", time=False) -> NiftiGeometry` accepts a NIfTI-1 or NIfTI-2 header without
+reading image data. `NiftiGeometry` is a frozen declaration with `dims`, `coords`, `transform`,
+`frame` and `report`. `coords` maps coordinate names to xarray-compatible
+`(dimension, values, {"units": unit})` tuples; a 2-D header retains a scalar `k=0`. Source
+axes `i`, `j`, `k` are integer index coordinates with centred sample offsets.
+`xarrayrf.nifti.to_dataarray(geometry, data) -> DataArray` binds caller-supplied pixels in header
+dimension order.
+
+`"best"` selects a coded sform before a coded qform; either can be selected explicitly. Import
+is refused when neither xform is coded. Spatial units map from `xyzt_units` codes to `m`, `mm` or
+`um`; an
+unknown unit uses the caller's `spatial_unit` and is reported, or is refused when that argument
+is `None`. Selected xform code 4 declares the shared `("nifti-template", "MNI152")` frame with
+definition `{"space": "MNI152", "variant": "unspecified"}`; code 3 similarly declares
+`("nifti-template", "Talairach")`. `template=name` declares `("templateflow", name)` with
+definition `{"space": name}` for a nonempty alphanumeric BIDS space label and selected code 2–5.
+Named and unnamed variants have distinct identities. `template=` cannot be combined with
+`frame=` or `time=True`; `frame=` also accepts a framed DataArray. Other codes mint local frames. `time=True`
+always mints a local frame unless `frame=` is supplied, since a spatial template does not declare
+a shared clock. The selected xform, codes and qfac appear in the report and in local frame
+definitions only. A supplied frame must be reachable through `coordinate_system_change` from a
+RAS view of that same identity. With `time=False`, a time dimension is a non-geometry coordinate derived from
+`toffset` and `pixdim[4]` (an integer index, reported, when `pixdim[4]` is not positive);
+`time=True` adds an unoriented time axis when the header declares a time unit. Frequency units
+remain non-geometry.
+
+**NIfTI export:** `xarrayrf.nifti.to_header(geometry, *, dims, xform_code="scanner",
+qform=True, header=None) -> (header, report)` returns a new NIfTI-1 header, or a copy of a supplied
+NIfTI-1 or NIfTI-2 header. `dims` gives the three or four geometry dimensions in NIfTI voxel-axis
+order, regardless of array storage order. Export uses `Geometry.lattice`, converts the frame to
+RAS, writes a coded sform, and writes a qform only when the spatial columns are orthogonal. A
+sheared sform is retained, with a `qform-unrepresentable` report entry when qform was requested.
+Spatial units must be `m`, `mm` or `um`. Four-dimensional export requires a time axis in `s`,
+`ms` or `us`, with zero space-time cross terms; its step and origin become `pixdim[4]` and
+`toffset`. Three-dimensional export preserves a supplied header's time fields. Export refuses
+nonuniform, single-sample, field and non-affine geometry, unsupported units, frames that cannot
+convert to RAS, and coupled space-time mappings. Two-dimensional export is deferred.
+
+**NGFF (OME-Zarr 0.6 import).** `xarrayrf.ngff.coordinate_system(cs, *, store=None,
+group="") -> tuple[ReferenceFrame, Report]` imports a named v06 system.
+`transform(t, systems, *, store=None, group="", dims=None, frames=None) ->
+tuple[AffineTransform, Report]` imports a transform between named systems or a path-only array
+endpoint. `from_multiscale(ms, *, shapes, dims=None, store=None, group="",
+frames=None) -> NgffMultiscale` returns a shared intrinsic frame, levels keyed by path (each with
+`dims`, xarray-compatible integer-index `coords`, and `transform`), additional transforms, and
+an import `report`. `from_scene(scene, *, systems, store=None, group="", frames=None) -> NgffScene`
+returns frame-to-frame `transforms` and an import `report`. All four accept v06 models or
+equivalent JSON attributes; the adapter reads metadata only. `shapes` supplies each dataset's
+array shape, `dims` supplies dimension names by path, and a scene's `systems` supplies systems
+of referenced images. Axis
+names, units, and types become the core coordinate system; a missing unit becomes `None`, while
+an unnamed axis or non-string unit is refused.
+`xarrayrf.ngff.to_dataarray(level, data) -> DataArray` binds caller-supplied pixels to one
+`NgffLevel` in its declared dimension order.
+
+With `store`, a named system's identity is `("ome-zarr", "store/group#quoted-name")`, omitting
+the group slash at the root. `store` has no trailing slash; `group` is relative and has no
+empty, `.` or `..` segments. Without `store`, frames are local; pass a mapping from
+`(group path, name)` to `ReferenceFrame` as `frames` to reuse them across imports. A path-only
+array endpoint
+uses centred cells (`sample_offset=0.5`) and unit `"1"`. All affine members, including rectangular
+`affine`, `rotation`, `mapAxis`, `projectAxis`, `sequence`, `byDimension` and an inverse-checked
+`bijection`, become one `AffineTransform`. Sequence members apply in listed order. Identity-mapped
+channel and other discrete axes are omitted from geometry and reported by multiscale import;
+mixed discrete axes are refused. Array-backed parameters and nonlinear transforms are refused.
+The NGFF adapter reads and writes RFC-4 `orientation` through `xarrayrf.anatomy.VOCABULARY`.
+`discrete` and `longName` declarations and checked `bijection` inverses are deferred; multiscale
+reports their loss.
+
+**NGFF export:** `xarrayrf.ngff.to_multiscale_level(geometry, *, path, name="intrinsic",
+frame_name="physical", store=None) -> tuple[Multiscale, Report]` exports one regular affine level
+as a validated v06 multiscale model with one dataset. A diagonal lattice uses the frame's axes
+as its intrinsic system and a dataset sequence of scale then translation. For a non-diagonal
+lattice, the intrinsic system uses array dimension names as spatial axes with the frame's units;
+the dataset sequence scales by lattice column norms and translates by zero. One additional
+multiscale-level affine maps that intrinsic system to `frame_name`, whose axes are the frame's,
+using the normalized lattice matrix and origin. This synthesis is reported as
+`intrinsic-synthesized`. A level needs one array dimension per intrinsic axis; rectangular
+mappings remain available through `to_transform`. `xarrayrf.ngff.to_transform(t, *, names=None)`
+exports a frame-to-frame affine and returns `tuple[Affine, Report]`. `names` maps reference frames
+to coordinate-system names declared alongside the export; without a mapping entry, only a frame
+declared in the `ome-zarr` namespace supplies its own NGFF name. Export refuses non-lattice
+geometry, non-affine transforms and invalid v06 multiscale declarations. Reports name frame
+identity beyond the NGFF name, `definition`, `context`, `role`, `display`, direction vocabulary and
+orientation outside the anatomical vocabulary, non-centred sample offsets, array-coordinate units
+other than `"1"`, and array-coordinate axis types. The v06 path-only array endpoint cannot retain
+those declarations.
+
+**GeoTIFF import:** `xarrayrf.geotiff.from_profile(profile, *, area_or_point="Area") ->
+GeoTiffGeometry` imports rasterio metadata without reading pixels. `GeoTiffGeometry` holds
+`dims`, `coords`, `transform`, `frame`, `report` and `nodata`. `to_dataarray(geometry, data)`
+binds pixels in `(band, row, column)` order; band is a non-geometry dimension with 1-based
+coordinates. `geotiff.open(path, *, bands=None, chunks="auto")` reads projected GeoTIFFs,
+with one independent windowed read per dask chunk, or eagerly with `chunks=None`.
+`bands` selects 1-based band indices. `nodata` is recorded in attrs but masks and scale/offset
+are not applied. `crs_frame(crs)` returns the frame for a pyproj or rasterio CRS. Exact
+authority codes share identity (`("epsg", code)` for EPSG); CRSs without an exact authority
+mint local frames containing WKT. Axis names and linear units come from pyproj. The affine
+locates rasterio pixel centres for both `AREA_OR_POINT=Area` and `Point`; Area declares centred
+cells, while Point declares point samples. Angular, compound and vertical CRSs are refused.
+
+Application policy stays in the application: multi-image series assembly, pixel handling,
+regions of interest, display conventions and the choice of resampling targets.
+
+## Removed and deferred
+
+- **Full native lifecycle support is deferred.** `array.rf.frame` attaches an experimental
+  binding, while known native-operation gaps remain release blockers until the inventory and
+  xarray hook stages complete.
+
+- **Orientation-only poses are removed.** A transform whose translation is unknown cannot map
+  points honestly, and no mainstream library models one. Relating a moved subject to a scanner is
+  an explicit affine the caller builds (choosing or registering the translation). Direction
+  queries need no special type: the vector rule uses only an affine's matrix.
+- **Approximate and declared inverses are deferred** to a separately named, opt-in capability.
+- Geodetic and spherical representations, product transforms and declared domains are recorded
+  in the [prior-art study](dev/architecture/prior_art_coverage_study.md). Per-axis type and undeclared units
+  are implemented; NGFF's `discrete` and `longName` are deferred.
+- **Channel axes stay non-geometry dimensions.** Interpolating across channels is meaningless and
+  nothing marks an axis discrete yet, so adapters must keep channel axes out of the geometry, and
+  `resample` carries them through. The NGFF adapter drops identity-mapped channel axes from transforms.

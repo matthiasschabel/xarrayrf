@@ -1,0 +1,193 @@
+# Geometry, cells and resampling
+
+**Status:** Active
+**Last updated:** 2026-09-28
+**Scope:** `Geometry` (the read-through view), `ArrayCoordinates.sample_offset` and the
+`"samples" | "cells"` domain, `Geometry.is_coincident`, core `resample` including the same-grid
+gather, and the accessor's `rf.resample_to` and `rf.assume_frame`. Declared intervals are
+designed, not implemented. [The core interface](../../core_interface.md) is normative.
+
+## Context
+
+A transform says what coordinate values mean; it carries no array. Answering "where is sample
+`(2, 1, 3)`?" needs only the array's own coordinate values, so it can ship without a binding.
+Three questions that all produce frame points must stay apart:
+
+- **Where is this sample?** Read coordinates at a position and apply the transform. `Geometry`.
+- **What is the value at this point?** Needs an interpolant, a domain and a policy. `resample`.
+- **How do two frames relate?** Needs an explicit registration or domain transform, never
+  inferred from identity plus matching labels.
+
+Half-voxel errors are a recurring source of silent incorrectness, so where a sample sits in its
+cell, and how far values extend beyond the outer samples, must be declared rather than assumed.
+Ecosystems differ at the edge: xarray `interp`, scipy's constant mode and nibabel answer only
+between outer samples; ITK answers out to the voxel extent. CF describes explicit extents with
+bounds variables; VTK distinguishes point from cell data.
+
+## Current Decision
+
+### Geometry is a view that re-reads the array
+
+`Geometry(array, transform, dims=...)` holds a reference to the array, which stays the authority
+for its sample domain.
+
+- **Validity is not cached.** Every geometry-dependent property and query re-runs the structural
+  check against the array as it is now. Validating once would make the view a stale snapshot
+  after the caller edits `attrs["units"]` or assigns a coordinate. The cost is proportional to
+  the number of source axes, not samples.
+- **`dims` must equal the dependency dimensions.** A coordinate depending on a dimension outside
+  `dims` is refused (nonspatial context may not silently parameterize geometry), and so is a
+  declared dimension no source axis depends on. Empty `dims` is meaningful: a fully selected point.
+- **Only selected values are evaluated.** Construction checks names, presence, dtype kind and
+  units; values are read in the query that needs them, which keeps chunked coordinates lazy. A
+  non-finite value surfaces at the query it affects.
+- **Units:** an explicit `attrs["units"]` must equal the declared unit exactly; nothing converts.
+- **Positions** are zero-based and bounded; negative positions are refused rather than read from
+  the end, so an off-by-one is an error, not a sample at the far edge.
+
+Queries: `point_at`, `points()` (lazy), `lattice()`, `frame_coordinates()` (lazy xarray
+coordinates for interoperability), `positions_at` (inverse lookup, refused for retained scalars,
+fields and embedded planes) and `is_coincident`. The `.rf.geometry` accessor delegates to this
+view; the binding adds snapshot, association and enforcement, which the view never provides.
+
+### Sample offsets and cells
+
+- **Coordinate:** where its sample is. Crop offsets and one-based labels live in coordinate
+  values, not in a separate index offset.
+- **Cell:** the region an element stands for (voxel, pixel, time bin); nominal support, not the
+  point-spread function.
+- **Sample offset:** per axis, where the sample sits in its cell, a fraction in `[0, 1]` measured
+  from the cell edge at lower coordinate values; `None` for point samples (echo times, time
+  points), which have no cells. Part of `ArrayCoordinates` equality.
+
+The range is closed because a coordinate is the sample's own location, so `1` (a cell ending at
+its sample, as for accumulations) differs from `0`. Measuring toward higher coordinate values,
+not higher index, keeps the offset true under reversal, cropping and striding. `coarsen`
+recomputes coordinates and keeps only a centred offset true; this is documented, not detected.
+
+**Default cells are dense and defined in positions.** Position `p` spans `p - s` to `p + 1 - s`,
+mapped to coordinates as positions are (linear for uniform axes, piecewise linear for nonuniform
+ones, extended by the outer steps). On a nonuniform axis the fraction holds in positions, not
+distance: offsets `[0, 2, 5]` with `s = 0.5` give a middle cell `[1, 3.5]`. Default cells describe
+the current sampling, so a stride widens them (`[-0.5, 0.5]` becomes `[-1, 1]` after selecting
+every other sample). This is a declared default applied only when the producer declares an
+offset, never inference of support from spacing.
+
+**Domains.** `"samples"` (default, as xarray) is defined between the outer samples;
+`"cells"` extends the hull to the outer cells' edges, where every method holds the edge value
+(ITK's domain is the same; its nearest and linear hold the edge, its B-spline mirrors). Cubic
+re-evaluates the shell at clamped positions; nearest and linear cost nothing extra. A
+point-sampled axis adds no reach. An axis declaring cells with a single sample is refused: no
+neighbour fixes its width, and calling it point-sampled would misdescribe a slice with thickness.
+`positions_at(..., domain="cells")` returns true fractional positions such as `-0.5`.
+
+### Declared intervals (designed, not implemented)
+
+Cells are declared regions (CF and VTK usage); density is a property of how they are declared.
+Declared intervals override the default: one `[lo, hi]` per index, in coordinate values, for
+cells that do not tile, such as multislice 2D MRI with gaps or overlap, and single slices.
+Spacing never stands in for thickness; a DICOM adapter would declare intervals from
+`SliceThickness`. An offset and intervals declared together must agree in positions.
+
+- Rectilinear cells are separable: element `(i_1, ..., i_N)` is the image of the box
+  `∏ [lo_d(i_d), hi_d(i_d)]`, stored as one `(n_d, 2)` array per axis.
+- `Geometry.cell_corners(**positions)` returns the `2^K` corner points; they enclose the cell only
+  under an affine transform.
+- The cells domain reaches the outer declared interval; interior gaps are still interpolated.
+- Carrier: intervals must follow `isel`. A DataArray refuses a CF `(n, 2)` bounds coordinate, and
+  parallel lower/upper coordinates are an invented convention that `coarsen` corrupts. The
+  intended carrier is a custom index on the axis coordinate that slices intervals in `isel`;
+  adapters write CF bounds on a Dataset for persistence.
+- A retained scalar slice cannot carry an interval (xarray drops indexes on scalar selection).
+  Until a carrier is prototyped, a slice that needs thickness stays a one-sample dimension.
+
+In a 2-D frame a pixel has in-plane extent only; placing it in 3-D needs a third source axis
+whose offset says where the sample sits along the normal and whose interval gives thickness.
+
+### Tolerant comparison
+
+`Geometry.is_coincident(other, *, tolerance=1e-6)` asks whether both arrays sample the same
+points of the same (or equivalent) frame element for element. The tolerance is in steps, as ITK's
+coordinate tolerance is a fraction of spacing, so it is unit-independent. The samples-domain
+locator is widened by the tolerance so edge jitter passes. For affine maps the check is exact and
+separable, linear in samples per dimension; corner-only checks were rejected because they miss
+interior deviations of approximate lattices. A single-sample dimension must agree to rounding
+until declared cells give it a width. Cells, offsets and values are not compared. `==` stays
+exact.
+
+### Core `resample`
+
+`resample(source, target, *, transform=None, ...)` computes each target sample's frame point,
+maps it into the source frame (an exact coordinate-system change between equivalent frames is
+derived automatically; different frames need a caller transform), inverts the source transform
+and interpolates. It is lazy over Dask chunks of non-geometry dimensions, carries non-geometry
+dimensions through, resamples complex sources as complex128, and returns an unframed array. When
+both sides form lattices with affine transforms it composes one affine and calls
+`scipy.ndimage.affine_transform` per slice; otherwise it works in blocks of `block_points`
+(default 2^20) with `map_coordinates`, computing cubic coefficients one slice at a time and
+caching positions across slices within a 256 MiB budget.
+
+**Same-grid gather.** On the lattice path the composed target-to-source index map is rounded to
+the nearest signed permutation with integer offset. If the rounded and actual maps differ by at
+most `1e-6` source samples at every corner of the target index box (the difference is affine, so
+its maximum is at a corner, which bounds accumulated coefficient error for any shape), values are
+gathered by transposing, reversing and slicing, with the domain's fill or edge rule outside the
+source. Dask sources stay lazy. This makes relabelling between index and millimetre-offset
+conventions, crops, flips and permutations exact and cheap, through one entry point; a
+half-sample shift or a coefficient off by `5e-10` over a large range takes the interpolating path.
+
+### `rf.resample_to` and `rf.assume_frame`
+
+`source.rf.resample_to(target, *, transform=None, method="linear", fill_value=np.nan,
+domain="samples")` takes a framed DataArray or a `Geometry` (target values are ignored), calls
+core `resample` unchanged, and frames the result with the target's coordinate transform and
+geometry dims. The result keeps the source's non-geometry dims and coords, name and attributes
+(restored explicitly because core `resample` drops attrs); the reserved `xarrayrf_binding`
+attribute is not carried. Unframed source or target raise `ValueError`; other target types raise
+`TypeError`. It was motivated by a round trip between a DICOM reader's index `(k, j, i)` array
+and the same data framed with millimetre-offset `(z, y, x)` coordinates in one patient frame.
+
+`array.rf.assume_frame(other)` re-targets an affine array transform to another frame's complete
+identity, definition and context without moving samples. It requires full `CoordinateSystem`
+equality and is implemented as unframe plus frame; mapping compatibility is still checked when
+arrays combine. The NIfTI template identities and `dicom.patient_frame` that accompanied it are
+adapter decisions, recorded with the adapters.
+
+## Alternatives Considered
+
+| Alternative | Why not |
+|---|---|
+| Copy coordinates into the view, or cache validation | A second authority that goes stale when the caller edits the array |
+| Infer `dims` from coordinate dependencies | A coordinate on `time` would silently make time spatial |
+| Validate all coordinate values at construction | Materializes chunked fields for a guarantee no query needs |
+| Accept a `units` attribute that merely converts | No unit engine; no silent conversion |
+| Derive support from spacing (`Cells(anchor)`) | Misdescribes thickness; kept only as a producer-declared default |
+| CF bounds as a DataArray coordinate | xarray refuses a coordinate with an extra dimension |
+| Parallel `*_lower`/`*_upper` coordinates | Not CF, unlinked, corrupted by `coarsen` |
+| `pandas.IntervalIndex` coordinate | Cannot be written to netCDF |
+| Categorical offsets (`center`, `left`; xgcm style) | A fraction is simpler; xgcm solves staggered-grid relations |
+| Half-open `[0, 1)` offset | Here `1` is a distinct location, not the next cell's `0` |
+| Offset measured by index order | Reversal would silently turn `s` into `1 - s` |
+| Single-slice width from spacing | Spacing wearing thickness's name |
+| Core `resample` returning framed arrays | Breaks layering; the accessor composes instead |
+| A separate `relabel` API | Callers would need to know when it applies |
+
+## Deferred Work
+
+- Declared intervals: carrier index, CF encoding, `cell_corners`, offset/interval consistency,
+  adapter use of `SliceThickness`; a strict domain defined only inside declared cells; a carrier
+  for intervals on retained scalars.
+- Curvilinear and irregular cells: dense cells share a vertex grid (VTK structured grids, UGRID);
+  sparse cells are per-element shapes (CF 2-D bounds, footprints), possibly not boxes.
+- Conversions for edge-counting conventions (plot extents, GDAL geotransforms), refused when no
+  offset or interval is declared.
+- Framed results for `coarsen` and `pad`; non-affine `assume_frame`; Dataset-level `resample_to`;
+  `block_points` on `rf.resample_to`.
+- Masked coordinates: only a mask that survives into a selected value is observable; whether
+  xarray should keep masks on coordinates is an upstream question.
+
+## Next Steps
+
+1. Implement declared intervals with the DICOM and NIfTI adapters, which supply offsets and
+   `SliceThickness`.
+2. Revisit per-access validation cost only if a workload shows it matters.

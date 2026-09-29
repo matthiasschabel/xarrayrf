@@ -1,0 +1,144 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xarrayrf"
+version = "0.0.1.dev0"
+description = "Experimental reference-frame support for xarray"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Matthias Schabel"}]
+keywords = ["xarray", "reference frames", "coordinate transforms", "scientific data"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = ["numpy>=1.26", "xarray>=2026.7.0"]
+
+[project.urls]
+Repository = "https://github.com/matthiasschabel/xarrayrf"
+Issues = "https://github.com/matthiasschabel/xarrayrf/issues"
+
+[project.optional-dependencies]
+# scipy.ndimage interpolates values for resample(); the core never imports it.
+resample = ["scipy>=1.18"]
+# nibabel parses NIfTI headers for xarrayrf.nifti; 5.4 is the release tested.
+nifti = ["nibabel>=5.4", "dask[array]>=2025.1"]
+# pydicom parses DICOM datasets for xarrayrf.dicom; 3.0 is the release tested.
+dicom = ["pydicom>=3.0", "dask[array]>=2025.1"]
+# ome-zarr-models provides the OME-Zarr 0.6 metadata models for xarrayrf.ngff; 1.8 is the release tested.
+ngff = ["ome-zarr-models>=1.8", "dask[array]>=2025.1", "zarr>=3"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "nbclient>=0.10",
+    "nbformat>=5.10",
+    "pandas>=2.2",
+    "dask[array]>=2025.1",
+    "scipy>=1.18",
+    "nibabel>=5.4",
+    "pydicom>=3.0",
+    "ome-zarr-models>=1.8",
+    "rasterio>=1.4",
+    "pyproj>=3.7",
+]
+# rasterio reads GeoTIFF/COG for xarrayrf.geotiff and pyproj supplies CRS axes and authority codes;
+# 1.5 and 3.8 are the releases tested.
+geotiff = [
+    "dask[array]>=2025.1",
+    "pyproj>=3.7",
+    "rasterio>=1.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xarrayrf"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src/xarrayrf", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# A local, untracked AGENTS.md embeds generated convention text (sync-conventions, "do not
+# edit") whose code examples are illustrative, not project source.
+extend-exclude = ["AGENTS.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# The tour builder's strings are notebook prose and code (units such as 64 × 64, the Lorentz γ).
+"tools/build_tour.py" = ["RUF001"]
+# Physics notation in the relativity notebook and its builder: γ, primes, minus signs.
+"tools/build_relativity.py" = ["RUF001"]
+"examples/relativity.ipynb" = ["RUF001"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests", "tools", "benchmarks"]
+mypy_path = "src"
+
+# Dask is used only by the lazy-evaluation tests, to prove no pixel task runs. It does not
+# publish type information, and this is a no-op if a future release starts doing so.
+[[tool.mypy.overrides]]
+module = ["dask.*", "scipy.*"]
+ignore_missing_imports = true
+
+# nbformat and nbclient publish no annotations; only the notebook builders call them.
+[[tool.mypy.overrides]]
+module = ["build_tour", "build_relativity"]
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "explorations"]
+# Tests import the installed editable package, so "src" is deliberately absent: a source
+# path here would hide a packaging mistake by importing code that was never installed.
+# "explorations" stays because those development-only probes are not packaged at all.
+pythonpath = ["explorations"]
+addopts = "-ra --strict-markers"
+xfail_strict = true
+
+# Opt-in patched xarray: `uv sync --extra dev --group patched` (or `make test-pinned`) installs
+# the local xarray patch series from the public fork, pinned by tag. The default environment
+# keeps stock PyPI xarray. `stock` is empty; it exists only so uv keeps the two resolutions
+# apart (without the conflict the git source would apply to every environment).
+[dependency-groups]
+docs = [
+    "aiohttp>=3.9",
+    "fsspec>=2024.6",
+    "ipykernel>=6.29",
+    "matplotlib>=3.9",
+    "nbclient>=0.10",
+    "nbconvert>=7.16",
+    "nbformat>=5.10",
+    "requests>=2.32",
+]
+patched = ["xarray"]
+# Dev-only: the geospatial extensions compared in explorations/geo_failure_modes.py.
+priorart = [
+    "rasterix>=0.2.2",
+    "rioxarray>=0.23",
+    "xproj>=0.2.1",
+]
+stock = []
+
+[tool.uv]
+conflicts = [[{ group = "patched" }, { group = "stock" }]]
+
+[tool.uv.sources]
+xarray = { git = "https://github.com/matthiasschabel/xarray", tag = "xarrayrf-patches-4", group = "patched" }
+
+# uv's git checkout has no release tags, so setuptools-scm cannot derive xarray's version;
+# keep it equal to `git describe` of the tag (v2026.07.0-80) plus the series label.
+[tool.uv.extra-build-variables]
+xarray = { SETUPTOOLS_SCM_PRETEND_VERSION = "2026.7.1.dev80+xarrayrf.patches.4" }

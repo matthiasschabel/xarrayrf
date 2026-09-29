@@ -1,0 +1,43 @@
+name: checks
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.12"
+            dependency: locked
+          - python: "3.12"
+            dependency: minimum-resample
+          - python: "3.13"
+            dependency: current
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - if: matrix.dependency == 'locked'
+        run: uv sync --locked --extra dev
+      - if: matrix.dependency != 'locked'
+        run: uv venv --python ${{ matrix.python }}
+      - if: matrix.dependency == 'minimum-resample'
+        run: uv pip install -e '.[dev]' 'numpy==2.0.0' 'scipy==1.18.0' 'xarray==2026.7.0'
+      - if: matrix.dependency == 'current'
+        run: uv pip install -e '.[dev]'
+      - run: uv pip check
+      - run: make check test build
+
+  minimum-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv venv --python 3.12
+      - run: uv pip install -e '.[nifti,dicom,ngff,geotiff]' pytest 'dask[array]' 'numpy==1.26.0' 'xarray==2026.7.0'
+      - run: uv pip check
+      - run: .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('scipy') is None"
+      - run: .venv/bin/python -m pytest tests explorations

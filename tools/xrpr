@@ -1,0 +1,30 @@
+#!/bin/sh
+# Run Python against a specific local xarray tree.
+#   tools/xrpr <tree>                 interactive console, `np` and `xr` preloaded
+#   tools/xrpr <tree> <script.py>     run the script, then stay in the console (python -i)
+#   tools/xrpr <tree> -c '<code>'
+# <tree>: base | 11616 | 11617 | 11621 | main | patched | /abs/path/to/tree
+# The tree's source shadows the installed xarray via PYTHONPATH; the interpreter is
+# ~/GitHub/xarray-upstream/.venv/bin/python. Reproducers live in explorations/upstream_reproducers.
+set -e
+case "$1" in
+  base)    TREE=$HOME/GitHub/xarray-base ;;
+  11616)   TREE=$HOME/GitHub/xarray-pr-dataset-reduce-index ;;
+  11617)   TREE=$HOME/GitHub/xarray-pr-drop-scalar-index-coords ;;
+  11621)   TREE=$HOME/GitHub/xarray-pr-dataset-update-index ;;
+  main)    TREE=$HOME/GitHub/xarray-upstream ;;
+  patched) TREE=$HOME/GitHub/xarray-patched-4 ;;
+  /*)      TREE=$1 ;;
+  *) sed -n 2,8p "$0"; exit 2 ;;
+esac
+shift
+REPRO=$(cd "$(dirname "$0")/.." && pwd)/explorations/upstream_reproducers
+export PYTHONPATH="$TREE:$REPRO${PYTHONPATH:+:$PYTHONPATH}"
+PY=$HOME/GitHub/xarray-upstream/.venv/bin/python
+if [ $# -eq 0 ]; then
+  exec "$PY" -i -c "import numpy as np, xarray as xr; print('xarray from', xr.__file__)"
+elif [ "$1" = "-c" ]; then
+  exec "$PY" "$@"
+else
+  exec "$PY" -i "$@"
+fi

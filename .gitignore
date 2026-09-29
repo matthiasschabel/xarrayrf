@@ -1,0 +1,17 @@
+.venv/
+.venv-patched/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+*.egg-info/
+.DS_Store
+
+# Agent guidance and session handoff notes are local to each maintainer.
+AGENTS.md
+CLAUDE.md
+docs/dev/handoff_notes.md
