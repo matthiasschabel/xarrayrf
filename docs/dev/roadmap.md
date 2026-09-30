@@ -35,6 +35,8 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 - **xarray upstream.** Respond to review on the open bug-fix PRs, retire each local patch as a
   release ships it, and reduce the lifecycle hook patches to two `Index` methods before
   proposing them ([index hook design](xarray-upstream/index_hook_design.md)).
+- **Freestanding grids.** A NumPy-only `Grid` value, declared intervals and anatomy on grids
+  ([grid plan](architecture/grid_plan.md)); it also covers the viewer plan's pixel-free target domain.
 - **Declared cells.** Slice thickness and intervals beyond the sample offset
   ([geometry and resampling](architecture/geometry_and_resampling_design.md)).
 - **Viewer support.** Selection overhead, backend neutrality, pixel-free target domains and
