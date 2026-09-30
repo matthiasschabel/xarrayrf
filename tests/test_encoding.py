@@ -310,7 +310,15 @@ def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
         affine, xrf.AffineTransform(source=frame, target=frame_b, matrix=[[1.0]], translation=[0.0])
     )
     seen = set()
-    for value in (vocabulary, system, frame, array, affine, composite):
+    for value in (
+        vocabulary,
+        system,
+        frame,
+        array,
+        affine,
+        composite,
+        xrf.Grid(affine, {"i": ("i", [0, 1])}),
+    ):
         encoded = xrf.encode(value)["value"]
         kind = encoded["kind"]
         assert set(encoded) - {"kind"} == _FIELDS[kind], kind

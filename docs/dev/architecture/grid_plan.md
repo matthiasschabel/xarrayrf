@@ -139,7 +139,8 @@ remedy, so identity policies must never equate sources that differ in content.
 
 ### 6. Persistence
 
-Schema 1 (not frozen) gains a `grid` kind: transform, coordinates (dim, values) and intervals,
+Schema 1 (not frozen) gains a `grid` kind: transform, an explicit `dims` order, coordinates
+(dim, values) and intervals,
 plus intervals in the native binding encoding. Decoding rebuilds through constructors.
 
 ## Alternatives Considered
@@ -167,10 +168,10 @@ plus intervals in the native binding encoding. Decoding rebuilds through constru
 Each stage updates `core_interface.md` (normative) and its design note in the same change, and is
 reviewed separately.
 
-1. `Grid` value, shared sampling module with `Geometry`, `Geometry.grid()`, `points_at` and
-   extrapolating `positions_at`, `isel`/`transpose`, `is_coincident`, `grid` encoding. Accept:
-   Grid and Geometry answers agree; `isel` commutes with points; nonuniform forward/inverse
-   round trip including extrapolation; encode/decode round trip; refusals.
+1. **Done.** `Grid` value, shared sampling module with `Geometry`, `Geometry.grid()`,
+   `points_at` and extrapolating `positions_at`, `isel`/`transpose`, `is_coincident`, `grid`
+   encoding. Accept: Grid and Geometry answers agree; `isel` commutes with points; nonuniform
+   forward/inverse round trip including extrapolation; encode/decode round trip; refusals.
 2. Doors: `rf.grid`, `rf.frame(grid)`, `frame_array` (adapters migrated), `grid_coordinates`,
    `resample`/`resample_to` onto a grid. Accept: every door yields the same points; a lazy 4-D
    NIfTI and a multichannel array keep their non-geometry dims and coords; pixels unread.

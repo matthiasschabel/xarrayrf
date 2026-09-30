@@ -1,8 +1,9 @@
 # Geometry, cells and resampling
 
 **Status:** Active
-**Last updated:** 2026-09-28
-**Scope:** `Geometry` (the read-through view), `ArrayCoordinates.sample_offset` and the
+**Last updated:** 2026-09-30
+**Scope:** `Grid` (the immutable sampling value), `Geometry` (the read-through view),
+`ArrayCoordinates.sample_offset` and the
 `"samples" | "cells"` domain, `Geometry.is_coincident`, core `resample` including the same-grid
 gather, and the accessor's `rf.resample_to` and `rf.assume_frame`. Declared intervals are
 designed, not implemented. [The core interface](../../core_interface.md) is normative.
@@ -46,9 +47,37 @@ for its sample domain.
   the end, so an off-by-one is an error, not a sample at the far edge.
 
 Queries: `point_at`, `points()` (lazy), `lattice()`, `frame_coordinates()` (lazy xarray
-coordinates for interoperability), `positions_at` (inverse lookup, refused for retained scalars,
+coordinates for interoperability), `points_at`, `positions_at` (inverse lookup, refused for retained scalars,
 fields and embedded planes) and `is_coincident`. The `.rf.geometry` accessor delegates to this
 view; the binding adds snapshot, association and enforcement, which the view never provides.
+
+### Grid is a frozen sampling value
+
+Stage 1 of [the grid plan](grid_plan.md) is implemented. `Grid(transform, coordinates,
+intervals=None)` copies finite real 0-D/1-D coordinates into immutable NumPy buffers. It has
+no pixels, non-geometry dimensions, binding path or xarray dependency. Equality and hashing
+compare the exact declaration, including dimension order; `is_coincident` is the separate
+step-tolerant query. `isel` selects coordinate values (retaining integer selections as scalars),
+and `transpose` reorders dimensions, so both commute with `points()`.
+
+`Geometry.grid()` revalidates and snapshots the current coordinates in its declared dimension
+order. It refuses multidimensional fields and shared dimensions. It never reads pixels, but
+snapshotting necessarily evaluates the coordinate values. Geometry construction, selected
+`point_at` reads, lazy `points()` and revalidation on every query retain their existing behavior.
+
+The private NumPy sampling description carries transform, dims, sizes, source coordinate values
+and exact index steps when available; offsets come from the source. Geometry supplies coordinate
+values only when a query needs them. The positions, lattice and coincidence math consumes this
+description, shared by Grid and Geometry; resampling continues to accept its existing targets.
+
+`points_at(positions, domain="samples", outside="raise")` maps fractional positions piecewise
+linearly and reads retained scalars from the sampling description. It and `positions_at` accept
+`outside="extrapolate"`, extending by the outer steps, and round-trip even on nonuniform axes.
+The existing `"raise"` and `"nan"` policies enforce the chosen samples/cells domain. A singleton
+has no step for forward fractional extrapolation; inverse lookup still admits only its coordinate.
+Retained scalars still refuse inverse lookup and coincidence pending a projection policy.
+
+Grid doors, intervals, anatomy and adapter identity changes remain later stages.
 
 ### Sample offsets and cells
 

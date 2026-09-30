@@ -1,7 +1,7 @@
 # Core interface and nomenclature
 
 **Status:** Active (normative)
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-30
 **Scope:** The public vocabulary, value objects, transform protocol, calling conventions and
 adapter contract of xarrayrf. Every public name follows this document. Where
 [the core model design](dev/architecture/core_model_design.md) or [the architecture](design.md) disagree with it,
@@ -63,7 +63,7 @@ Each term has one meaning. Public names, docstrings, errors and docs use these m
 | **Axis** | One named, ordered entry of a coordinate system or of array coordinates, with a unit and an optional type. ("Component" is not used.) |
 | **Unit** | An open CF/UDUNITS string compared exactly, or `None` where no unit is declared. `None` is not `"1"` (dimensionless) and implies nothing else about the axis. |
 | **Axis type** | An optional open string naming what kind of axis it is, such as NGFF's `"space"`, `"time"` and `"channel"`, Astropy's `SPECTRAL`, or a UCD. Declarative: nothing in the core depends on it, so no axis names or kinds are blessed. |
-| **Position** | An integer index along an array dimension, zero-based, restarting at 0 after a crop. |
+| **Position** | A zero-based index along an array or grid dimension, restarting at 0 after a crop. Sample positions are integers; interpolated positions may be fractional. |
 | **Coordinate** | A value along an axis, as xarray uses the word. At import an adapter usually sets coordinates equal to positions; after a crop xarray keeps the original values. A coordinate is where its sample is. |
 | **Cell** | The region an element stands for, such as a voxel, a pixel or a time bin: its nominal support, not its point-spread function or slice profile. By default cells are dense, tiling each axis from the current samples and the sample offset. Declared cells (designed, not yet implemented) may leave gaps or overlap, as slices of a multislice 2D MRI stack do; a cell width derived from spacing never stands in for slice thickness. |
 | **Sample offset** | Where a sample sits in its cell along one axis, in position units: a fraction in `[0, 1]` measured from the cell's edge at lower coordinate values, `0.5` for a centred voxel; `None` for point samples, which have no cells. The cell of position p spans positions p − s to p + 1 − s, mapped to coordinates as positions are (piecewise linearly for nonuniform values), so on a nonuniform axis the fraction holds in positions, not in coordinate distance. |
@@ -236,14 +236,46 @@ rules (diffusion PPD, ITK's J·T·J⁻¹) live downstream.
    `transform_named`, `check_transform`, `coordinate_system_change`, `compose`. **Methods for
    queries on a concrete value object**: `CoordinateSystem.axis_codes(vector)` replaces the free
    function `nearest_axis_codes(vector, coordinate_system)`.
-4. **Positions only enter through `Geometry`**, which reads coordinates at positions and then
-   applies the transform: `Geometry.point_at(**positions)` replaces `world_at_indices`.
+4. **Positions enter through sampling queries on `Geometry` and `Grid`**, which read
+   coordinates at positions and apply the transform. `point_at(**positions)` locates a sample;
+   `points_at(positions)` locates fractional positions.
+
+## Grid values
+
+`Grid(transform, coordinates, *, intervals=None)` is an immutable, hashable NumPy-only sampling
+value, exported from `xarrayrf`. It describes geometry without pixels. The transform must map
+`ArrayCoordinates` into a `ReferenceFrame`. Coordinates name exactly its source axes, with one
+entry `name: (dim, values)` per varying axis (1-D values), or `name: value` per retained scalar
+(0-D). At most one axis varies along each dimension. Values are copied into immutable storage,
+must have real integer or floating dtype and must be finite; units come from the source.
+`intervals` must be `None`; any other value is refused with a message naming stage 3.
+
+`transform`, `frame`, `coordinates`, `dims` and read-only `sizes` expose the declaration. `dims`
+follows the varying coordinates' insertion order. Empty dimensions and fully scalar grids are
+valid. Equality compares the transform (including frame identity), dimension order and coordinate
+values exactly; it never uses coincidence tolerance. The representation names source axes,
+target identity, dimensions and sizes.
+
+`point_at`, `points_at`, `positions_at`, `lattice` and `is_coincident` use the same sampling
+implementation and semantics as `Geometry`. `point_at` requires a nonnegative integer per
+varying dimension and returns a NumPy point. `points()` returns a NumPy array shaped
+`(*sizes, number_of_frame_axes)` in grid dimension order. `is_coincident` accepts another `Grid`;
+`Geometry.is_coincident` continues to accept only `Geometry`.
+
+`isel(**indexers)` accepts integers and slices, including negative steps; negative integer
+indices count from the end, as in NumPy and xarray. An integer selection retains that source axis
+as a scalar. `transpose(*dims)` names every varying dimension exactly once; with no arguments
+it reverses their order. Both return grids whose points equal the corresponding selection or
+permutation of the original points. Neither changes the coordinate transform or sample offsets.
 
 ## Geometry queries
 
 `Geometry(array, transform, dims=...)` pairs an array with its transform from array
 coordinates. Beyond `point_at`:
 
+- `grid()`: an immutable `Grid` snapshot of the current coordinates, in `Geometry.dims` order.
+  Coordinate values are read, pixels are never read. Multidimensional coordinates and multiple
+  source axes along one dimension are refused because they cannot form a grid.
 - `points()`: every sample's point as a `DataArray` over the geometry dimensions and `axis`,
   labelled with units; lazy and chunked like the array when it is Dask-backed.
 - `lattice(dims=None, *, tolerance=...)`: a `Lattice` (origin, spacing, direction, matrix and
@@ -269,6 +301,13 @@ coordinates. Beyond `point_at`:
   the outer steps). A retained scalar axis, a field, or two axes along one dimension are refused.
   With `domain="cells"`, positions in the outer cells lie outside `[0, n - 1]`, such as `-0.5`,
   and are returned as they are.
+- `points_at(positions, *, domain="samples", outside="raise")`: the forward partner, mapping
+  positions shaped `(..., D)` in `dims` order to NumPy frame points shaped `(..., M)`. Uniform
+  coordinates map linearly; nonuniform coordinates map piecewise linearly, extending by the
+  outer steps. Retained scalar axes are read from the array or grid, not supplied in positions.
+  Fields and multiple axes along one dimension are refused. A single-sample dimension accepts
+  position zero but has no step for fractional positions or extrapolation. Empty axes cannot
+  locate positions.
 - `is_coincident(other, *, tolerance=1e-6)`: whether both arrays sample the same points of the
   same frame, element for element, so one's values stand for the other's without resampling.
   The explicit tolerant comparison; `==` on transforms and frames stays exact. Frames must be
@@ -278,6 +317,16 @@ coordinates. Beyond `point_at`:
   unit-independent. With affine transforms the check is exact and linear in the samples per
   dimension; otherwise every sample is checked in blocks. A single-sample dimension must agree
   to rounding until declared cells give it a width. Cells, offsets and values are not compared.
+
+Both fractional queries accept `outside="raise"` (refuse points outside the domain), `"nan"`
+(mark every component of an outside row as NaN) and `"extrapolate"` (extend beyond the domain
+using each axis's outer step). `domain="samples"` bounds positions to `[0, n - 1]`;
+`domain="cells"` extends to the declared sample-offset edges, with the same single-sample
+cell-width refusal as before. Extrapolation still validates the domain declaration. Forward and
+inverse queries round-trip on strictly monotonic axes with a determined transform inverse,
+including extrapolated nonuniform positions: offsets `0, 2, 5, 9` map positions
+`-1, 0, 1.5, 4` to coordinates `-2, 0, 3.5, 13`. Retained scalars continue to refuse inverse
+lookup and coincidence because projection is a separate policy.
 
 ## Resampling
 
@@ -340,7 +389,7 @@ clamped positions, at a cost proportional to the shell.
 ## Persistence
 
 `encode(value)` and `decode(data, *, decoders=None)` convert vocabularies, coordinate systems,
-frames, array coordinates, affine and composite transforms, and user-defined transforms to and from
+frames, array coordinates, grids, affine and composite transforms, and user-defined transforms to and from
 versioned, plain JSON data. Decoding rebuilds through the public constructors; frame identity,
 metadata types and float64 coefficients survive exactly. User-defined transforms implement
 `SupportsEncoding` (namespaced `kind`, own `version`, `to_data()`) and decode only through
@@ -348,6 +397,13 @@ caller-supplied `decoders`; nothing in the data selects code. Failures are `Enco
 subclasses: `UnsupportedVersionError`, `UnknownKindError`, `MissingDecoderError`,
 `MalformedDataError`, `DecoderResultError`. The schema is provisional until the NGFF boundary
 fixtures pass (`docs/dev/architecture/persistence_design.md`).
+
+Provisional schema 1 includes a `grid` kind with `transform`, `dims` and `coordinates`
+fields. Each coordinate is encoded as `{"dim": ..., "values": [...]}` or `{"value": ...}` for a
+scalar. `dims` fixes the dimension order, so tools that reorder JSON object keys cannot change
+it. Unknown fields at either level are refused; numbers are checked strictly, and constructor
+errors become chained `MalformedDataError`.
+Intervals are not encoded in stage 1. Schema 1 is not frozen.
 
 ## Units
 

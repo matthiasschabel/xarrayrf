@@ -73,7 +73,9 @@ def main() -> None:
     methods: tuple[tuple[xrf.Method, int], ...] = (("nearest", 0), ("linear", 1), ("cubic", 3))
     # The baseline is scipy alone applying the same composed map resample() uses, with the same
     # edge mode and a separately timed prefilter, so the difference is xarrayrf's overhead.
-    composed = _lattice_map(source, target, ("k", "j", "i"), None, extents(source, "samples"))
+    composed = _lattice_map(
+        source, target, ("k", "j", "i"), None, extents(source._sampling(), "samples")
+    )
     assert composed is not None
     values = source.array.values
     for method, order in methods:

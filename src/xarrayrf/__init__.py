@@ -44,6 +44,7 @@ from ._encoding import (
     encode,
 )
 from ._frame import LOCAL_NAMESPACE, ReferenceFrame, Role
+from ._grid import Grid
 from ._lattice import Lattice
 from ._orientation import coordinate_system_change
 from ._transform import (
@@ -75,6 +76,7 @@ __all__ = [
     "DirectionVocabulary",
     "EncodingError",
     "Endpoint",
+    "Grid",
     "Lattice",
     "MalformedDataError",
     "MissingDecoderError",

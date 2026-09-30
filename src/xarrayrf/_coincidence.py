@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 import numpy as np
 import numpy.typing as npt
 
 from ._orientation import coordinate_system_change
 from ._positions import located_axes, locator, sample_columns
-from ._sampling import POSITION_SLACK, coordinate_to_position, sample_axes
+from ._sampling import POSITION_SLACK, Sampling, coordinate_to_position
 from ._transform import SupportsAffine, SupportsInverse, SupportsPoints
-
-if TYPE_CHECKING:
-    from ._geometry import Geometry
 
 COINCIDENCE_BLOCK_POINTS: Final = 1 << 20
 """Samples located per block when comparing geometries that do not form lattices."""
 
 
-def is_coincident(geometry: Geometry, other: Geometry, tolerance: float) -> bool:
+def is_coincident(geometry: Sampling, other: Sampling, tolerance: float) -> bool:
     """Implement :meth:`~xarrayrf.Geometry.is_coincident`; arguments are already validated."""
     if geometry.frame != other.frame and not geometry.frame.is_equivalent_frame(other.frame):
         return False
@@ -34,7 +31,7 @@ def is_coincident(geometry: Geometry, other: Geometry, tolerance: float) -> bool
     )
 
 
-def _locates_within(geometry: Geometry, other: Geometry, tolerance: float) -> bool:
+def _locates_within(geometry: Sampling, other: Sampling, tolerance: float) -> bool:
     """Whether every sample of ``other`` lies within ``tolerance`` steps of its own position."""
     change = (
         None
@@ -45,10 +42,10 @@ def _locates_within(geometry: Geometry, other: Geometry, tolerance: float) -> bo
     if exact is not None:
         return exact
     locate = locator(geometry, slack=tolerance)
-    order = [str(dim) for dim in other.array.dims if dim in other.dims]
-    shape = tuple(other.array.sizes[dim] for dim in order)
+    order = list(other.dims)
+    shape = tuple(other.sizes[dim] for dim in order)
     columns = [order.index(dim) for dim in geometry.dims]
-    samplings = sample_axes(other.array, other.transform.source.axes)
+    samplings = other.axes
     total = int(np.prod(shape, dtype=np.int64))
     for start in range(0, total, COINCIDENCE_BLOCK_POINTS):
         stop = min(total, start + COINCIDENCE_BLOCK_POINTS)
@@ -68,7 +65,7 @@ def _locates_within(geometry: Geometry, other: Geometry, tolerance: float) -> bo
 
 
 def _affine_within(
-    geometry: Geometry, other: Geometry, change: SupportsPoints | None, tolerance: float
+    geometry: Sampling, other: Sampling, change: SupportsPoints | None, tolerance: float
 ) -> bool | None:
     """Exact check when every map is affine, in time linear in the samples per dimension.
 
@@ -97,11 +94,11 @@ def _affine_within(
         translation = translation + change.translation
     weights = inverse.matrix @ matrix
     base = inverse.matrix @ translation + inverse.translation
-    samplings = sample_axes(other.array, theirs.source.axes)
+    samplings = other.axes
     for sampling, row, _ in located_axes(geometry):
         dim = sampling.dim
         assert dim is not None
-        size = geometry.array.sizes[dim]
+        size = geometry.sizes[dim]
         along = np.zeros(size)
         others = 0.0, 0.0
         constant = float(base[row])

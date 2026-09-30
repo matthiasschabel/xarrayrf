@@ -1,9 +1,9 @@
 # Data-only persistence of the core value objects
 
 **Status:** Active
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-30
 **Scope:** `xarrayrf.encode` and `xarrayrf.decode` for vocabularies, coordinate systems, frames,
-array coordinates, affine and composite transforms, and user-defined transforms. Native binding
+array coordinates, grids, affine and composite transforms, and user-defined transforms. Native binding
 persistence wraps this encoding; NGFF, CF and NIfTI formats are adapters.
 
 ## Context
@@ -24,6 +24,12 @@ interface requires a bound transform to persist only through such an encoding.
   additions bump the version.
 - Identity survives: the identifier is decoded with `ReferenceFrame.declared`, so a local frame
   decodes equal to the original. Metadata keeps the type distinctions the core compares.
+- Schema 1 gains the `grid` kind before freezing: `transform` uses the existing transform
+  encoding, `dims` lists the dimension order (JSON key order is not relied on), and
+  `coordinates` maps names to `{"dim": ..., "values": [...]}` for varying axes or
+  `{"value": ...}` for retained scalars. No interval field is emitted in stage 1. Decoding
+  checks exact coordinate fields and numeric types, then rebuilds through `Grid`; constructor
+  refusals are chained `MalformedDataError`.
 - A vocabulary stores the lexicographically smaller token of each antipodal pair.
 - User transforms implement `SupportsEncoding`: a namespaced `kind` (`"package:name"`), their own
   integer `version`, and `to_data()`. They decode only through caller-supplied `decoders`, which

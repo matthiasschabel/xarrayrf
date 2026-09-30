@@ -15,10 +15,10 @@ import xarray as xr
 
 from ._affine import equilibrated_inverse
 from ._frame import ReferenceFrame
-from ._geometry import LATTICE_TOLERANCE, Geometry
+from ._geometry import Geometry
 from ._orientation import coordinate_system_change
 from ._positions import extents, lattice_parts, locator, sample_columns
-from ._sampling import POSITION_SLACK, Domain, sample_axes
+from ._sampling import LATTICE_TOLERANCE, POSITION_SLACK, Domain
 from ._transform import SupportsAffine, SupportsPoints, check_transform
 
 type Method = Literal["nearest", "linear", "cubic"]
@@ -174,7 +174,7 @@ def _lattice_map(
     try:
         # A single-sample target dimension is never stepped along, so it needs no step.
         target_origin, target_columns = lattice_parts(
-            target, target_dims, LATTICE_TOLERANCE, single_samples=True
+            target._sampling(), target_dims, LATTICE_TOLERANCE, single_samples=True
         )
         source_lattice = source.lattice(source.dims)
     except (TypeError, ValueError):
@@ -213,9 +213,9 @@ def _general_map(
     domain: Domain,
 ) -> PositionMap:
     """Map through target coordinates, the frames and the source's exact inverse."""
-    samplings = sample_axes(target.array, target.transform.source.axes)
+    samplings = target._sampling().axes
     transform = target.transform
-    locate = locator(source, domain)
+    locate = locator(source._sampling(), domain)
 
     def positions(target_positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         indices = target_positions.astype(np.intp)
@@ -329,7 +329,7 @@ def _plan(
         raise ValueError(
             f"target geometry dimensions {clashes} are non-geometry dimensions of the source",
         )
-    reach = extents(source, domain)
+    reach = extents(source._sampling(), domain)
     lattice_map = _lattice_map(source, target, target_dims, frame_map, reach)
     position_map = (
         _general_map(source, target, target_dims, frame_map, domain)

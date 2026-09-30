@@ -10,9 +10,7 @@ from pathlib import Path
 
 import xarrayrf
 
-INTEGRATION_MODULES = frozenset(
-    {"_geometry", "_resample", "_sampling", "_frame_coordinates", "_binding"}
-)
+INTEGRATION_MODULES = frozenset({"_geometry", "_resample", "_frame_coordinates", "_binding"})
 """Modules allowed to import xarray; everything else in the package is core."""
 
 CORE_WITHOUT_XARRAY = textwrap.dedent(
@@ -27,6 +25,18 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
         target=frame, source=xrf.ArrayCoordinates(("i",), ("1",)), matrix=((2.0,),), translation=(1.0,)
     )
     assert float(xrf.transform_named(transform, {"i": 3.0})["x"]) == 7.0
+    import numpy as np
+    grid = xrf.Grid(transform, {"i": ("i", [0, 1, 3])})
+    np.testing.assert_allclose(grid.point_at(i=2), [7.0], atol=1e-12)
+    np.testing.assert_allclose(grid.points_at([[1.5]]), [[5.0]], atol=1e-12)
+    np.testing.assert_allclose(grid.positions_at([[5.0]]), [[1.5]], atol=1e-12)
+    assert xrf.decode(xrf.encode(grid)) == grid
+    assert hash(grid) == hash(xrf.decode(xrf.encode(grid)))
+    assert grid.is_coincident(grid)
+    assert grid.isel(i=slice(None, None, -1)).dims == ("i",)
+    assert grid.transpose().dims == ("i",)
+    uniform = xrf.Grid(transform, {"i": ("i", [0, 1, 2])})
+    np.testing.assert_allclose(uniform.lattice().origin, [1.0], atol=1e-12)
     try:
         xrf.Geometry
     except ImportError as error:
@@ -37,7 +47,7 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
     assert loaded == ["xarray"], loaded  # only the blocking sentinel
     namespace = {}
     exec("from xarrayrf import *", namespace)
-    assert "ReferenceFrame" in namespace and "Geometry" not in namespace
+    assert "ReferenceFrame" in namespace and "Grid" in namespace and "Geometry" not in namespace
     """
 )
 

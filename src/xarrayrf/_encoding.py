@@ -16,11 +16,14 @@ import math
 from collections.abc import Callable, Mapping
 from typing import Any, Final, Protocol, runtime_checkable
 
+import numpy as np
+
 from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
 from ._composite import CompositeTransform
 from ._coordinate_system import CoordinateSystem
 from ._frame import ReferenceFrame
+from ._grid import Coordinate, Grid
 from ._transform import Endpoint, SupportsPoints, check_transform
 from ._vocabulary import DirectionVocabulary
 
@@ -83,6 +86,7 @@ _BUILT_IN: Final = frozenset(
         "array_coordinates",
         "affine_transform",
         "composite_transform",
+        "grid",
     }
 )
 
@@ -93,7 +97,7 @@ def encode(value: object) -> dict[str, Any]:
     Args:
         value: A :class:`DirectionVocabulary`, :class:`CoordinateSystem`,
             :class:`ReferenceFrame`, :class:`ArrayCoordinates`, :class:`AffineTransform`,
-            :class:`CompositeTransform`, or a user-defined transform implementing
+            :class:`CompositeTransform`, :class:`Grid`, or a user-defined transform implementing
             :class:`SupportsEncoding`.
 
     Returns:
@@ -149,6 +153,18 @@ def decode(data: object, *, decoders: Mapping[str, Decoder] | None = None) -> An
 
 
 def _encode(value: object) -> dict[str, Any]:
+    if isinstance(value, Grid):
+        return {
+            "kind": "grid",
+            "transform": _encode(value.transform),
+            "dims": list(value.dims),
+            "coordinates": {
+                name: {"dim": entry[0], "values": np.asarray(entry[1]).tolist()}
+                if isinstance(entry, tuple)
+                else {"value": entry}
+                for name, entry in value.coordinates.items()
+            },
+        }
     if isinstance(value, DirectionVocabulary):
         representatives = sorted({min(token, value.opposite(token)) for token in value.directions})
         return {
@@ -289,6 +305,7 @@ _FIELDS: Final = {
     "array_coordinates": {"axes", "units", "axis_types", "sample_offset"},
     "affine_transform": {"source", "target", "matrix", "translation"},
     "composite_transform": {"transforms"},
+    "grid": {"transform", "dims", "coordinates"},
 }
 
 _EXTENSION_FIELDS: Final = {"version", "source", "target", "data"}
@@ -403,6 +420,32 @@ class _Decoder:
             matrix=self._numbers(fields["matrix"], "matrix"),
             translation=self._numbers(fields["translation"], "translation"),
         )
+
+    def grid(self, fields: Mapping[str, Any]) -> Grid:
+        coordinates: dict[str, Coordinate] = {}
+        for name, data in _mapping(fields["coordinates"], "grid coordinates").items():
+            record = _mapping(data, f"grid coordinate {name!r}")
+            if "value" in record:
+                self._expect("scalar coordinate", record, {"value"})
+                value = record["value"]
+                if isinstance(value, bool) or not isinstance(value, int | float):
+                    raise MalformedDataError(f"coordinate {name!r} value must be a number")
+                coordinates[name] = value
+            else:
+                self._expect("varying coordinate", record, {"dim", "values"})
+                coordinates[name] = (record["dim"], self._numbers(record["values"], "values"))
+        dims = self._list(fields["dims"], "grid dims")
+        varying = {
+            entry[0]: name for name, entry in coordinates.items() if isinstance(entry, tuple)
+        }
+        if not all(isinstance(dim, str) for dim in dims) or sorted(dims) != sorted(varying):
+            raise MalformedDataError(
+                f"grid dims {dims!r} must name each varying coordinate's dimension once"
+            )
+        # JSON object order is not preserved by every tool, so dims, not key order, fixes the order.
+        ordered = {varying[dim]: coordinates[varying[dim]] for dim in dims}
+        ordered.update({name: entry for name, entry in coordinates.items() if name not in ordered})
+        return Grid(self.value(fields["transform"]), ordered)
 
     def composite_transform(self, fields: Mapping[str, Any]) -> CompositeTransform:
         members = [self.value(item) for item in self._list(fields["transforms"], "transforms")]

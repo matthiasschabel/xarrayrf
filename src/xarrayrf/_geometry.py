@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
 from types import MappingProxyType
-from typing import Any, Final, Literal, cast
+from typing import Any, Final, cast
 
 import numpy as np
 import numpy.typing as npt
 import xarray as xr
+from xarray.indexes import RangeIndex
 
 from ._array_coordinates import ArrayCoordinates
 from ._coincidence import is_coincident
 from ._frame import ReferenceFrame
+from ._grid import Grid
 from ._lattice import Lattice
-from ._positions import lattice_parts, locator
-from ._sampling import Domain
+from ._positions import Outside, check_position, check_tolerance, lattice, points_at, positions_at
+from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling
 from ._transform import SupportsAffine, SupportsPoints, check_transform, transform_named
 from ._validation import REAL_KINDS, _check_str_sequence, check_names, real_float_array
 
@@ -24,8 +26,27 @@ AXIS_DIM: Final = "axis"
 
 _SOURCE_AXIS: Final = "__xarrayrf_source_axis__"
 
-LATTICE_TOLERANCE: Final = 1e-6
-"""Default largest deviation from uniform spacing, as a fraction of one step, for a lattice."""
+
+def _sample_axes(array: xr.DataArray, axes: tuple[str, ...]) -> tuple[AxisSampling, ...]:
+    """Read each source axis's coordinate values, refusing multidimensional coordinate fields.
+
+    Raises:
+        ValueError: If a coordinate depends on more than one dimension, or is not finite.
+    """
+    samplings = []
+    for axis in axes:
+        coordinate = array.coords[axis]
+        if coordinate.ndim > 1:
+            raise ValueError(
+                f"coordinate {axis!r} depends on {coordinate.dims}; a multidimensional coordinate "
+                "field has no per-dimension spacing or inverse lookup here",
+            )
+        values = real_float_array(np.asarray(coordinate.values), field=f"coordinate {axis!r}")
+        dim = str(coordinate.dims[0]) if coordinate.ndim == 1 else None
+        index = array.xindexes.get(axis)
+        step = float(index.step) if isinstance(index, RangeIndex) and values.size > 1 else None
+        samplings.append(AxisSampling(axis, dim, values, step))
+    return tuple(samplings)
 
 
 def _check_dims(value: object) -> tuple[str, ...]:
@@ -34,22 +55,6 @@ def _check_dims(value: object) -> tuple[str, ...]:
     Empty is meaningful: a fully selected point has no varying geometry dimension left.
     """
     return check_names(value, field="dims", allow_empty=True)
-
-
-def _check_position(value: object, *, dim: str, size: int) -> int:
-    """Validate one zero-based, non-negative, in-bounds sample position."""
-    if isinstance(value, bool) or not isinstance(value, int | np.integer):
-        raise TypeError(
-            f"index for dimension {dim!r} must be a Python or NumPy integer, got "
-            f"{type(value).__name__}; a boolean is not read as 0 or 1",
-        )
-    position = int(value)
-    if not 0 <= position < size:
-        raise IndexError(
-            f"index {position} is out of range for dimension {dim!r} of current size {size}; "
-            "positions are zero-based, and a negative position is not read from the end",
-        )
-    return position
 
 
 def check_coordinate_unit(
@@ -326,7 +331,7 @@ class Geometry:
                 f"dimensions {self._dims}",
             )
         positions = {
-            dim: _check_position(indexers[dim], dim=dim, size=self._array.sizes[dim])
+            dim: check_position(indexers[dim], dim=dim, size=self._array.sizes[dim])
             for dim in self._dims
         }
         values = {
@@ -402,6 +407,49 @@ class Geometry:
             {AXIS_DIM: list(frame_axes), "units": (AXIS_DIM, list(self._frame.units))}
         ).assign_coords(index_coordinates)
 
+    def _sampling(self) -> Sampling:
+        """Revalidate and read the per-axis coordinates needed by sampling queries."""
+        self._dependencies()
+        return Sampling(
+            self._transform,
+            self._dims,
+            self.sizes,
+            lambda: _sample_axes(self._array, self._transform.source.axes),
+        )
+
+    def grid(self) -> Grid:
+        """Snapshot the current 0-D/1-D coordinates as an immutable Grid.
+
+        Raises:
+            ValueError: If a coordinate is multidimensional or dimensions share source axes.
+        """
+        sampling = self._sampling()
+        coordinates = {
+            axis.axis: float(axis.values) if axis.dim is None else (axis.dim, axis.values)
+            for axis in sampling.axes
+        }
+        return Grid(self._transform, coordinates).transpose(*self._dims)
+
+    def points_at(
+        self,
+        positions: npt.ArrayLike,
+        *,
+        domain: Domain = "samples",
+        outside: Outside = "raise",
+    ) -> npt.NDArray[np.float64]:
+        """Map fractional positions (..., D), in dims order, to frame points (..., M).
+
+        Coordinates interpolate piecewise linearly and extrapolate by the outer steps.
+        Retained scalar axes are read from the array.
+
+        Raises:
+            TypeError: If positions have a non-real dtype.
+            ValueError: If positions have the wrong shape, domain or outside is unknown,
+                coordinates are multidimensional, two axes share a dimension, an empty or
+                single-sample axis has no step, or a position is outside the chosen domain.
+        """
+        return points_at(self._sampling(), positions, domain=domain, outside=outside)
+
     def lattice(
         self, dims: Sequence[str] | None = None, *, tolerance: float = LATTICE_TOLERANCE
     ) -> Lattice:
@@ -432,22 +480,8 @@ class Geometry:
                 determined), a coordinate is not uniformly spaced within ``tolerance``, or a
                 dimension's step maps to no displacement in the frame.
         """
-        self._dependencies()
-        transform = self._transform
-        if not isinstance(transform, SupportsAffine):
-            raise TypeError(
-                f"a lattice needs an affine transform; {type(transform).__name__} is not one",
-            )
-        order = self._array_order() if dims is None else _check_str_sequence(dims, field="dims")
-        if sorted(order) != sorted(self._dims) or len(set(order)) != len(order):
-            raise ValueError(
-                f"dims must name each geometry dimension {self._dims} once, got {order}",
-            )
-        origin, columns = lattice_parts(self, order, tolerance, single_samples=False)
-        degenerate = [order[j] for j in range(len(order)) if not np.any(columns[:, j])]
-        if degenerate:
-            raise ValueError(f"dimensions {degenerate} map to no displacement in the frame")
-        return Lattice(frame=self._frame, dims=order, origin=origin, matrix=columns)
+        order = self._array_order() if dims is None else dims
+        return lattice(self._sampling(), order, tolerance=tolerance)
 
     def frame_coordinates(
         self,
@@ -497,7 +531,7 @@ class Geometry:
         """
         from ._frame_coordinates import FrameCoordinateIndex, FrameCoordinateTransform
         from ._positions import check_domain, reach
-        from ._sampling import coordinate_to_position, sample_axes
+        from ._sampling import coordinate_to_position
 
         self._dependencies()
         transform = self._transform
@@ -508,7 +542,7 @@ class Geometry:
         check_domain(domain)
         source = transform.source
         assert isinstance(source, ArrayCoordinates)
-        samplings = sample_axes(self._array, transform.source.axes)
+        samplings = _sample_axes(self._array, transform.source.axes)
         by_dim = {}
         for axis, sampling in enumerate(samplings):
             if sampling.dim is None:
@@ -551,7 +585,7 @@ class Geometry:
         self,
         points: npt.ArrayLike,
         *,
-        outside: Literal["raise", "nan"] = "raise",
+        outside: Outside = "raise",
         domain: Domain = "samples",
     ) -> npt.NDArray[np.float64]:
         """Locate frame points among the samples as fractional positions.
@@ -563,7 +597,8 @@ class Geometry:
         Args:
             points: Frame points shaped ``(..., M)`` in the frame's axis order.
             outside: ``"raise"`` refuses a point outside the domain; ``"nan"`` returns NaN
-                for every position of such a point, as resampling needs.
+                for every position of such a point, as resampling needs. "extrapolate" extends
+                beyond the domain by the outer coordinate steps.
             domain: ``"samples"`` admits points between the outer samples, as xarray's
                 ``interp`` does. ``"cells"`` also admits points in the outer samples' cells, as
                 ITK does, using each source axis's declared
@@ -583,14 +618,7 @@ class Geometry:
                 cells has a single sample, or ``outside="raise"`` and a point lies outside the
                 domain.
         """
-        if outside not in ("raise", "nan"):
-            raise ValueError(f"outside must be 'raise' or 'nan', got {outside!r}")
-        positions = locator(self, domain)(points)
-        if outside == "raise" and np.isnan(positions).any():
-            raise ValueError(
-                f"points lie outside the {domain} domain; pass outside='nan' to mark them instead",
-            )
-        return positions
+        return positions_at(self._sampling(), points, domain=domain, outside=outside)
 
     def is_coincident(self, other: Geometry, *, tolerance: float = LATTICE_TOLERANCE) -> bool:
         """Return whether both arrays sample the same points, element for element.
@@ -630,11 +658,7 @@ class Geometry:
         """
         if not isinstance(other, Geometry):
             raise TypeError(f"other must be a Geometry, got {type(other).__name__}")
-        if isinstance(tolerance, bool) or not isinstance(tolerance, int | float | np.floating):
-            raise TypeError(f"tolerance must be a real number, got {type(tolerance).__name__}")
-        if not (np.isfinite(tolerance) and 0.0 <= tolerance < 0.5):
-            raise ValueError(f"tolerance must lie in [0, 0.5) steps, got {tolerance!r}")
-        return is_coincident(self, other, float(tolerance))
+        return is_coincident(self._sampling(), other._sampling(), check_tolerance(tolerance))
 
     def __repr__(self) -> str:
         """Return a representation naming the target frame and the geometry dimensions."""

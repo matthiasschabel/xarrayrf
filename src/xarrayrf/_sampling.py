@@ -1,20 +1,24 @@
-"""How each source axis of a sample-locating transform is laid out over an array's dimensions.
+"""NumPy descriptions and per-axis sampling arithmetic shared by Grid and Geometry.
 
-Shared by :class:`~xarrayrf.Geometry` queries and :func:`~xarrayrf.resample`. Only coordinate
-values are read, never pixels; one-dimensional coordinates are small, so they are read eagerly.
+Geometry supplies coordinate values lazily when a query needs them; Grid supplies frozen values.
+Neither the description nor the math needs xarray or pixels.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Literal
+from functools import cached_property
+from typing import Literal, cast
 
 import numpy as np
 import numpy.typing as npt
-import xarray as xr
-from xarray.indexes import RangeIndex
 
-from ._validation import real_float_array
+from ._frame import ReferenceFrame
+from ._transform import SupportsPoints
+
+LATTICE_TOLERANCE = 1e-6
+"""Default allowed deviation from uniform spacing, as a fraction of one step."""
 
 type Domain = Literal["samples", "cells"]
 """Where values are defined: between the outer samples, or out to the edges of their cells."""
@@ -59,26 +63,25 @@ class AxisSampling:
     step: float | None = None
 
 
-def sample_axes(array: xr.DataArray, axes: tuple[str, ...]) -> tuple[AxisSampling, ...]:
-    """Read each source axis's coordinate values, refusing multidimensional coordinate fields.
+@dataclass(frozen=True)
+class Sampling:
+    """NumPy sampling description, prepared only when a query needs coordinate values."""
 
-    Raises:
-        ValueError: If a coordinate depends on more than one dimension, or is not finite.
-    """
-    samplings = []
-    for axis in axes:
-        coordinate = array.coords[axis]
-        if coordinate.ndim > 1:
-            raise ValueError(
-                f"coordinate {axis!r} depends on {coordinate.dims}; a multidimensional coordinate "
-                "field has no per-dimension spacing or inverse lookup here",
-            )
-        values = real_float_array(np.asarray(coordinate.values), field=f"coordinate {axis!r}")
-        dim = str(coordinate.dims[0]) if coordinate.ndim == 1 else None
-        index = array.xindexes.get(axis)
-        step = float(index.step) if isinstance(index, RangeIndex) and values.size > 1 else None
-        samplings.append(AxisSampling(axis, dim, values, step))
-    return tuple(samplings)
+    transform: SupportsPoints
+    dims: tuple[str, ...]
+    sizes: Mapping[str, int]
+    _axes: tuple[AxisSampling, ...] | Callable[[], tuple[AxisSampling, ...]]
+
+    @cached_property
+    def axes(self) -> tuple[AxisSampling, ...]:
+        """Read coordinates once per prepared query, after metadata-only refusals."""
+        return self._axes() if callable(self._axes) else self._axes
+
+    @property
+    def frame(self) -> ReferenceFrame:
+        """The transform's target frame."""
+        assert isinstance(self.transform.target, ReferenceFrame)
+        return self.transform.target
 
 
 def uniform_step(values: npt.NDArray[np.float64], tolerance: float) -> float | None:
@@ -130,6 +133,8 @@ def coordinate_to_position(
     coordinates: npt.NDArray[np.float64],
     step: float | None = None,
     extent: tuple[float, float] = (0.0, 0.0),
+    *,
+    extrapolate: bool = False,
 ) -> npt.NDArray[np.float64]:
     """Invert one dimension's coordinate values: fractional positions, NaN outside.
 
@@ -143,6 +148,8 @@ def coordinate_to_position(
         ValueError: If the values are not strictly monotonic.
     """
     size = values.size
+    if size == 0:
+        raise ValueError("an empty coordinate has no positions to locate")
     before, after = extent
     if size == 1:
         tolerance = SINGLE_SAMPLE_TOLERANCE * max(1.0, abs(float(values[0])))
@@ -182,6 +189,24 @@ def coordinate_to_position(
             / (ascending[-1] - ascending[-2]),
             positions,
         )
+    if extrapolate:
+        return cast(npt.NDArray[np.float64], positions)
     lowest, highest = 0.0 - before, size - 1 + after
     outside = (positions < lowest - POSITION_SLACK) | (positions > highest + POSITION_SLACK)
     return np.where(outside, np.nan, np.clip(positions, lowest, highest))
+
+
+def position_to_coordinate(
+    values: npt.NDArray[np.float64], positions: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Interpolate positions piecewise linearly, extending by the outer steps."""
+    if values.size == 0:
+        raise ValueError("an empty coordinate has no positions to locate")
+    if values.size == 1:
+        if np.any(np.abs(positions) > POSITION_SLACK):
+            raise ValueError(
+                "a single sample has no step for fractional positions or extrapolation"
+            )
+        return np.full(positions.shape, values[0])
+    indices = np.clip(np.floor(positions), 0, values.size - 2).astype(np.intp)
+    return values[indices] + (positions - indices) * (values[indices + 1] - values[indices])
