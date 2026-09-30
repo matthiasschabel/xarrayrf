@@ -45,7 +45,20 @@ reasons. The stable documents are [the design](../design.md),
 - [index_hook_design.md](xarray-upstream/index_hook_design.md): reducing the lifecycle hook
   patches to two `Index` methods, and the cross-extension reproducers that motivate them.
 
+## napari-3783/
+
+- [transformations_wishlist_review.md](napari-3783/transformations_wishlist_review.md): the
+  model-side coverage of napari/napari#3783's transform wish list and thread requests.
+
+## castalign/
+
+- [castalign_comparison_review.md](castalign/castalign_comparison_review.md): CASTalign's
+  transforms, graph and GUI compared with xarrayrf; overlaps, model-layer problems, synergies.
+
 ## adapters/
 
 - [adapters_design.md](adapters/adapters_design.md): the shared adapter contract, frame
   identity, and the NIfTI, DICOM, OME-NGFF and GeoTIFF adapters.
+- [transform_adapters_design.md](adapters/transform_adapters_design.md): proposed adapters that
+  wrap registration results from CASTalign, ITK, ANTs and elastix as xarrayrf transforms,
+  without running an optimizer.
