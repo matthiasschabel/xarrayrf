@@ -14,7 +14,7 @@ from ome_zarr_models.v06.multiscales import Multiscale
 from ome_zarr_models.v06.scene import SceneAttrs
 
 from xarrayrf import AffineTransform, ReferenceFrame
-from xarrayrf.native import CoordinateSpec, DuckArray, Report, frame_dataarray
+from xarrayrf.native import CoordinateSpec, DuckArray, Report, _grid_and_coords, frame_array
 
 from ._export import to_multiscale_level as to_multiscale_level
 from ._export import to_transform as to_transform
@@ -77,7 +77,8 @@ def to_dataarray(level: NgffLevel, data: DuckArray) -> xr.DataArray:
     """
     if not isinstance(level, NgffLevel):
         raise TypeError(f"level must be a NgffLevel, got {type(level).__name__}")
-    return frame_dataarray(data, dims=level.dims, coords=level.coords, transform=level.transform)
+    grid, other_coords = _grid_and_coords(level.transform, level.coords)
+    return frame_array(data, grid, dims=level.dims, coords=other_coords)
 
 
 def coordinate_system(

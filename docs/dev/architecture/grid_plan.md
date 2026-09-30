@@ -29,10 +29,12 @@ the binding stays the only authority on a framed array; no valid-looking incorre
 - `coordinates`: one entry per source axis, `name -> (dim, values)` with `values` 1-D for a
   varying axis, or `name -> value` for a retained scalar (0-D), matching the binding's rule that
   bound coordinates are 0-D or 1-D and at most one per dimension. Values are copied, frozen, and
-  checked finite and of real dtype; units come from the transform's source, not from attrs.
+  checked finite and of real dtype (integers stored as int64, floats as float64; booleans
+  refused); units come from the transform's source, not from attrs.
 - `dims` (in coordinate order) and `sizes` are derived. A grid describes the geometry
-  dimensions only: no pixels, no dtype, no non-geometry dimensions (time, channel, echo).
-- `==` is exact (frame identity, transform, coordinate values, intervals); hashable.
+  dimensions only: no pixels, no pixel dtype, no non-geometry dimensions (time, channel, echo).
+- `==` is exact (frame identity, transform, coordinate values and dtype kind, intervals);
+  hashable. Integer and float declarations differ.
 
 `Geometry` stays the live, lazy view of an array; `Grid` is the immutable snapshot. They share
 one private sampling module, so neither can disagree with the other. `Geometry.grid()` returns
@@ -61,7 +63,7 @@ points equal the corresponding selection of the original's points.
 |---|---|---|
 | framed `DataArray` | `da.rf.grid` | Snapshot of the binding; property, like `rf.geometry` |
 | existing `DataArray` | `da.rf.frame(grid)` | Overload: the grid's dims must be dims of the array with equal sizes; assigns the grid's coordinate values, frames, and leaves other dims and coords untouched. The `(transform, dims=)` form stays. |
-| raw pixels (NumPy, Dask, duck array) | `xarrayrf.native.frame_array(data, grid, *, dims=None, coords=None, attrs=None)` | Public form of today's `frame_dataarray`. `dims` names every array dimension (default: the grid's); `coords` supplies non-geometry coordinates (a NIfTI time axis, channels). Never evaluates `data`. Adapters use it. |
+| raw pixels (NumPy, Dask, duck array) | `xarrayrf.native.frame_array(data, grid, *, dims=None, coords=None, attrs=None)` | Replaces `frame_dataarray` (removed). `dims` names every array dimension (default: the grid's); `coords` supplies non-geometry coordinates (a NIfTI time axis, channels). Never evaluates `data`. Adapters use it. |
 | framed source | `da.rf.resample_to(grid)`, core `resample(source, grid)` | `Grid` joins `DataArray | Geometry` as a target; non-geometry dims are carried as today |
 | xarray coordinates | `xarrayrf.native.grid_coordinates(grid) -> xr.Coordinates` | Carries the binding index, so `assign_coords` binds natively |
 
@@ -192,9 +194,11 @@ reviewed separately.
    `points_at` and extrapolating `positions_at`, `isel`/`transpose`, `is_coincident`, `grid`
    encoding. Accept: Grid and Geometry answers agree; `isel` commutes with points; nonuniform
    forward/inverse round trip including extrapolation; encode/decode round trip; refusals.
-2. Doors: `rf.grid`, `rf.frame(grid)`, `frame_array` (adapters migrated), `grid_coordinates`,
+2. **Done.** Doors: `rf.grid`, `rf.frame(grid)`, `frame_array` (adapters migrated), `grid_coordinates`,
    `resample`/`resample_to` onto a grid. Accept: every door yields the same points; a lazy 4-D
    NIfTI and a multichannel array keep their non-geometry dims and coords; pixels unread.
+   Stage 1 amendment: integer snapshots and materialized coordinates stay int64, including
+   exact JSON round trips; floating coordinates stay float64. All adapter outputs remain unchanged.
 3. Declared intervals, after the lifecycle table is approved: `Grid`, `BindingIndex`, cells
    domain, DICOM `SliceThickness`. Accept: one test per lifecycle row.
 4. Anatomy functions. Accept: an oblique volume, a single thick slice, and a sheared grid whose

@@ -26,10 +26,17 @@ interface requires a bound transform to persist only through such an encoding.
   decodes equal to the original. Metadata keeps the type distinctions the core compares.
 - Schema 1 gains the `grid` kind before freezing: `transform` uses the existing transform
   encoding, `dims` lists the dimension order (JSON key order is not relied on), and
-  `coordinates` maps names to `{"dim": ..., "values": [...]}` for varying axes or
-  `{"value": ...}` for retained scalars. No interval field is emitted in stage 1. Decoding
+  `coordinates` maps names to `{"dim": ..., "values": [...], "dtype": ...}` for varying axes or
+  `{"value": ..., "dtype": ...}` for retained scalars. No interval field is emitted in stage 1. Decoding
   checks exact coordinate fields and numeric types, then rebuilds through `Grid`; constructor
-  refusals are chained `MalformedDataError`.
+  refusals are chained `MalformedDataError`. Stage 2 requires an explicit `"dtype": "int64"`
+  or `"dtype": "float64"` on every coordinate record, including scalars and empty arrays.
+  int64 accepts only JSON integers fitting in int64; float64 accepts finite numbers, including
+  integral JSON numbers. Numeric kind survives tools rewriting `2.0` to `2`. Integer values
+  never pass through float64, including values above 2**53. Missing or unknown dtypes refuse;
+  there is no inferred kind or fallback for older records without dtype. Equality and hashing
+  include the kind, and both kinds round-trip exactly. These changes remain within provisional
+  schema 1.
 - A vocabulary stores the lexicographically smaller token of each antipodal pair.
 - User transforms implement `SupportsEncoding`: a namespaced `kind` (`"package:name"`), their own
   integer `version`, and `to_data()`. They decode only through caller-supplied `decoders`, which

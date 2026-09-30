@@ -19,7 +19,8 @@ index on only some of its coordinates (a Dataset reduction on stock xarray, `exp
 retained scalar); `rf.unframe()` clears that;
 `array.rf.reference_frame`, `array.rf.coordinate_transform`, and `array.rf.geometry_dims`
 expose the binding declaration.
-`array.rf.geometry` builds a fresh `Geometry` from the current array, and
+`array.rf.geometry` builds a fresh `Geometry` from the current array; `array.rf.grid`
+returns its immutable `Grid` snapshot (reading geometry coordinates, never pixels).
 `array.rf.unframe()` removes the binding while retaining ordinary coordinate values and
 indexes. The binding has no declaration coordinate.
 
@@ -247,13 +248,16 @@ value, exported from `xarrayrf`. It describes geometry without pixels. The trans
 `ArrayCoordinates` into a `ReferenceFrame`. Coordinates name exactly its source axes, with one
 entry `name: (dim, values)` per varying axis (1-D values), or `name: value` per retained scalar
 (0-D). At most one axis varies along each dimension. Values are copied into immutable storage,
-must have real integer or floating dtype and must be finite; units come from the source.
+must have real integer or floating dtype and must be finite; booleans are refused. Integer
+input is stored as int64 (values outside its range refuse), floating input as float64. Sampling
+math converts to float64; the declaration keeps integer values exact. Units come from the source.
 `intervals` must be `None`; any other value is refused with a message naming stage 3.
 
 `transform`, `frame`, `coordinates`, `dims` and read-only `sizes` expose the declaration. `dims`
 follows the varying coordinates' insertion order. Empty dimensions and fully scalar grids are
 valid. Equality compares the transform (including frame identity), dimension order and coordinate
-values exactly; it never uses coincidence tolerance. The representation names source axes,
+values and dtype kind exactly; integer and float coordinates declare different grids even
+when their numeric values match. Equality never uses coincidence tolerance. The representation names source axes,
 target identity, dimensions and sizes.
 
 `point_at`, `points_at`, `positions_at`, `lattice` and `is_coincident` use the same sampling
@@ -267,6 +271,30 @@ indices count from the end, as in NumPy and xarray. An integer selection retains
 as a scalar. `transpose(*dims)` names every varying dimension exactly once; with no arguments
 it reverses their order. Both return grids whose points equal the corresponding selection or
 permutation of the original points. Neither changes the coordinate transform or sample offsets.
+
+### Native grid doors
+
+`array.rf.frame(grid)` requires every grid dimension to be an array dimension with the same
+size. It assigns the grid's source coordinates and binding, retaining an existing coordinate
+when its dimensions, values and dtype kind match exactly (including its attrs). Other dimensions
+and coordinates are untouched. A `dims=` argument with a grid raises `TypeError`, even when
+`None`; the transform form still requires `dims`. Already framed arrays and arrays carrying an
+encoded binding refuse as in the transform form. Geometry coordinate attrs must still agree
+with the source's declared units.
+
+`xarrayrf.native.grid_coordinates(grid)` returns `xr.Coordinates` carrying the same binding
+index; `array.assign_coords(grid_coordinates(grid))` frames an array with matching dimensions
+and sizes. Coordinates carry `attrs={"units": unit}` when the transform's source unit is declared,
+and no units attribute otherwise. Varying integer coordinates and retained integer scalars stay
+int64. All native grid doors use this conversion and the existing binding index.
+
+`xarrayrf.native.frame_array(data, grid, *, dims=None, coords=None, attrs=None)` builds a framed
+DataArray sharing NumPy, Dask or other duck-array pixels without evaluating them. `dims` uniquely
+names every array dimension, defaulting to the grid's geometry dimensions. `coords` maps names
+to non-geometry `CoordinateSpec` declarations; redefining a grid coordinate refuses. Every
+non-geometry dimension needs a coordinate declaring its size, and the complete declared shape
+must equal `data.shape`. Geometry coordinates, dtypes and unit attrs come from the grid.
+Non-geometry coordinates along a grid dimension must have that dimension's grid size.
 
 ## Geometry queries
 
@@ -338,8 +366,11 @@ multidimensional coordinate fields are refused); and interpolates values at thos
 carrying non-geometry dimensions through. It is format-neutral and lazy.
 
 `source.rf.resample_to(target, *, transform=None, method="linear", fill_value=np.nan,
-domain="samples")` accepts a framed DataArray or `Geometry`, calls the core `resample`, and binds
+domain="samples")` accepts a `Grid`, framed DataArray or `Geometry`, calls the core `resample`, and binds
 the result to the target's coordinate transform and geometry dimensions. Target pixels are ignored.
+Core `resample(source, target, ...)` takes a source `Geometry`
+and a target `Geometry` or `Grid`; a grid produces the same values as its equivalent framed
+array geometry. Source non-geometry coordinates retain their dtypes, attrs and custom indexes.
 The result retains the source's name, ordinary attributes and non-geometry coordinates; a
 reserved `xarrayrf_binding` attribute is not carried, and `rf.frame` refuses an array that still
 has one (decode it or drop it first). `rf.unframe()` drops it as stale. The core
@@ -399,11 +430,16 @@ subclasses: `UnsupportedVersionError`, `UnknownKindError`, `MissingDecoderError`
 fixtures pass (`docs/dev/architecture/persistence_design.md`).
 
 Provisional schema 1 includes a `grid` kind with `transform`, `dims` and `coordinates`
-fields. Each coordinate is encoded as `{"dim": ..., "values": [...]}` or `{"value": ...}` for a
-scalar. `dims` fixes the dimension order, so tools that reorder JSON object keys cannot change
-it. Unknown fields at either level are refused; numbers are checked strictly, and constructor
-errors become chained `MalformedDataError`.
-Intervals are not encoded in stage 1. Schema 1 is not frozen.
+fields. Each coordinate is encoded as `{"dim": ..., "values": [...], "dtype": ...}` or
+`{"value": ..., "dtype": ...}` for a scalar. Every record requires `"dtype": "int64"` or
+`"dtype": "float64"`, including empty coordinates. `dims` fixes the dimension order, so tools
+that reorder JSON object keys cannot change it. int64 records accept only JSON integers fitting
+in int64; float64 records accept finite numbers, including integral JSON numbers. The explicit
+dtype preserves numeric kind when tools rewrite `2.0` as `2`. Integer values never pass through
+float64. Missing or unknown dtypes and unknown fields at either level are refused; numbers are
+checked strictly, and constructor errors become
+chained `MalformedDataError`.
+Intervals are not encoded in stages 1 or 2. Schema 1 is not frozen.
 
 ## Units
 
@@ -418,8 +454,8 @@ read from different formats compare equal; the core itself never relabels a unit
 
 Format adapters are optional subpackages of the xarrayrf distribution, each with an extra
 (`xarrayrf[dicom]`, `xarrayrf[nifti]`, `xarrayrf[ngff]`, `xarrayrf[geotiff]`). They share
-`xarrayrf.native.frame_dataarray` (duck-array and shape check, then `rf.frame` on the
-dimensions the transform's source axes depend on), `index_coordinate`, and the `CoordinateSpec`,
+`xarrayrf.native.frame_array` (duck-array and shape check, then framing on the imported
+`Grid`), `index_coordinate`, and the `CoordinateSpec`,
 `Report` and `DuckArray` aliases.
 `xarrayrf.anatomy` holds the
 canonical anatomical vocabulary and is dependency-free.

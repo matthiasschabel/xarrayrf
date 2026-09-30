@@ -386,3 +386,27 @@ def frozen_float_array(value: npt.ArrayLike, *, field: str) -> npt.NDArray[np.fl
     normalized = array + 0.0
     frozen = np.frombuffer(normalized.tobytes(), dtype=np.float64)
     return frozen.reshape(normalized.shape)
+
+
+def frozen_coordinate_array(
+    value: npt.ArrayLike, *, field: str
+) -> npt.NDArray[np.int64] | npt.NDArray[np.float64]:
+    """Freeze real coordinates, keeping integer values exact as int64.
+
+    Raises:
+        TypeError: If values are masked or have a non-real dtype.
+        ValueError: If values are nonfinite, not rectangular, or outside the int64 range.
+    """
+    if isinstance(value, np.ma.MaskedArray):
+        raise TypeError(f"{field} must not be a masked array")
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{field} must be a rectangular numeric array") from error
+    if array.dtype.kind in "iu":
+        if array.size and (
+            int(array.min()) < np.iinfo(np.int64).min or int(array.max()) > np.iinfo(np.int64).max
+        ):
+            raise ValueError(f"{field} integer values must fit in int64")
+        return np.frombuffer(array.astype(np.int64).tobytes(), dtype=np.int64).reshape(array.shape)
+    return frozen_float_array(array, field=field)

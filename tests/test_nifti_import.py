@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Literal, cast
 
 import dask.array as da
@@ -53,6 +54,30 @@ def test_to_dataarray_keeps_dask_pixels_lazy() -> None:
         array = to_dataarray(geometry, pixels)
     assert not tasks
     assert array.data is pixels
+
+
+@pytest.mark.parametrize(
+    "attrs", [{"units": "mm"}, {"description": "voxel"}, {"units": "1", "description": "voxel"}]
+)
+def test_to_dataarray_refuses_geometry_attrs_it_would_discard(attrs: dict[str, str]) -> None:
+    geometry = from_header(header())
+    coords = dict(geometry.coords)
+    dim, values, _ = coords["i"]
+    coords["i"] = (dim, values, attrs)
+    with pytest.raises(
+        ValueError, match="internal adapter contract: geometry coordinate 'i' attrs"
+    ):
+        to_dataarray(replace(geometry, coords=coords), np.zeros((4, 5, 6)))
+
+
+@pytest.mark.parametrize("attrs", [{}, {"units": "1"}])
+def test_to_dataarray_accepts_geometry_attrs_from_the_declaration(attrs: dict[str, str]) -> None:
+    geometry = from_header(header())
+    coords = dict(geometry.coords)
+    dim, values, _ = coords["i"]
+    coords["i"] = (dim, values, attrs)
+    array = to_dataarray(replace(geometry, coords=coords), np.zeros((4, 5, 6)))
+    assert array.coords["i"].attrs == {"units": "1"}
 
 
 @pytest.mark.parametrize("pixels", [np.zeros((4, 5, 6)).tolist(), 1])
@@ -392,3 +417,13 @@ def test_time_and_supplied_frame_errors() -> None:
     )
     with pytest.raises(ValueError, match="cannot be derived from NIfTI RAS"):
         from_header(source, frame=other_vocabulary)
+
+
+def test_to_dataarray_orders_coordinates_by_dimension() -> None:
+    four_d = header(shape=(4, 5, 6, 3))
+    four_d["pixdim"][4] = 2.0
+    four_d["xyzt_units"] = 2 | 8
+    array = to_dataarray(from_header(four_d), np.zeros((4, 5, 6, 3)))
+    assert list(array.coords) == ["i", "j", "k", "t"]
+    plane = to_dataarray(from_header(header(shape=(4, 5))), np.zeros((4, 5)))
+    assert list(plane.coords) == ["i", "j", "k"]

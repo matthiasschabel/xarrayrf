@@ -193,6 +193,8 @@ def test_geometry_grid_refuses_coordinate_fields_and_shared_dimensions() -> None
         ({"offset": ("", [1, 2])}, ValueError, "empty"),
         ({"offset": (1, [1, 2])}, TypeError, "string"),
         ({"offset": ("i", [True, False])}, TypeError, "real"),
+        ({"offset": ("i", np.ma.array([0, 1], mask=[False, True]))}, TypeError, "masked"),
+        ({"offset": ("i", [[0, 1], [2]])}, ValueError, "rectangular"),
         ({"offset": ("i", [0, np.nan])}, ValueError, "finite"),
     ],
 )
@@ -302,13 +304,13 @@ def test_grid_encoding_round_trip(operation: str) -> None:
 @pytest.mark.parametrize(
     "record",
     [
-        {"dim": "i", "values": [0, True]},
-        {"dim": "i", "values": [0, "2"]},
-        {"dim": "i", "values": [[0, 2]]},
-        {"dim": "i", "values": [0, 2], "unknown": 1},
-        {"value": True},
-        {"value": [1]},
-        {"value": 1, "dim": "i"},
+        {"dim": "i", "values": [0, True], "dtype": "int64"},
+        {"dim": "i", "values": [0, "2"], "dtype": "float64"},
+        {"dim": "i", "values": [[0, 2]], "dtype": "int64"},
+        {"dim": "i", "values": [0, 2], "dtype": "int64", "unknown": 1},
+        {"value": True, "dtype": "int64"},
+        {"value": [1], "dtype": "float64"},
+        {"value": 1, "dtype": "int64", "dim": "i"},
         {},
     ],
 )
@@ -420,3 +422,339 @@ def test_coincidence_frame_refusal_does_not_compute_chunked_coordinates() -> Non
             Geometry(array, other_mapping, dims=("i",))
         )
     assert not tasks
+
+
+@pytest.mark.parametrize("dtype", [np.int8, np.uint16, np.int64, np.float32, np.float64])
+@pytest.mark.parametrize("empty", [False, True])
+def test_coordinate_kinds_round_trip_exactly(dtype: Any, empty: bool) -> None:
+    values = np.array([] if empty else [0, 2, 4], dtype=dtype)
+    grid = Grid(transform(), {"offset": ("i", values)})
+    entry = grid.coordinates["offset"]
+    assert isinstance(entry, tuple)
+    expected_dtype = np.int64 if values.dtype.kind in "iu" else np.float64
+    assert np.asarray(entry[1]).dtype == expected_dtype
+    with pytest.raises(ValueError):
+        np.asarray(entry[1]).flags.writeable = True
+    encoded = json.loads(json.dumps(encode(grid)))
+    result = decode(encoded)
+    assert result == grid
+    assert hash(result) == hash(grid)
+    if not empty:
+        scalar = grid.isel(i=1)
+        assert type(scalar.coordinates["offset"]) is (int if expected_dtype is np.int64 else float)
+        assert decode(json.loads(json.dumps(encode(scalar)))) == scalar
+
+
+def test_integer_coordinates_above_float_precision_stay_exact() -> None:
+    values = np.array([2**53 + 1, 2**53 + 3], dtype=np.int64)
+    grid = Grid(transform(), {"offset": ("i", values)})
+    encoded = encode(grid)
+    assert encoded["value"]["coordinates"]["offset"]["values"] == values.tolist()
+    assert decode(json.loads(json.dumps(encoded))) == grid
+    assert grid != Grid(grid.transform, {"offset": ("i", values.astype(np.float64))})
+    floating = Grid(grid.transform, {"offset": ("i", [0.0, 2.0])})
+    integer = Grid(grid.transform, {"offset": ("i", [0, 2])})
+    assert integer != floating
+    assert len({integer, floating}) == 2
+
+
+def test_grid_integer_overflow_is_refused() -> None:
+    with pytest.raises(ValueError, match="fit in int64"):
+        Grid(transform(), {"offset": ("i", np.array([2**63], dtype=np.uint64))})
+    encoded = encode(Grid(transform(), {"offset": ("i", [0, 2])}))
+    encoded["value"]["coordinates"]["offset"]["values"] = [2**63]
+    with pytest.raises(MalformedDataError, match="fit in int64"):
+        decode(encoded)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"dim": "i", "values": [0.0], "dtype": "int64"},
+        {"dim": "i", "values": [2**63], "dtype": "int64"},
+        {"dim": "i", "values": [-(2**63) - 1], "dtype": "int64"},
+        {"dim": "i", "values": [], "dtype": "int32"},
+        {"dim": "i", "values": []},
+        {"value": 0.0, "dtype": "int64"},
+        {"value": 2**63, "dtype": "int64"},
+        {"value": 0, "dtype": "int32"},
+        {"value": 0},
+        {"value": float("inf"), "dtype": "float64"},
+        {"dim": "i", "values": [float("nan")], "dtype": "float64"},
+        {"value": 10**400, "dtype": "float64"},
+    ],
+)
+def test_coordinate_dtype_metadata_is_required_and_validated(record: dict[str, Any]) -> None:
+    encoded = encode(Grid(transform(), {"offset": ("i", [])}))
+    encoded["value"]["coordinates"]["offset"] = record
+    with pytest.raises(MalformedDataError):
+        decode(encoded)
+
+
+@pytest.mark.parametrize("scalar", [False, True])
+def test_float_grid_survives_integral_json_number_rewriting(scalar: bool) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0.0, 2.0])})
+    if scalar:
+        grid = grid.isel(i=0)
+    encoded = encode(grid)
+    assert encoded["value"]["coordinates"]["offset"]["dtype"] == "float64"
+    rewritten = json.dumps(encoded).replace("0.0", "0").replace("2.0", "2")
+    result = decode(json.loads(rewritten))
+    assert result == grid
+    assert hash(result) == hash(grid)
+
+
+@pytest.mark.parametrize("selection", ["full", "retained", "scalar", "empty", "transposed"])
+def test_every_grid_door_has_the_same_sampling(selection: str) -> None:
+    from xarrayrf.native import frame_array, grid_coordinates
+
+    grid = Grid(transform(("u", "v")), {"u": ("i", [0, 2, 5]), "v": ("j", [1.0, 3.0])})
+    if selection == "retained":
+        grid = grid.isel(i=1)
+    elif selection == "scalar":
+        grid = grid.isel(i=1, j=0)
+    elif selection == "empty":
+        grid = grid.isel(i=slice(0, 0))
+    elif selection == "transposed":
+        grid = grid.transpose()
+    data = np.zeros(tuple(grid.sizes.values()))
+    plain = xr.DataArray(data, dims=grid.dims)
+    arrays = [
+        frame_array(data, grid),
+        plain.rf.frame(grid),
+        plain.assign_coords(grid_coordinates(grid)),
+    ]
+    for array in arrays:
+        assert array.data is data
+        assert array.rf.grid == grid
+        assert_allclose(array.rf.geometry.points(), grid.points(), atol=ATOL, rtol=0)
+        assert array.rf.coordinate_transform == grid.transform
+        assert array.rf.geometry_dims == grid.dims
+
+
+def test_integer_binding_snapshot_materializes_dtype_units_and_existing_attrs() -> None:
+    from xarrayrf.native import frame_array, index_coordinate
+
+    mapping = transform(("i",)).with_endpoints(source=ArrayCoordinates(("i",), ("1",)))
+    coord = index_coordinate("i", 3, start=2**53 + 1)
+    original = xr.DataArray(np.zeros(3), dims="i", coords={"i": coord}).rf.frame(
+        mapping, dims=("i",)
+    )
+    snapshot = original.rf.grid
+    restored = frame_array(original.data, snapshot)
+    assert restored.rf.grid == snapshot
+    assert restored.coords["i"].dtype == np.int64
+    np.testing.assert_array_equal(restored.coords["i"], original.coords["i"])
+    assert restored.coords["i"].attrs == {"units": "1"}
+    plain = original.rf.unframe()
+    plain.coords["i"].attrs["description"] = "sample labels"
+    reframed = plain.rf.frame(snapshot)
+    assert reframed.coords["i"].variable.identical(plain.coords["i"].variable)
+    assert reframed.rf.grid == snapshot
+
+
+@pytest.mark.parametrize("existing", [[9, 10, 11], [0.0, 2.0, 5.0]])
+def test_grid_frame_replaces_different_values_or_dtype_kind(existing: list[float]) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 2, 5])})
+    plain = xr.DataArray(np.zeros(3), dims="i", coords={"offset": ("i", existing)})
+    plain.coords["offset"].attrs["description"] = "old labels"
+    result = plain.rf.frame(grid)
+    assert result.rf.grid == grid
+    assert result.coords["offset"].dtype == np.int64
+    assert result.coords["offset"].attrs == {"units": "mm"}
+
+
+@pytest.mark.parametrize("multichannel", [False, True])
+def test_grid_doors_keep_lazy_nongeometry_dimensions_and_coordinates(multichannel: bool) -> None:
+    from xarrayrf.native import CoordinateSpec, frame_array, grid_coordinates
+
+    axes = ("y", "x") if multichannel else ("i", "j", "k")
+    grid = Grid(transform(axes), {axis: (axis, np.arange(3)) for axis in axes})
+    context_dim = "channel" if multichannel else "time"
+    dims = (context_dim, *axes) if multichannel else (*axes, context_dim)
+    other_coords: dict[str, CoordinateSpec] = {
+        context_dim: (context_dim, np.array([0.25, 0.75]), {"units": "s"}),
+        "context": ((), 7, {"description": "retained context"}),
+    }
+    shape = tuple(3 if dim in axes else 2 for dim in dims)
+    data = da.zeros(shape, chunks=1)
+    plain = xr.DataArray(data, dims=dims, coords=other_coords, attrs={"description": "pixels"})
+    tasks: list[object] = []
+    with Callback(pretask=lambda key, *args: tasks.append(key)):  # type: ignore[no-untyped-call]
+        arrays = [
+            frame_array(data, grid, dims=dims, coords=other_coords, attrs=plain.attrs),
+            plain.rf.frame(grid),
+            plain.assign_coords(grid_coordinates(grid)),
+        ]
+        for array in arrays:
+            assert array.data is data
+            assert array.dims == dims
+            assert array.rf.grid == grid
+            assert array.attrs == plain.attrs
+            for name in other_coords:
+                xr.testing.assert_identical(array.coords[name], plain.coords[name])
+        assert not tasks
+
+
+def test_undeclared_grid_units_do_not_create_coordinate_attrs() -> None:
+    from xarrayrf.native import frame_array, grid_coordinates
+
+    mapping = transform().with_endpoints(source=ArrayCoordinates(("offset",), (None,)))
+    grid = Grid(mapping, {"offset": ("i", [0, 1])})
+    assert grid_coordinates(grid)["offset"].attrs == {}
+    assert frame_array(np.zeros(2), grid).coords["offset"].attrs == {}
+
+
+@pytest.mark.parametrize("nonuniform", [False, True])
+@pytest.mark.parametrize("method", ["nearest", "linear", "cubic"])
+def test_resampling_to_grid_equals_framed_array_target(nonuniform: bool, method: Any) -> None:
+    from xarrayrf import resample
+    from xarrayrf.native import frame_array
+
+    mapping = transform(("y", "x"))
+    source_grid = Grid(
+        mapping,
+        {"y": ("y", [0, 2, 5, 9] if nonuniform else [0, 2, 4, 6]), "x": ("x", [0, 1, 2, 3])},
+    )
+    source = frame_array(
+        np.arange(32).reshape(2, 4, 4),
+        source_grid,
+        dims=("channel", "y", "x"),
+        coords={"channel": ("channel", np.array([2, 4]), {"description": "channels"})},
+        attrs={"description": "source"},
+    )
+    source.name = "signal"
+    target_grid = Grid(
+        mapping, {"y": ("row", [1.0, 3.0, 5.0]), "x": ("col", [0.5, 1.5])}
+    ).transpose()
+    target = frame_array(np.zeros((2, 3)), target_grid)
+    by_grid = source.rf.resample_to(target_grid, method=method)
+    by_array = source.rf.resample_to(target, method=method)
+    xr.testing.assert_identical(by_grid, by_array)
+    assert by_grid.rf.grid == target_grid
+    xr.testing.assert_identical(by_grid.coords["channel"], source.coords["channel"])
+    core_grid = resample(source.rf.geometry, target_grid, method=method, block_points=3)
+    core_array = resample(source.rf.geometry, target.rf.geometry, method=method, block_points=3)
+    xr.testing.assert_identical(core_grid, core_array)
+    assert not core_grid.rf.is_framed
+
+
+@pytest.mark.parametrize("dims", [("i",), None])
+def test_grid_frame_refuses_dims_argument(dims: Any) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 1])})
+    with pytest.raises(TypeError, match="dims must not be supplied"):
+        xr.DataArray(np.zeros(2), dims="i").rf.frame(grid, dims=dims)
+
+
+@pytest.mark.parametrize("dims,shape", [("j", (2,)), ("i", (3,))])
+def test_grid_frame_refuses_missing_or_wrong_sized_dimensions(dims: str, shape: tuple[int]) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 1])})
+    with pytest.raises(ValueError, match="must be an array dimension of size"):
+        xr.DataArray(np.zeros(shape), dims=dims).rf.frame(grid)
+
+
+def test_grid_frame_refuses_existing_or_encoded_binding() -> None:
+    from xarrayrf.native import frame_array
+
+    grid = Grid(transform(), {"offset": ("i", [0, 1])})
+    array = frame_array(np.zeros(2), grid)
+    with pytest.raises(ValueError, match="already framed"):
+        array.rf.frame(grid)
+    with pytest.raises(ValueError, match="encoded binding"):
+        array.rf.encode().rf.frame(grid)
+    with pytest.raises(ValueError, match="encoded binding"):
+        frame_array(np.zeros(2), grid, attrs={"xarrayrf_binding": "stale"})
+
+
+@pytest.mark.parametrize(
+    "kwargs,error,match",
+    [
+        ({"coords": {"offset": ("i", np.array([0, 1]), {})}}, ValueError, "redefine grid"),
+        ({"coords": []}, TypeError, "coords must be a mapping"),
+        ({"dims": ("j",)}, ValueError, "include grid dimensions"),
+        ({"dims": ("i", "time")}, ValueError, "no coordinate declares"),
+        ({"dims": ("i", "i")}, ValueError, "must be unique"),
+        ({"dims": "i"}, TypeError, "sequence"),
+    ],
+)
+def test_frame_array_refusals(kwargs: dict[str, Any], error: type[Exception], match: str) -> None:
+    from xarrayrf.native import frame_array
+
+    grid = Grid(transform(), {"offset": ("i", [0, 1])})
+    with pytest.raises(error, match=match):
+        frame_array(np.zeros(2), grid, **kwargs)
+
+
+def test_frame_array_refuses_pixel_shape_mismatch() -> None:
+    from xarrayrf.native import frame_array
+
+    grid = Grid(transform(), {"offset": ("i", [0, 1])})
+    with pytest.raises(ValueError, match=r"data shape.*geometry shape"):
+        frame_array(np.zeros(3), grid)
+
+
+def test_frame_array_refuses_wrong_sized_nongeometry_coordinate_on_grid_dim() -> None:
+    from xarrayrf.native import frame_array
+
+    grid = Grid(transform(), {"offset": ("i", [0, 1])})
+    with pytest.raises(
+        ValueError, match="coordinate 'label' along grid dimension 'i' has length 3; expected 2"
+    ):
+        frame_array(np.zeros(2), grid, coords={"label": ("i", np.arange(3), {})})
+
+
+def test_grid_coordinates_requires_grid() -> None:
+    from xarrayrf.native import frame_array, grid_coordinates
+
+    for call in (lambda: grid_coordinates(3), lambda: frame_array(np.zeros(2), 3)):  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="grid must be a Grid"):
+            call()
+
+
+def test_resampling_to_grid_keeps_pixels_lazy_and_context_coords_exact() -> None:
+    from xarrayrf.native import frame_array
+
+    grid = Grid(transform(), {"offset": ("i", [0, 2, 4, 6])})
+    source = frame_array(
+        da.zeros((4, 2), chunks=(2, 1)),
+        grid,
+        dims=("i", "time"),
+        coords={"time": ("time", np.array([0.25, 0.75]), {"units": "s"})},
+    )
+    target_grid = Grid(grid.transform, {"offset": ("j", [1.0, 3.0, 5.0])})
+    target = frame_array(da.zeros(3, chunks=1), target_grid)
+    tasks: list[object] = []
+    with Callback(pretask=lambda key, *args: tasks.append(key)):  # type: ignore[no-untyped-call]
+        result = source.rf.resample_to(target_grid)
+        equivalent = source.rf.resample_to(target)
+        assert isinstance(result.data, da.Array)
+        assert result.rf.grid == target_grid
+        xr.testing.assert_identical(result.coords["time"], source.coords["time"])
+        assert not tasks
+    xr.testing.assert_identical(result.compute(), equivalent.compute())
+
+
+def test_grid_property_refuses_unframed_array() -> None:
+    import xarrayrf.native  # noqa: F401
+
+    with pytest.raises(ValueError, match="array is unframed"):
+        _ = xr.DataArray(np.zeros(2), dims="i").rf.grid
+
+
+def test_grid_frame_preserves_retained_scalar_attrs() -> None:
+    from xarrayrf.native import frame_array
+
+    grid = Grid(transform(("u", "v")), {"u": ("i", [0, 2]), "v": 3})
+    plain = frame_array(np.zeros(2), grid).rf.unframe()
+    plain.coords["v"].attrs["description"] = "selected slice"
+    result = plain.rf.frame(grid)
+    assert result.coords["v"].variable.identical(plain.coords["v"].variable)
+    assert result.rf.grid == grid
+
+
+def test_grid_frame_validates_units_on_preserved_coordinates() -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 2])})
+    plain = xr.DataArray(np.zeros(2), dims="i", coords=dict(grid.coordinates))
+    plain.coords["offset"].attrs["units"] = "m"
+    with pytest.raises(ValueError, match="declares"):
+        plain.rf.frame(grid)

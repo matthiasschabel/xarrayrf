@@ -53,8 +53,11 @@ view; the binding adds snapshot, association and enforcement, which the view nev
 
 ### Grid is a frozen sampling value
 
-Stage 1 of [the grid plan](grid_plan.md) is implemented. `Grid(transform, coordinates,
-intervals=None)` copies finite real 0-D/1-D coordinates into immutable NumPy buffers. It has
+Stages 1 and 2 of [the grid plan](grid_plan.md) are implemented. `Grid(transform, coordinates,
+intervals=None)` copies finite real 0-D/1-D coordinates into immutable NumPy buffers:
+integer inputs become int64 without passing through float, floating inputs become float64.
+Out-of-range integers refuse. Equality and hashing include the coordinate dtype kind; sampling
+math uses float64, so integer declarations stay exact without changing interpolation. It has
 no pixels, non-geometry dimensions, binding path or xarray dependency. Equality and hashing
 compare the exact declaration, including dimension order; `is_coincident` is the separate
 step-tolerant query. `isel` selects coordinate values (retaining integer selections as scalars),
@@ -68,7 +71,8 @@ snapshotting necessarily evaluates the coordinate values. Geometry construction,
 The private NumPy sampling description carries transform, dims, sizes, source coordinate values
 and exact index steps when available; offsets come from the source. Geometry supplies coordinate
 values only when a query needs them. The positions, lattice and coincidence math consumes this
-description, shared by Grid and Geometry; resampling continues to accept its existing targets.
+description, shared by Grid and Geometry. Resampling accepts Grid targets directly through
+this description, without constructing dummy pixels or a target array.
 
 `points_at(positions, domain="samples", outside="raise")` maps fractional positions piecewise
 linearly and reads retained scalars from the sampling description. It and `positions_at` accept
@@ -77,7 +81,26 @@ The existing `"raise"` and `"nan"` policies enforce the chosen samples/cells dom
 has no step for forward fractional extrapolation; inverse lookup still admits only its coordinate.
 Retained scalars still refuse inverse lookup and coincidence pending a projection policy.
 
-Grid doors, intervals, anatomy and adapter identity changes remain later stages.
+### Grid doors share the native binding
+
+`rf.grid` delegates to `Geometry.grid()`; it reads geometry coordinate buffers with their
+original dtype before constructing the frozen value. `rf.frame(grid)` checks geometry dimensions
+and sizes, then uses `native.grid_coordinates(grid)`. Matching existing coordinates keep their
+attrs; differing values or dtype kinds are replaced by the grid's coordinates with declared
+source units. Geometry validation still checks preserved coordinate attrs against the transform.
+`dims=` refuses with a grid. Non-geometry dimensions and coordinates stay untouched.
+
+`native.frame_array(data, grid, dims=None, coords=None, attrs=None)` validates duck storage and
+the shape declared by geometry and non-geometry coordinates, then frames through the accessor.
+It never evaluates pixels. The four format adapters construct a Grid from their existing
+geometry coordinates and pass non-geometry coordinates separately; their output declarations
+remain the same. `frame_dataarray` is removed.
+
+`native.grid_coordinates(grid)` builds 0-D/1-D variables with declared source unit attrs and
+uses the same private BindingIndex factory as transform framing. Assigning these coordinates
+to an array with matching dimensions and sizes is the native xarray framing door.
+
+Intervals, anatomy and adapter identity changes remain later stages.
 
 ### Sample offsets and cells
 
@@ -168,9 +191,12 @@ half-sample shift or a coefficient off by `5e-10` over a large range takes the i
 ### `rf.resample_to` and `rf.assume_frame`
 
 `source.rf.resample_to(target, *, transform=None, method="linear", fill_value=np.nan,
-domain="samples")` takes a framed DataArray or a `Geometry` (target values are ignored), calls
-core `resample` unchanged, and frames the result with the target's coordinate transform and
-geometry dims. The result keeps the source's non-geometry dims and coords, name and attributes
+domain="samples")` takes a Grid, framed DataArray or Geometry (target values are ignored), calls
+core `resample`, and frames the result with the target's coordinate transform and
+geometry dims. Core resampling takes Geometry or Grid targets, using their shared sampling
+math and restoring the source's non-geometry coordinate variables, including attrs that xarray
+would otherwise drop. Grid targets have the same values as equivalent framed-array targets.
+The result keeps the source's non-geometry dims and coords, name and attributes
 (restored explicitly because core `resample` drops attrs); the reserved `xarrayrf_binding`
 attribute is not carried. Unframed source or target raise `ValueError`; other target types raise
 `TypeError`. It was motivated by a round trip between a DICOM reader's index `(k, j, i)` array

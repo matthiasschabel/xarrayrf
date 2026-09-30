@@ -14,7 +14,21 @@ from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
 from ._frame import ReferenceFrame
 from ._geometry import check_coordinate_unit
+from ._grid import Grid
 from ._transform import SupportsPoints
+
+
+def grid_variables(grid: Grid) -> dict[str, xr.Variable]:
+    """Materialize a Grid's coordinate declarations with their source units."""
+    units = dict(zip(grid.transform.source.axes, grid.transform.source.units, strict=True))
+    return {
+        name: xr.Variable(
+            entry[0] if isinstance(entry, tuple) else (),
+            entry[1] if isinstance(entry, tuple) else entry,
+            attrs={"units": units[name]} if units[name] is not None else {},
+        )
+        for name, entry in grid.coordinates.items()
+    }
 
 
 class BindingIndex(xr.Index):

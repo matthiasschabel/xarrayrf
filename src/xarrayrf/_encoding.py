@@ -159,9 +159,13 @@ def _encode(value: object) -> dict[str, Any]:
             "transform": _encode(value.transform),
             "dims": list(value.dims),
             "coordinates": {
-                name: {"dim": entry[0], "values": np.asarray(entry[1]).tolist()}
+                name: {
+                    "dim": entry[0],
+                    "values": np.asarray(entry[1]).tolist(),
+                    "dtype": str(np.asarray(entry[1]).dtype),
+                }
                 if isinstance(entry, tuple)
-                else {"value": entry}
+                else {"value": entry, "dtype": "int64" if isinstance(entry, int) else "float64"}
                 for name, entry in value.coordinates.items()
             },
         }
@@ -426,14 +430,32 @@ class _Decoder:
         for name, data in _mapping(fields["coordinates"], "grid coordinates").items():
             record = _mapping(data, f"grid coordinate {name!r}")
             if "value" in record:
-                self._expect("scalar coordinate", record, {"value"})
-                value = record["value"]
-                if isinstance(value, bool) or not isinstance(value, int | float):
-                    raise MalformedDataError(f"coordinate {name!r} value must be a number")
-                coordinates[name] = value
+                self._expect("scalar coordinate", record, {"value", "dtype"})
+                values = [record["value"]]
             else:
-                self._expect("varying coordinate", record, {"dim", "values"})
-                coordinates[name] = (record["dim"], self._numbers(record["values"], "values"))
+                self._expect("varying coordinate", record, {"dim", "values", "dtype"})
+                values = self._list(record["values"], "values")
+            dtype = record["dtype"]
+            if dtype not in ("int64", "float64"):
+                raise MalformedDataError("coordinate dtype must be int64 or float64")
+            for value in values:
+                if isinstance(value, bool) or not isinstance(value, int | float):
+                    raise MalformedDataError(f"coordinate {name!r} values must be numbers")
+                if dtype == "int64":
+                    if not isinstance(value, int):
+                        raise MalformedDataError("int64 coordinate values must be integers")
+                    if not -(2**63) <= value < 2**63:
+                        raise MalformedDataError("integer coordinate values must fit in int64")
+            try:
+                decoded_values = np.asarray(values, dtype=dtype)
+            except OverflowError as error:
+                raise MalformedDataError("float64 coordinate values must be finite") from error
+            if not np.all(np.isfinite(decoded_values)):
+                raise MalformedDataError("coordinate values must be finite")
+            if "value" in record:
+                coordinates[name] = decoded_values[0].item()
+            else:
+                coordinates[name] = (record["dim"], decoded_values)
         dims = self._list(fields["dims"], "grid dims")
         varying = {
             entry[0]: name for name, entry in coordinates.items() if isinstance(entry, tuple)

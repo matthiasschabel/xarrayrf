@@ -423,10 +423,14 @@ class Geometry:
         Raises:
             ValueError: If a coordinate is multidimensional or dimensions share source axes.
         """
-        sampling = self._sampling()
+        dependencies = self._dependencies()
+        if any(len(dims) > 1 for dims in dependencies.values()):
+            raise ValueError("multidimensional coordinates cannot be snapshotted as a Grid")
         coordinates = {
-            axis.axis: float(axis.values) if axis.dim is None else (axis.dim, axis.values)
-            for axis in sampling.axes
+            name: (dims[0], self._array.coords[name].data)
+            if dims
+            else self._array.coords[name].data
+            for name, dims in dependencies.items()
         }
         return Grid(self._transform, coordinates).transpose(*self._dims)
 

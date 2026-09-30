@@ -29,7 +29,7 @@ coordinate systems and transform graphs), and GeoTIFF (projected rasters with a 
   `ArrayCoordinates` to the frame, the `frame`, and a `report` of `(code, message)` entries for
   every normalization, loss and assumed default.
 - **Framing.** `to_dataarray(geometry, data)` checks a duck array's type and shape, builds the
-  `DataArray` and calls `array.rf.frame` (shared helper `xarrayrf.native.frame_dataarray`). Lists
+  `DataArray` and calls `array.rf.frame` (shared helper `xarrayrf.native.frame_array`). Lists
   and scalars are refused; dask stays lazy.
 - **Readers.** One `open` per adapter, lazy by default like `xr.open_dataset`, returning exactly
   one framed `DataArray`. Each composes the metadata function and `to_dataarray`; no reader adds

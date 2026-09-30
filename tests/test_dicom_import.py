@@ -418,3 +418,14 @@ def test_enhanced_public_validation() -> None:
 def test_public_input_errors(call: object, error: type[Exception], message: str) -> None:
     with pytest.raises(error, match=message):
         call()  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    ("offsets", "expected"),
+    [((0.0, 2.0, 4.0), ["k", "j", "i"]), ((0.0, 2.0, 5.0), ["slice_offset", "j", "i"])],
+)
+def test_to_dataarray_orders_coordinates_by_dimension(
+    offsets: tuple[float, ...], expected: list[str]
+) -> None:
+    geometry = from_datasets([image(offset) for offset in offsets])
+    assert list(to_dataarray(geometry, np.zeros((3, 4, 5))).coords) == expected

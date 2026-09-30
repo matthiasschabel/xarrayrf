@@ -12,7 +12,14 @@ import rasterio  # type: ignore[import-untyped]
 import xarray as xr
 
 from xarrayrf import AffineTransform, ArrayCoordinates, CoordinateSystem, ReferenceFrame
-from xarrayrf.native import CoordinateSpec, DuckArray, Report, frame_dataarray, index_coordinate
+from xarrayrf.native import (
+    CoordinateSpec,
+    DuckArray,
+    Report,
+    _grid_and_coords,
+    frame_array,
+    index_coordinate,
+)
 
 from ._reader import open as open
 
@@ -184,11 +191,12 @@ def to_dataarray(geometry: GeoTiffGeometry, data: DuckArray) -> xr.DataArray:
     """
     if not isinstance(geometry, GeoTiffGeometry):
         raise TypeError(f"geometry must be a GeoTiffGeometry, got {type(geometry).__name__}")
-    return frame_dataarray(
+    grid, other_coords = _grid_and_coords(geometry.transform, geometry.coords)
+    return frame_array(
         data,
+        grid,
         dims=geometry.dims,
-        coords=geometry.coords,
-        transform=geometry.transform,
+        coords=other_coords,
         attrs={"nodata": geometry.nodata},
     )
 

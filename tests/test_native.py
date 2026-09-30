@@ -56,12 +56,13 @@ def pixel_tasks() -> Iterator[list[object]]:
 def test_import_registers_accessor_only_in_native_module() -> None:
     # Registration is tested in a fresh interpreter by the import-boundary suite.
     assert hasattr(xr.DataArray(np.ones(1)), "rf")
-    # native exports only the adapter-support helpers, never a second binding API.
+    # Native framing helpers share the accessor binding path.
     assert set(xarrayrf.native.__all__) == {
         "CoordinateSpec",
         "DuckArray",
         "Report",
-        "frame_dataarray",
+        "frame_array",
+        "grid_coordinates",
         "index_coordinate",
     }
     assert not hasattr(xarrayrf.native, "bind")
@@ -1004,7 +1005,7 @@ def test_incompatible_bindings_say_why(framed: xr.DataArray, transform: AffineTr
         _ = framed + regridded
 
 
-def test_frame_dataarray_keeps_array_api_storage_and_refuses_lists(
+def test_frame_array_keeps_array_api_storage_and_refuses_lists(
     transform: AffineTransform,
 ) -> None:
     class Namespaced:
@@ -1030,13 +1031,35 @@ def test_frame_dataarray_keeps_array_api_storage_and_refuses_lists(
         "y": xarrayrf.native.index_coordinate("y", 3),
         "x": xarrayrf.native.index_coordinate("x", 4),
     }
+    grid = xarrayrf.Grid(transform, {name: (name, spec[1]) for name, spec in coords.items()})
     storage = Namespaced(np.arange(12.0).reshape(3, 4))
-    framed = xarrayrf.native.frame_dataarray(
-        storage, dims=("y", "x"), coords=coords, transform=transform
-    )
+    framed = xarrayrf.native.frame_array(storage, grid)
     assert framed.data is storage  # accepted as is, no eager conversion
     assert framed.rf.geometry_dims == ("y", "x")
     with pytest.raises(TypeError, match="duck array, got list"):
-        xarrayrf.native.frame_dataarray(
-            [[0.0] * 4] * 3, dims=("y", "x"), coords=coords, transform=transform
-        )
+        xarrayrf.native.frame_array([[0.0] * 4] * 3, grid)
+
+
+def test_core_grid_resampling_does_not_register_accessor() -> None:
+    import subprocess
+    import sys
+
+    script = """
+import numpy as np
+import xarray as xr
+import xarrayrf as xrf
+frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x",), ("mm",)))
+transform = xrf.AffineTransform(
+    source=xrf.ArrayCoordinates(("i",), ("1",)), target=frame,
+    matrix=((2.0,),), translation=(0.0,),
+)
+grid = xrf.Grid(transform, {"i": ("i", [0, 1, 2])})
+array = xr.DataArray(np.zeros(3), dims="i", coords=dict(grid.coordinates))
+source = xrf.Geometry(array, transform, dims=("i",))
+result = xrf.resample(source, grid)
+assert not hasattr(result, "rf")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr

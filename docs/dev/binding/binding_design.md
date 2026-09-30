@@ -43,7 +43,7 @@ transform's source axes and holds the transform and the geometry dimensions itse
 The accessor is registered by importing `xarrayrf.native` (not `xarrayrf`), on DataArray only:
 `is_framed`, `reference_frame`, `coordinate_transform`, `geometry_dims`, `geometry`,
 `frame`, `unframe`, `encode`, `decode`, `resample_to`, `assume_frame`. Adapters build bound
-arrays through `frame_dataarray` in `xarrayrf.native`.
+arrays through `frame_array` in `xarrayrf.native`.
 
 ### Invariants enforced in code
 

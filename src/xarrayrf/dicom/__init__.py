@@ -26,8 +26,9 @@ from xarrayrf.native import (
     CoordinateSpec,
     DuckArray,
     Report,
+    _grid_and_coords,
     _require_duck_array,
-    frame_dataarray,
+    frame_array,
     index_coordinate,
 )
 
@@ -98,9 +99,8 @@ def to_dataarray(geometry: DicomGeometry, data: DuckArray) -> xr.DataArray:
         sorted_data = data[first : first + len(geometry.order), :, :]
     else:
         sorted_data = cast(Any, data)[list(geometry.order), :, :]
-    return frame_dataarray(
-        sorted_data, dims=geometry.dims, coords=geometry.coords, transform=geometry.transform
-    )
+    grid, other_coords = _grid_and_coords(geometry.transform, geometry.coords)
+    return frame_array(sorted_data, grid, dims=geometry.dims, coords=other_coords)
 
 
 @dataclass(frozen=True)

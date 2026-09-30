@@ -8,6 +8,7 @@ import numpy.typing as npt
 import pytest
 import xarray as xr
 from numpy.testing import assert_allclose, assert_array_equal
+from xarray.indexes import RangeIndex
 
 import xarrayrf as xrf
 
@@ -313,7 +314,7 @@ def test_arguments_are_validated(
 
 
 def test_arguments_must_be_geometries() -> None:
-    with pytest.raises(TypeError, match="must be Geometry objects"):
+    with pytest.raises(TypeError, match="source must be Geometry"):
         xrf.resample(volume(ramp()).array, volume(ramp()))  # type: ignore[arg-type]
 
 
@@ -657,3 +658,32 @@ def test_a_transform_applies_only_to_the_frames_it_was_computed_between() -> Non
     )
     with pytest.raises(ValueError, match="same frames, different coordinate systems"):
         xrf.resample(source, target, transform=in_ras)
+
+
+def test_geometry_target_keeps_nongeometry_coordinate_attrs() -> None:
+    source = volume(
+        np.stack([ramp(), ramp()]),
+        extra={
+            "echo": ("echo", [0, 1], {"description": "echo labels"}),
+            "delay": ("echo", [0.25, 0.75], {"units": "s"}),
+            "context": ((), 7, {"description": "scan"}),
+        },
+    )
+    target = volume(np.zeros((2, 3, 4)))
+    result = xrf.resample(source, target)
+    for name in ("echo", "delay", "context"):
+        xr.testing.assert_identical(result.coords[name], source.array.coords[name])
+
+
+@pytest.mark.parametrize("target_kind", ["geometry", "grid"])
+def test_resampling_keeps_nongeometry_custom_index(target_kind: str) -> None:
+    source = volume(np.stack([ramp(), ramp()]))
+    index = RangeIndex.arange(2, dim="echo")
+    array = source.array.assign_coords(xr.Coordinates.from_xindex(index))
+    array.coords["echo"].attrs["description"] = "echo labels"
+    source = xrf.Geometry(array, source.transform, dims=source.dims)
+    target = volume(np.zeros((2, 3, 4)))
+    result = xrf.resample(source, target.grid() if target_kind == "grid" else target)
+    assert isinstance(result.xindexes["echo"], RangeIndex)
+    assert result.xindexes["echo"].equals(index)
+    xr.testing.assert_identical(result.coords["echo"], source.array.coords["echo"])

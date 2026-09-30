@@ -14,8 +14,10 @@ import numpy.typing as npt
 import xarray as xr
 
 from ._affine import equilibrated_inverse
+from ._binding import grid_variables
 from ._frame import ReferenceFrame
 from ._geometry import Geometry
+from ._grid import Grid
 from ._orientation import coordinate_system_change
 from ._positions import extents, lattice_parts, locator, sample_columns
 from ._sampling import LATTICE_TOLERANCE, POSITION_SLACK, Domain
@@ -161,7 +163,7 @@ def _crop_window(
 
 def _lattice_map(
     source: Geometry,
-    target: Geometry,
+    target: Geometry | Grid,
     target_dims: tuple[str, ...],
     frame_map: SupportsPoints | None,
     extents: list[tuple[float, float]],
@@ -207,7 +209,7 @@ def _lattice_map(
 
 def _general_map(
     source: Geometry,
-    target: Geometry,
+    target: Geometry | Grid,
     target_dims: tuple[str, ...],
     frame_map: SupportsPoints | None,
     domain: Domain,
@@ -299,7 +301,7 @@ class _Plan:
 
 def _plan(
     source: Geometry,
-    target: Geometry,
+    target: Geometry | Grid,
     *,
     transform: SupportsPoints | None,
     method: Method,
@@ -313,15 +315,19 @@ def _plan(
     except ImportError as error:  # pragma: no cover - exercised only without the extra
         raise ImportError("resample needs scipy; install xarrayrf[resample]") from error
 
-    if not isinstance(source, Geometry) or not isinstance(target, Geometry):
-        raise TypeError("source and target must be Geometry objects")
+    if not isinstance(source, Geometry) or not isinstance(target, Geometry | Grid):
+        raise TypeError("source must be Geometry and target must be Geometry or Grid")
     if method not in _SPLINE_ORDER:
         raise ValueError(f"method must be one of {tuple(_SPLINE_ORDER)}, got {method!r}")
     if isinstance(block_points, bool) or not isinstance(block_points, int) or block_points < 1:
         raise ValueError(f"block_points must be a positive integer, got {block_points!r}")
     order = _SPLINE_ORDER[method]
     frame_map = _frame_map(target.frame, source.frame, transform)
-    target_dims = tuple(str(dim) for dim in target.array.dims if dim in target.dims)
+    target_dims = (
+        target.dims
+        if isinstance(target, Grid)
+        else tuple(str(dim) for dim in target.array.dims if dim in target.dims)
+    )
     source_dims = source.dims
     other_dims = [str(dim) for dim in source.array.dims if dim not in source_dims]
     clashes = sorted(set(target_dims) & set(other_dims))
@@ -336,7 +342,7 @@ def _plan(
         if lattice_map is None
         else None
     )
-    target_shape = tuple(target.array.sizes[dim] for dim in target_dims)
+    target_shape = tuple(target.sizes[dim] for dim in target_dims)
     total = int(np.prod(target_shape, dtype=np.int64))
     output_dtype = _output_dtype(source.array.dtype, method, fill_value)
     source_values = source.array
@@ -525,7 +531,7 @@ def _resample_block(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray
 
 def resample(
     source: Geometry,
-    target: Geometry,
+    target: Geometry | Grid,
     *,
     transform: SupportsPoints | None = None,
     method: Method = "linear",
@@ -533,7 +539,7 @@ def resample(
     domain: Domain = "samples",
     block_points: int = BLOCK_POINTS,
 ) -> xr.DataArray:
-    """Resample the source array's values onto the target array's samples.
+    """Resample the source array's values onto a target Geometry or Grid.
 
     For each target sample, its point in the target frame is mapped into the source frame and
     located among the source samples, and the source values are interpolated there.
@@ -565,7 +571,7 @@ def resample(
 
     Args:
         source: The array whose values are resampled, with its geometry.
-        target: The array whose samples receive values; only its geometry coordinates are used.
+        target: Geometry or Grid whose samples receive values; target pixels are ignored.
         transform: The transform from the target's frame to the source's frame, required when
             they are different frames.
         method: ``"nearest"``, ``"linear"`` or ``"cubic"`` (spline) interpolation.
@@ -621,12 +627,21 @@ def resample(
         keep_attrs=False,
     )
     result = result.rename({value: key for key, value in renamed.items()})
+    coordinates = grid_variables(target) if isinstance(target, Grid) else target.array.coords
     target_coordinates = {
         name: coordinate
-        for name, coordinate in target.array.coords.items()
+        for name, coordinate in coordinates.items()
         if set(coordinate.dims) <= set(plan.target_dims) and name not in other_dims
     }
+    source_coordinates = {
+        name: coordinate.variable
+        for name, coordinate in source.array.coords.items()
+        if set(coordinate.dims) <= set(other_dims) and name not in result.xindexes
+    }
+    for name in result.xindexes:
+        if name in source.array.coords and set(source.array.coords[name].dims) <= set(other_dims):
+            result.coords[name].attrs = dict(source.array.coords[name].attrs)
     return result.drop_vars(
         [name for name in result.coords if set(result.coords[name].dims) & set(plan.source_dims)],
         errors="ignore",
-    ).assign_coords(target_coordinates)
+    ).assign_coords({**source_coordinates, **target_coordinates})

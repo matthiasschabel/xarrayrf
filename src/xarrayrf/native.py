@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, cast, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -14,17 +14,27 @@ import xarray as xr
 from xarray.indexes import PandasIndex
 
 from ._affine import AffineTransform
-from ._binding import BindingIndex
+from ._binding import BindingIndex, grid_variables
 from ._encoding import Decoder, MalformedDataError, encode
 from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
 from ._geometry import Geometry
+from ._grid import Coordinate, Grid
 from ._resample import Method, resample
 from ._sampling import Domain
 from ._transform import SupportsAffine, SupportsPoints
+from ._validation import check_names
 
 _BINDING_ATTR = "xarrayrf_binding"
-__all__ = ["CoordinateSpec", "DuckArray", "Report", "frame_dataarray", "index_coordinate"]
+_DIMS_UNSET = object()
+__all__ = [
+    "CoordinateSpec",
+    "DuckArray",
+    "Report",
+    "frame_array",
+    "grid_coordinates",
+    "index_coordinate",
+]
 
 
 class DuckArray(Protocol):
@@ -65,50 +75,122 @@ def index_coordinate(dim: str, size: int, *, start: int = 0) -> CoordinateSpec:
     return (dim, np.arange(start, start + size, dtype=np.int64), _INDEX_UNITS)
 
 
-def frame_dataarray(
-    data: object,
-    *,
-    dims: Sequence[str],
-    coords: Mapping[str, CoordinateSpec],
-    transform: SupportsPoints,
-    attrs: Mapping[str, Any] | None = None,
-) -> xr.DataArray:
-    """Bind caller-supplied pixels to imported geometry without evaluating them.
+def _grid_and_coords(
+    transform: SupportsPoints, coords: Mapping[str, CoordinateSpec]
+) -> tuple[Grid, dict[str, CoordinateSpec]]:
+    """Split adapter coordinate specs without discarding geometry metadata."""
+    units = dict(zip(transform.source.axes, transform.source.units, strict=True))
+    geometry: dict[str, Coordinate] = {}
+    other: dict[str, CoordinateSpec] = {}
+    for name, spec in coords.items():
+        if name not in units:
+            other[name] = spec
+            continue
+        dim, values, attrs = spec
+        if attrs and attrs != {"units": units[name]}:
+            raise ValueError(
+                f"internal adapter contract: geometry coordinate {name!r} attrs must be empty "
+                "or contain only the declared units"
+            )
+        geometry[name] = (dim, values) if isinstance(dim, str) else values
+    return Grid(transform, geometry), other
 
-    The adapters' shared final step: check the pixels are a duck array of the shape the
-    dimension coordinates declare, build the DataArray, and frame it on the dimensions the
-    transform's source axes depend on.
 
-    Args:
-        data: NumPy or dask array in ``dims`` order.
-        dims: Dimension names.
-        coords: Coordinate declarations, at least one per dimension.
-        transform: The array's coordinate transform into its frame.
-        attrs: Optional attributes for the DataArray.
+def grid_coordinates(grid: Grid) -> xr.Coordinates:
+    """Convert a Grid to coordinates carrying its native binding index.
 
-    Returns:
-        A framed DataArray sharing the supplied pixels.
+    Assign these coordinates to an array with matching geometry dimensions and sizes.
+    Declared source units become coordinate ``units`` attributes.
 
     Raises:
-        TypeError: If ``data`` is not a duck array.
-        ValueError: If its shape differs from the declared dimension sizes.
+        TypeError: If grid is not a Grid.
     """
+    if not isinstance(grid, Grid):
+        raise TypeError(f"grid must be a Grid, got {type(grid).__name__}")
+    return _binding_coordinates(grid_variables(grid), grid.transform, grid.dims)
+
+
+def _binding_coordinates(
+    variables: Mapping[str, xr.Variable], transform: SupportsPoints, dims: tuple[str, ...]
+) -> xr.Coordinates:
+    axes = {
+        name: PandasIndex.from_variables({name: variable}, options={})
+        for name, variable in variables.items()
+        if variable.ndim == 1
+    }
+    fixed = {name: variable for name, variable in variables.items() if variable.ndim == 0}
+    index = BindingIndex(axes, fixed, transform, dims)
+    return xr.Coordinates(variables, indexes={name: index for name in variables})
+
+
+def frame_array(
+    data: object,
+    grid: Grid,
+    *,
+    dims: Sequence[str] | None = None,
+    coords: Mapping[str, CoordinateSpec] | None = None,
+    attrs: Mapping[str, Any] | None = None,
+) -> xr.DataArray:
+    """Frame duck-array pixels on a Grid without evaluating them.
+
+    ``dims`` names every pixel dimension (default: grid dimensions). ``coords`` declares
+    non-geometry coordinates; geometry coordinates and their source units come from the grid.
+    Every dimension needs a coordinate declaring its size.
+
+    Raises:
+        TypeError: If grid, data, dims or coords has an invalid type.
+        ValueError: If coords redefines a grid coordinate, dims omits a grid dimension,
+            a dimension has no declared size, a coordinate has the wrong length along a grid
+            dimension, or data has the wrong shape.
+    """
+    if not isinstance(grid, Grid):
+        raise TypeError(f"grid must be a Grid, got {type(grid).__name__}")
+    names = grid.dims if dims is None else check_names(dims, field="dims", allow_empty=True)
+    if coords is not None and not isinstance(coords, Mapping):
+        raise TypeError("coords must be a mapping or None")
+    extra = dict(coords or {})
+    redefined = set(extra) & set(grid.coordinates)
+    if redefined:
+        raise ValueError(f"coords must not redefine grid coordinates {sorted(redefined)}")
+    absent = set(grid.dims) - set(names)
+    if absent:
+        raise ValueError(f"dims must include grid dimensions {sorted(absent)}")
     duck = _require_duck_array(data)
-    sizes: dict[str, int] = {}
-    for coordinate_dims, values, _ in coords.values():
+    sizes = dict(grid.sizes)
+    for name, (coordinate_dims, values, _) in extra.items():
         along = (coordinate_dims,) if isinstance(coordinate_dims, str) else coordinate_dims
         if len(along) == 1:
-            sizes[along[0]] = len(cast(Sequence[Any], values))
-    unsized = [dim for dim in dims if dim not in sizes]
+            size = len(cast(Sequence[Any], values))
+            if along[0] in grid.sizes and size != grid.sizes[along[0]]:
+                raise ValueError(
+                    f"coordinate {name!r} along grid dimension {along[0]!r} has length {size}; "
+                    f"expected {grid.sizes[along[0]]}"
+                )
+            sizes.setdefault(along[0], size)
+    unsized = [dim for dim in names if dim not in sizes]
     if unsized:
         raise ValueError(f"no coordinate declares the size of dimension(s) {unsized}")
-    shape = tuple(sizes[dim] for dim in dims)
+    shape = tuple(sizes[dim] for dim in names)
     if duck.shape != shape:
         raise ValueError(f"data shape {duck.shape} does not match geometry shape {shape}")
-    array = xr.DataArray(duck, dims=tuple(dims), coords=coords, attrs=attrs)
-    used = {dim for axis in transform.source.axes for dim in array.coords[axis].dims}
-    frame_dims = tuple(dim for dim in dims if dim in used)
-    return cast(xr.DataArray, array.rf.frame(transform, dims=frame_dims))
+    # Coordinates follow the array's dimension order, grid coordinates first along each
+    # dimension, then the rest (retained scalars, then other coordinates) in declared order.
+    declared: dict[str, xr.Variable | CoordinateSpec] = {**grid_variables(grid), **extra}
+
+    def dims_of(name: str) -> tuple[str, ...]:
+        entry = declared[name]
+        if isinstance(entry, xr.Variable):
+            return tuple(map(str, entry.dims))
+        coordinate_dims = entry[0]
+        return (coordinate_dims,) if isinstance(coordinate_dims, str) else tuple(coordinate_dims)
+
+    ordered = [name for dim in names for name in declared if dims_of(name) == (dim,)]
+    ordered += [name for name in declared if name not in ordered]
+    array = xr.DataArray(
+        duck, dims=names, coords={name: declared[name] for name in ordered}, attrs=attrs
+    )
+    # Keep the accessor's validation, including refusal of a stale encoded declaration.
+    return cast(xr.DataArray, array.rf.frame(grid))
 
 
 def _binding(array: xr.DataArray, *, verify: bool = True) -> BindingIndex | None:
@@ -167,13 +249,23 @@ class _ReferenceFrameAccessor:
             raise ValueError("array is unframed; call rf.frame() first")
         return index
 
-    def frame(self, coordinate_transform: SupportsPoints, *, dims: Sequence[str]) -> xr.DataArray:
-        """Frame this array with a transform from its ArrayCoordinates to a ReferenceFrame.
+    @overload
+    def frame(self, coordinate_transform: Grid) -> xr.DataArray: ...
+
+    @overload
+    def frame(
+        self, coordinate_transform: SupportsPoints, *, dims: Sequence[str]
+    ) -> xr.DataArray: ...
+
+    def frame(
+        self, coordinate_transform: SupportsPoints | Grid, *, dims: object = _DIMS_UNSET
+    ) -> xr.DataArray:
+        """Frame this array with a Grid or an ArrayCoordinates-to-ReferenceFrame transform.
 
         Args:
-            coordinate_transform: Mapping from the array's coordinates (an
+            coordinate_transform: Grid, or mapping from the array's coordinates (an
                 ``ArrayCoordinates`` source) to its target ``ReferenceFrame``.
-            dims: Geometry dimensions, in their intended order.
+            dims: Required with a transform; forbidden with a Grid.
 
         Returns:
             A DataArray sharing the original pixel data and carrying a private binding index.
@@ -193,21 +285,44 @@ class _ReferenceFrameAccessor:
                 f"array carries an encoded binding in attrs[{_BINDING_ATTR!r}]; call "
                 "rf.decode() to restore it, or drop the attribute before framing"
             )
-        geometry = Geometry(array, coordinate_transform, dims=dims)
+        if isinstance(coordinate_transform, Grid):
+            if dims is not _DIMS_UNSET:
+                raise TypeError("dims must not be supplied with a Grid")
+            grid = coordinate_transform
+            for dim, size in grid.sizes.items():
+                if dim not in array.dims or array.sizes[dim] != size:
+                    raise ValueError(
+                        f"grid dimension {dim!r} must be an array dimension of size {size}"
+                    )
+            coords = grid_coordinates(grid)
+            variables = {str(name): variable for name, variable in coords.variables.items()}
+            for name, variable in variables.items():
+                if name in array.coords:
+                    current = array.coords[name].variable
+                    if (
+                        current.dims == variable.dims
+                        and current.dtype.kind == variable.dtype.kind
+                        and np.array_equal(current.data, variable.data)
+                    ):
+                        variables[name] = current
+            Geometry(array.assign_coords(variables), grid.transform, dims=grid.dims)
+            coords = _binding_coordinates(variables, grid.transform, grid.dims)
+            names = grid.transform.source.axes
+            stripped = array.drop_indexes([name for name in names if name in array.xindexes])
+            return stripped.assign_coords(coords)
+        if dims is _DIMS_UNSET:
+            raise TypeError("dims is required with a coordinate transform")
+        geometry = Geometry(array, coordinate_transform, dims=cast(Sequence[str], dims))
         names = coordinate_transform.source.axes
-        axes: dict[str, PandasIndex] = {}
-        fixed: dict[str, xr.Variable] = {}
-        for name, coordinate_dims in geometry.coordinate_dependencies.items():
-            variable = array.coords[name].variable
-            if len(coordinate_dims) == 1:
-                axes[name] = PandasIndex.from_variables({name: variable}, options={})
-            elif not coordinate_dims:
-                fixed[name] = variable
-            else:
+        variables = {name: array.coords[name].variable for name in names}
+        for name, variable in variables.items():
+            if variable.ndim > 1:
                 raise ValueError(f"source coordinate {name!r} must be 0-D or 1-D")
         shared = sorted(
             str(dim)
-            for dim, count in Counter(index.dim for index in axes.values()).items()
+            for dim, count in Counter(
+                variable.dims[0] for variable in variables.values() if variable.ndim == 1
+            ).items()
             if count > 1
         )
         if shared:
@@ -217,12 +332,8 @@ class _ReferenceFrameAccessor:
                 f"source coordinates share dimension(s) {shared}; binding several "
                 "coordinates that vary along one dimension is not supported"
             )
-        index = BindingIndex(axes, fixed, coordinate_transform, geometry.dims)
+        coords = _binding_coordinates(variables, coordinate_transform, geometry.dims)
         stripped = array.drop_indexes([name for name in names if name in array.xindexes])
-        coords = xr.Coordinates(
-            {name: stripped.coords[name].variable for name in names},
-            indexes={name: index for name in names},
-        )
         return stripped.assign_coords(coords)
 
     def decode(self, *, decoders: Mapping[str, Decoder] | None = None) -> xr.DataArray:
@@ -297,9 +408,14 @@ class _ReferenceFrameAccessor:
         index = self._require_binding()
         return Geometry(self._array, index.transform, dims=index.dims)
 
+    @property
+    def grid(self) -> Grid:
+        """An immutable snapshot of this array's current binding coordinates."""
+        return self.geometry.grid()
+
     def resample_to(
         self,
-        target: xr.DataArray | Geometry,
+        target: xr.DataArray | Geometry | Grid,
         *,
         transform: SupportsPoints | None = None,
         method: Method = "linear",
@@ -309,7 +425,7 @@ class _ReferenceFrameAccessor:
         """Resample values onto a target geometry and bind them to its frame.
 
         Args:
-            target: Framed array or geometry whose samples and binding define the result.
+            target: Grid, framed array or geometry whose samples define the result.
             transform: Mapping from the target frame to the source frame, if needed.
             method: ``"nearest"``, ``"linear"`` or ``"cubic"`` interpolation.
             fill_value: Value outside the source domain.
@@ -320,16 +436,16 @@ class _ReferenceFrameAccessor:
             ordinary attributes. A reserved ``xarrayrf_binding`` attribute is not carried.
 
         Raises:
-            TypeError: If target is neither a DataArray nor a Geometry.
+            TypeError: If target is not a DataArray, Geometry or Grid.
             ValueError: If either array is unframed or core resampling rejects the geometry.
         """
         source = self.geometry
         if isinstance(target, xr.DataArray):
             target_geometry = target.rf.geometry
-        elif isinstance(target, Geometry):
+        elif isinstance(target, Geometry | Grid):
             target_geometry = target
         else:
-            raise TypeError("target must be a framed DataArray or Geometry")
+            raise TypeError("target must be a framed DataArray, Geometry or Grid")
         result = resample(
             source,
             target_geometry,
@@ -340,6 +456,8 @@ class _ReferenceFrameAccessor:
         )
         result.name = self._array.name
         result.attrs = {k: v for k, v in self._array.attrs.items() if k != _BINDING_ATTR}
+        if isinstance(target_geometry, Grid):
+            return cast(xr.DataArray, result.rf.frame(target_geometry))
         return cast(
             xr.DataArray,
             result.rf.frame(target_geometry.transform, dims=target_geometry.dims),

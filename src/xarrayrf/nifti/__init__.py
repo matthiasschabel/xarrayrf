@@ -25,7 +25,14 @@ from xarrayrf import (
     coordinate_system_change,
 )
 from xarrayrf.anatomy import RAS, patient_coordinate_system
-from xarrayrf.native import CoordinateSpec, DuckArray, Report, frame_dataarray, index_coordinate
+from xarrayrf.native import (
+    CoordinateSpec,
+    DuckArray,
+    Report,
+    _grid_and_coords,
+    frame_array,
+    index_coordinate,
+)
 
 from ._reader import open as open
 
@@ -310,9 +317,8 @@ def to_dataarray(geometry: NiftiGeometry, data: DuckArray) -> xr.DataArray:
     """
     if not isinstance(geometry, NiftiGeometry):
         raise TypeError(f"geometry must be a NiftiGeometry, got {type(geometry).__name__}")
-    return frame_dataarray(
-        data, dims=geometry.dims, coords=geometry.coords, transform=geometry.transform
-    )
+    grid, other_coords = _grid_and_coords(geometry.transform, geometry.coords)
+    return frame_array(data, grid, dims=geometry.dims, coords=other_coords)
 
 
 def to_header(

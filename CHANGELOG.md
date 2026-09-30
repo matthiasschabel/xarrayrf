@@ -4,6 +4,13 @@
 
 ### Added
 
+- `Grid`: an immutable sampling value with no pixels, `points_at` for batched fractional
+  positions, and `positions_at(outside="extrapolate")` for positions beyond the sample domain.
+  `Geometry.grid()` snapshots sampling, and the provisional `grid` encoding kind persists it.
+- Native grid binding through `rf.grid`, `rf.frame(grid)`, `xarrayrf.native.frame_array` and
+  `grid_coordinates`, plus `Grid` targets for core and native resampling. Integer coordinates
+  retain int64 values, including values above 2**53; grid equality includes numeric dtype kind.
+  Every encoded grid coordinate declares `int64` or `float64` explicitly.
 - Pre-alpha package metadata and a manual TestPyPI rehearsal workflow. This is release
   preparation; no package release or native-operation release pass is claimed.
 - Independent repository scaffold, migrated architecture/review records, and local xarray
@@ -167,7 +174,7 @@
   `xarrayrf.anatomy` holds the RFC-4 anatomical direction vocabulary and
   `patient_coordinate_system`. `xarrayrf.units` maps UDUNITS names to the CF symbols every
   adapter emits (`canonical`) and back (`udunits_name`), so unit spelling never keeps frames
-  from different formats from comparing equal (identity and declarations still must match). `xarrayrf.native.frame_dataarray` and `index_coordinate` are the adapters' shared binding
+  from different formats from comparing equal (identity and declarations still must match). `xarrayrf.native.frame_array` and `index_coordinate` are the adapters' shared binding
   step and index-coordinate declaration.
 - `affine_class(transform_or_lattice, *, tolerance=..., offset_tolerance=...)` classifies an
   affine by its matrix geometry (identity, translation, rigid, scaled, general, rectangular).
@@ -179,6 +186,8 @@
 
 ### Fixed
 
+- Core resampling retains attrs and custom indexes on non-geometry coordinates for both
+  `Geometry` and `Grid` targets.
 - Cubic resampling at array edges requires SciPy 1.18 or newer, which includes the upstream
   [spline boundary fix](https://github.com/scipy/scipy/pull/24615). The `resample` and `dev`
   extras now enforce that floor; SciPy 1.18 requires NumPy 2, while the core NumPy floor remains
@@ -195,3 +204,7 @@
   require the pinned `xarrayrf-patches-3` series recorded in
   `docs/dev/xarray-upstream/xarray_patches.md`;
   stock xarray still has the corresponding gaps.
+
+### Removed
+
+- `xarrayrf.native.frame_dataarray`; use `xarrayrf.native.frame_array(data, grid, ...)` instead.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
@@ -16,22 +17,30 @@ from ._lattice import Lattice
 from ._positions import Outside, check_position, check_tolerance, lattice, points_at, positions_at
 from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling
 from ._transform import SupportsPoints, check_transform
-from ._validation import check_names, check_str, frozen_float_array
+from ._validation import check_names, check_str, frozen_coordinate_array
 
 type Coordinate = npt.ArrayLike | tuple[str, npt.ArrayLike]
+
+
+@dataclass(frozen=True)
+class _AxisCoordinate:
+    axis: str
+    dim: str | None
+    values: npt.NDArray[np.int64] | npt.NDArray[np.float64]
 
 
 class Grid:
     """A transform and frozen 0-D/1-D source coordinates describing sampling without pixels.
 
     Coordinate entries are ``name: (dim, values)`` for varying axes and ``name: value``
-    for retained scalars. Units come from the transform's source.
+    for retained scalars. Integers are stored as int64, floats as float64. Units come
+    from the transform's source.
     """
 
     __slots__ = ("_axes", "_dims", "_transform")
 
     _transform: SupportsPoints
-    _axes: tuple[AxisSampling, ...]
+    _axes: tuple[_AxisCoordinate, ...]
     _dims: tuple[str, ...]
 
     def __init__(
@@ -48,7 +57,8 @@ class Grid:
                 a dimension is not a string, or transform does not implement SupportsPoints.
             ValueError: If endpoints are not ArrayCoordinates -> ReferenceFrame, coordinates
                 do not name exactly the source axes, values have the wrong rank or are not
-                finite, dimensions repeat, or intervals is supplied (reserved for stage 3).
+                finite, dimensions repeat, integers exceed int64, or intervals is supplied (reserved
+                for stage 3).
         """
         if intervals is not None:
             raise ValueError("intervals are reserved for stage 3; intervals must be None for now")
@@ -63,12 +73,12 @@ class Grid:
             raise ValueError(
                 f"coordinates must name exactly the source axes {transform.source.axes}"
             )
-        axes: dict[str, AxisSampling] = {}
+        axes: dict[str, _AxisCoordinate] = {}
         dims = []
         for name, entry in coordinates.items():
             if isinstance(entry, tuple) and len(entry) == 2:
                 dim = check_str(entry[0], field=f"coordinate {name!r} dimension")
-                values = frozen_float_array(entry[1], field=f"coordinate {name!r}")
+                values = frozen_coordinate_array(entry[1], field=f"coordinate {name!r}")
                 if values.ndim != 1:
                     raise ValueError(f"coordinate {name!r} values must be one-dimensional")
                 if dim in dims:
@@ -88,10 +98,10 @@ class Grid:
                         f"coordinate {name!r} looks like a (dim, values) pair; pass it as a tuple"
                     )
                 dim = None
-                values = frozen_float_array(entry, field=f"coordinate {name!r}")
+                values = frozen_coordinate_array(entry, field=f"coordinate {name!r}")
                 if values.ndim != 0:
                     raise ValueError(f"coordinate {name!r} must be a scalar or (dim, values)")
-            axes[name] = AxisSampling(name, dim, values)
+            axes[name] = _AxisCoordinate(name, dim, values)
         self._dims = check_names(dims, field="dims", allow_empty=True)
         self._transform = transform
         self._axes = tuple(axes[name] for name in transform.source.axes)
@@ -126,7 +136,7 @@ class Grid:
         ordered += [axis for axis in self._axes if axis.dim is None]
         return MappingProxyType(
             {
-                axis.axis: float(axis.values) if axis.dim is None else (axis.dim, axis.values)
+                axis.axis: axis.values.item() if axis.dim is None else (axis.dim, axis.values)
                 for axis in ordered
             }
         )
@@ -137,7 +147,15 @@ class Grid:
         return None
 
     def _sampling(self) -> Sampling:
-        return Sampling(self._transform, self._dims, self.sizes, self._axes)
+        return Sampling(
+            self._transform,
+            self._dims,
+            self.sizes,
+            tuple(
+                AxisSampling(axis.axis, axis.dim, np.asarray(axis.values, dtype=np.float64))
+                for axis in self._axes
+            ),
+        )
 
     def point_at(self, /, **positions: int | np.integer[Any]) -> npt.NDArray[np.float64]:
         """Locate one sample using a nonnegative integer position per dimension.
@@ -158,7 +176,8 @@ class Grid:
                 if axis.dim is None
                 else axis.values[indices[self._dims.index(axis.dim)]]
                 for axis in self._axes
-            ]
+            ],
+            dtype=np.float64,
         )
         return self._transform.transform_point(coordinates)
 
@@ -173,7 +192,7 @@ class Grid:
                 axis_shape = [1] * len(shape)
                 axis_shape[self._dims.index(axis.dim)] = axis.values.size
                 columns.append(np.broadcast_to(axis.values.reshape(axis_shape), shape))
-        return self._transform.transform_point(np.stack(columns, axis=-1))
+        return self._transform.transform_point(np.stack(columns, axis=-1).astype(np.float64))
 
     def points_at(
         self,
@@ -265,7 +284,7 @@ class Grid:
             if isinstance(indexer, bool) or not isinstance(indexer, int | np.integer | slice):
                 raise TypeError(f"indexer for dimension {dim!r} must be an integer or slice")
             selected = np.asarray(values)[indexer]
-            coordinates[name] = float(selected) if selected.ndim == 0 else (dim, selected)
+            coordinates[name] = selected.item() if selected.ndim == 0 else (dim, selected)
         return Grid(self._transform, coordinates)
 
     def transpose(self, *dims: str) -> Grid:
@@ -286,14 +305,16 @@ class Grid:
         return Grid(self._transform, {name: self.coordinates[name] for name in names})
 
     def __eq__(self, other: object) -> bool:
-        """Compare transforms, dimension order and coordinate values exactly."""
+        """Compare transforms, dimension order, coordinate kinds and values exactly."""
         if not isinstance(other, Grid):
             return NotImplemented
         return (
             self._transform == other._transform
             and self._dims == other._dims
             and all(
-                a.dim == b.dim and np.array_equal(a.values, b.values)
+                a.dim == b.dim
+                and a.values.dtype.kind == b.values.dtype.kind
+                and np.array_equal(a.values, b.values)
                 for a, b in zip(self._axes, other._axes, strict=True)
             )
         )
@@ -304,7 +325,9 @@ class Grid:
             (
                 self._transform,
                 self._dims,
-                tuple((axis.dim, axis.values.tobytes()) for axis in self._axes),
+                tuple(
+                    (axis.dim, axis.values.dtype.kind, axis.values.tobytes()) for axis in self._axes
+                ),
             )
         )
 
