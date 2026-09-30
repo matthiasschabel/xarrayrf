@@ -15,7 +15,7 @@ reasons. The stable documents are [the design](../design.md),
 - [geometry_and_resampling_design.md](architecture/geometry_and_resampling_design.md): the
   `Geometry` view, sample offsets and cells, declared intervals (open), resampling.
 - [grid_plan.md](architecture/grid_plan.md): the freestanding `Grid` sampling value, its doors,
-  declared intervals, anatomy on grids, and the frame-identity rule.
+  declared intervals, anatomy on grids, and complete versus anonymous frames.
 - [nonlinear_geometry_plan.md](architecture/nonlinear_geometry_plan.md): draft staging for
   nonlinear geometry and the plan for displacement-field transforms.
 - [persistence_design.md](architecture/persistence_design.md): schema 1 of `encode`/`decode`,

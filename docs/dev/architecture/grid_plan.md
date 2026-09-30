@@ -4,7 +4,7 @@
 **Last updated:** 2026-09-30
 **Scope:** A NumPy-only `Grid` value describing an array's sampling without pixels; the doors that
 bind, snapshot, resample onto and persist it; declared intervals carried by grids and bindings;
-anatomical grid operations; and the frame-identity rule adapters follow.
+anatomical grid operations; and complete versus anonymous frames.
 
 ## Context
 
@@ -109,32 +109,50 @@ Affine transforms into anatomically oriented frames only; nonlinear transforms r
   it; a nonuniform source axis needs explicit `spacing`. A single thick slice keeps its
   declared interval as the output slice's interval.
 
-### 5. Frame identity (decision gate, stage 5)
+### 5. Complete and anonymous frames
 
-Rule: **the same source yields the same frame; different sources share a frame only when an
-identity is declared or the caller asserts it with `rf.assume_frame`.** No value matching. A
-false "same" is a valid-looking incorrect geometry; a false "different" is a refusal with a
-remedy, so identity policies must never equate sources that differ in content.
+A **complete** frame has geometry and an identity: a declared name (a DICOM Frame of Reference
+UID, a NIfTI template space) or a local frame someone created deliberately and shares by
+passing the object around. Consistency between complete frames is enforced, and nothing is
+ambiguous. An **anonymous** frame has geometry but no identity, because its source did not say
+which world it belongs to: a scanner-space NIfTI affine, a DICOM series without a Frame of
+Reference UID, an NGFF coordinate system read without a store. An unframed array has neither and
+is index space.
 
-- DICOM: `("dicom-frame-of-reference", FrameOfReferenceUID)` (unchanged); without that UID,
-  `("dicom-series", SeriesInstanceUID)` instead of a fresh local frame.
-- NIfTI without a template identity (today each open mints a new local frame). Options, for
-  maintainer decision:
-  - (a) Full-content SHA-256 of the file: equal content, equal frame, wherever it lives. Costs a
-    full read at open, which conflicts with lazy opening of large series.
-  - (b) Resolved path plus size, modification time and header digest: reopening the unchanged
-    file yields the same frame; a copy or move yields a different one (refusal with remedy).
-    Cheap, but not a content guarantee: replacing the voxel data in place while preserving size,
-    header and modification time keeps the identity.
-  - (c) Keep local frames; callers reuse one through `frame=`.
-  - Partial-content fingerprints are rejected: files differing only in their interiors would
-    share a frame.
-  - Open: (b) weakens the rule to "the same unmodified file"; the reviewer recommends (c) by
-    default with (a) opt-in. Unresolved until the maintainer decides.
-- `ReferenceFrame.local` stays random for programmatic use.
-- Refusal diagnostics: when two frames differ in identity but their coordinates match
-  numerically, the error says so and names `rf.assume_frame`. This is a separate private check,
-  not `is_coincident`, which by definition requires the same frame.
+The library never guesses an identity for an anonymous source: no content hashing, no path
+fingerprints, no shared default world, no series-UID fallback. Completing a frame is the user's
+explicit act, made at the point where it matters.
+
+- **Construction.** `ReferenceFrame.anonymous(coordinate_system, *, definition=None, ...)` mints a
+  distinct identity in its own namespace, and `frame.is_anonymous` reports it. Adapters use it
+  wherever their source declares no identity; `ReferenceFrame.local` stays the constructor for
+  frames created on purpose. Each adapter call site is classified in stage 5.
+- **Alone, an anonymous frame is fully usable.** Viewing, geometry queries, `rf.grid`, resampling
+  onto its own grids and every array derived from it work, because nothing is being related to
+  anything else. Derived arrays share its identity through the binding.
+- **Completing it: asserting a shared world.** At load, pass `frame=` a frame or a framed array
+  (`t2 = nifti.open(p2, frame=t1)`); afterwards, `t2.rf.assume_frame(t1)`, which already accepts a
+  frame or a framed array. Both state "these share a world", and the statement is the user's. The
+  two remedies have one contract, implemented once: adopt the other frame's identity, and when
+  the coordinate systems differ apply the exact derivable change between them
+  (`coordinate_system_change`, e.g. RAS to LPS), as NIfTI's `frame=` already does. `assume_frame`
+  is extended accordingly; it refuses only an underivable change (different units or axis
+  meanings) or a non-affine mapping, as `frame=` does.
+- **Asserting a world is not matching a grid.** Adopting an identity never bypasses the binding's
+  grid checks. Arrays sharing a frame align and combine in arithmetic only when their bindings
+  are compatible (same transform, dims and retained coordinates); otherwise the remedy is
+  `resample_to`, which needs only the shared frame.
+- **Refusals name the remedy that applies.** When arrays with different frames meet (alignment,
+  arithmetic, `resample_to` without a transform) and either frame is anonymous, the error says
+  which array is anonymous and gives the applicable steps: `frame=`/`assume_frame` to assert the
+  shared world, followed by `resample_to` when the grids differ; when the coordinates also match
+  numerically, it says so and `assume_frame` alone suffices. An underivable coordinate-system
+  difference is named instead of offering a remedy that would fail. This is a separate private
+  check, not `is_coincident`, which requires the same frame.
+- **Visible state.** `repr` of a frame, a binding and a grid marks an anonymous frame, so the
+  state is visible before any error.
+- **Persistence.** Encoding keeps the anonymous namespace and identifier, so a saved array
+  reloads with the same anonymous identity and still combines with arrays that shared it.
 - Unframed arrays (including wrapped NumPy) are index space. Nothing frames them implicitly.
 
 ### 6. Persistence
@@ -154,7 +172,9 @@ plus intervals in the native binding encoding. Decoding rebuilds through constru
 | Non-geometry dims inside `Grid` | A grid would have to describe time and channels it cannot locate |
 | `grid.bind(data)` | A third framing door beside `rf.frame` and `frame_array` |
 | Value-based frame matching for unidentified sources | Two subjects with identical headers would silently share a world |
-| Partial-content NIfTI fingerprints | Files differing only in their interiors would share a frame |
+| Identity derived from the source (content hash, path and modification time, series UID) | Cleverness the user cannot predict: a full hash reads the whole file, a path breaks on copy and can miss in-place edits, a partial fingerprint equates files differing only in their interiors |
+| One shared default world for all anonymous frames, with opt-in uniqueness | Different subjects would resample onto each other silently; safety on request protects only users who already know the danger |
+| Requiring `frame=` at load for anonymous sources | Ceremony for the common one-array case with no added safety, since an anonymous frame already cannot combine with another |
 | Auto-framing plain arrays as local frames | Each mint is a new identity, so two same-shape arrays refuse to combine |
 
 ## Deferred Work
@@ -179,5 +199,13 @@ reviewed separately.
    domain, DICOM `SliceThickness`. Accept: one test per lifecycle row.
 4. Anatomy functions. Accept: an oblique volume, a single thick slice, and a sheared grid whose
    per-dim largest cosines collide.
-5. Identity rule in the adapters, after the maintainer decision; refusal diagnostics.
+5. Anonymous frames: `ReferenceFrame.anonymous` and `is_anonymous`; adapter call sites
+   classified (anonymous versus deliberate local); `frame=` accepting a framed array where it
+   does not yet; `assume_frame` applying derivable coordinate-system changes through the same
+   implementation as `frame=`; refusal messages naming the applicable remedy; `repr` marking;
+   persistence round trip. Accept: two anonymous opens of equal grids refuse, then combine after
+   either `frame=t1` or `assume_frame(t1)`; an anonymous RAS array adopts an LPS frame through
+   both remedies with identical points; shared-identity arrays with different grids still refuse
+   arithmetic and resample onto each other; an underivable change refuses with its reason; a
+   reloaded anonymous array still combines with its partners.
 6. Design, viewer plan and roadmap updates.
