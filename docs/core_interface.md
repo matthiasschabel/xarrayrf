@@ -251,6 +251,8 @@ entry `name: (dim, values)` per varying axis (1-D values), or `name: value` per 
 must have real integer or floating dtype and must be finite; booleans are refused. Integer
 input is stored as int64 (values outside its range refuse), floating input as float64. Sampling
 math converts to float64; the declaration keeps integer values exact. Units come from the source.
+Integer-only sequences, including mixed signed and unsigned NumPy integers, are checked before
+dtype promotion so values cannot be rounded through float64.
 `intervals` must be `None`; any other value is refused with a message naming stage 3.
 
 `transform`, `frame`, `coordinates`, `dims` and read-only `sizes` expose the declaration. `dims`
@@ -259,18 +261,37 @@ valid. Equality compares the transform (including frame identity), dimension ord
 values and dtype kind exactly; integer and float coordinates declare different grids even
 when their numeric values match. Equality never uses coincidence tolerance. The representation names source axes,
 target identity, dimensions and sizes.
+Coordinate arrays are fresh read-only views over immutable buffers; editing a returned array's
+dtype or shape cannot change the stored declaration. Copies, deep copies and pickle round trips
+reconstruct through the constructor and retain this guarantee.
 
 `point_at`, `points_at`, `positions_at`, `lattice` and `is_coincident` use the same sampling
 implementation and semantics as `Geometry`. `point_at` requires a nonnegative integer per
 varying dimension and returns a NumPy point. `points()` returns a NumPy array shaped
 `(*sizes, number_of_frame_axes)` in grid dimension order. `is_coincident` accepts another `Grid`;
 `Geometry.is_coincident` continues to accept only `Geometry`.
+Transform results must be finite real arrays of the declared target shape, including before
+applying `outside="nan"`. Integer positions in `points_at` reproduce stored sample endpoints
+exactly. An empty query batch returns an empty result with its batch shape and the appropriate
+trailing point or position axis, even when a grid dimension has size zero. Non-empty queries
+on empty axes are refused.
 
-`isel(**indexers)` accepts integers and slices, including negative steps; negative integer
-indices count from the end, as in NumPy and xarray. An integer selection retains that source axis
-as a scalar. `transpose(*dims)` names every varying dimension exactly once; with no arguments
-it reverses their order. Both return grids whose points equal the corresponding selection or
-permutation of the original points. Neither changes the coordinate transform or sample offsets.
+Grid lattices test uniformity from stored coordinate values within the requested tolerance;
+grids carry no exact index-step metadata. `Geometry.lattice()` can use an xarray `RangeIndex`'s
+exact step, so it can succeed when `Geometry.grid().lattice()` refuses because materialized
+values at large magnitudes exceed that tolerance. This is a known parity difference.
+
+`isel(**indexers)` delegates positional selection by dimension to xarray, accepting integers,
+lists, integer arrays, boolean masks and slices, including negative indices and steps.
+`sel(**indexers)` delegates label selection by source-coordinate name to xarray, including
+lists and inclusive label slices. Scalar selections retain that source axis as a scalar.
+Both operate on a coordinate-only Dataset carrying the native binding index; vectorized
+indexers that change geometry dimensions are refused by that index. These methods import
+xarray lazily and raise a clear `ImportError` when it is unavailable; Grid construction and
+NumPy sampling queries still work without xarray.
+`transpose(*dims)` names every varying dimension exactly once; with no arguments it reverses
+their order and remains NumPy-only. All return grids whose points equal the corresponding
+selection or permutation, preserving the coordinate transform and sample offsets.
 
 ### Native grid doors
 
@@ -335,7 +356,8 @@ coordinates. Beyond `point_at`:
   outer steps. Retained scalar axes are read from the array or grid, not supplied in positions.
   Fields and multiple axes along one dimension are refused. A single-sample dimension accepts
   position zero but has no step for fractional positions or extrapolation. Empty axes cannot
-  locate positions.
+  locate non-empty position batches; empty batches return empty points. Likewise, `positions_at`
+  accepts empty point batches on empty axes.
 - `is_coincident(other, *, tolerance=1e-6)`: whether both arrays sample the same points of the
   same frame, element for element, so one's values stand for the other's without resampling.
   The explicit tolerant comparison; `==` on transforms and frames stays exact. Frames must be
@@ -371,6 +393,10 @@ the result to the target's coordinate transform and geometry dimensions. Target 
 Core `resample(source, target, ...)` takes a source `Geometry`
 and a target `Geometry` or `Grid`; a grid produces the same values as its equivalent framed
 array geometry. Source non-geometry coordinates retain their dtypes, attrs and custom indexes.
+The target contributes only coordinates named by its transform's source axes. Unrelated target
+coordinates, including scalar context, are ignored; non-geometry coordinates come from the
+source. If a target geometry coordinate name collides with a source non-geometry coordinate,
+resampling raises `ValueError` naming that coordinate instead of replacing it.
 The result retains the source's name, ordinary attributes and non-geometry coordinates; a
 reserved `xarrayrf_binding` attribute is not carried, and `rf.frame` refuses an array that still
 has one (decode it or drop it first). `rf.unframe()` drops it as stale. The core

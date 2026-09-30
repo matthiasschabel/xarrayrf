@@ -209,4 +209,13 @@ def position_to_coordinate(
             )
         return np.full(positions.shape, values[0])
     indices = np.clip(np.floor(positions), 0, values.size - 2).astype(np.intp)
-    return values[indices] + (positions - indices) * (values[indices + 1] - values[indices])
+    fraction = positions - indices
+    low, high = values[indices], values[indices + 1]
+    # Inside a cell the weighted form reproduces stored samples exactly (a difference form
+    # loses them to cancellation across large magnitudes); outside, extend from the nearer
+    # endpoint, where the weighted form's separate products could overflow.
+    with np.errstate(over="ignore", invalid="ignore"):
+        inside = (1 - fraction) * low + fraction * high
+    step = high - low
+    beyond = np.where(fraction < 0, low + fraction * step, high + (fraction - 1) * step)
+    return np.asarray(np.where((fraction >= 0) & (fraction <= 1), inside, beyond))

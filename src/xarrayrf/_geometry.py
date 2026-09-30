@@ -16,7 +16,15 @@ from ._coincidence import is_coincident
 from ._frame import ReferenceFrame
 from ._grid import Grid
 from ._lattice import Lattice
-from ._positions import Outside, check_position, check_tolerance, lattice, points_at, positions_at
+from ._positions import (
+    Outside,
+    check_position,
+    check_tolerance,
+    lattice,
+    points_at,
+    positions_at,
+    transform_points,
+)
 from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling
 from ._transform import SupportsAffine, SupportsPoints, check_transform, transform_named
 from ._validation import REAL_KINDS, _check_str_sequence, check_names, real_float_array
@@ -383,13 +391,7 @@ class Geometry:
             stacked = stacked.chunk({_SOURCE_AXIS: -1})
 
         def evaluate(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-            mapped = real_float_array(transform.transform_point(values), field="points")
-            if mapped.shape != (*values.shape[:-1], len(frame_axes)):
-                raise ValueError(
-                    f"{type(transform).__name__}.transform_point returned shape {mapped.shape}; "
-                    f"expected {(*values.shape[:-1], len(frame_axes))}",
-                )
-            return mapped
+            return transform_points(transform, values)
 
         result: xr.DataArray = xr.apply_ufunc(
             evaluate,
@@ -447,10 +449,11 @@ class Geometry:
         Retained scalar axes are read from the array.
 
         Raises:
-            TypeError: If positions have a non-real dtype.
+            TypeError: If positions or transformed points have a non-real dtype.
             ValueError: If positions have the wrong shape, domain or outside is unknown,
                 coordinates are multidimensional, two axes share a dimension, an empty or
-                single-sample axis has no step, or a position is outside the chosen domain.
+                single-sample axis has no step, a position is outside the chosen domain,
+                or transformed points have the wrong shape or non-finite values.
         """
         return points_at(self._sampling(), positions, domain=domain, outside=outside)
 

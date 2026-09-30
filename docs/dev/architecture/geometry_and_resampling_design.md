@@ -58,15 +58,22 @@ intervals=None)` copies finite real 0-D/1-D coordinates into immutable NumPy buf
 integer inputs become int64 without passing through float, floating inputs become float64.
 Out-of-range integers refuse. Equality and hashing include the coordinate dtype kind; sampling
 math uses float64, so integer declarations stay exact without changing interpolation. It has
-no pixels, non-geometry dimensions, binding path or xarray dependency. Equality and hashing
+no pixels or non-geometry dimensions. Construction and sampling have no xarray dependency.
+Coordinate arrays are fresh read-only views, so editing their headers cannot change the stored
+declaration; copying and unpickling reconstruct through the constructor to freeze the buffers.
+Equality and hashing
 compare the exact declaration, including dimension order; `is_coincident` is the separate
-step-tolerant query. `isel` selects coordinate values (retaining integer selections as scalars),
-and `transpose` reorders dimensions, so both commute with `points()`.
+step-tolerant query. `isel` and `sel` lazily import xarray and select a coordinate-only Dataset
+carrying the native binding, retaining scalar selections. Positional lists, arrays and masks
+use xarray's indexing semantics. `transpose` stays native. All commute with `points()`.
 
 `Geometry.grid()` revalidates and snapshots the current coordinates in its declared dimension
 order. It refuses multidimensional fields and shared dimensions. It never reads pixels, but
 snapshotting necessarily evaluates the coordinate values. Geometry construction, selected
 `point_at` reads, lazy `points()` and revalidation on every query retain their existing behavior.
+The snapshot stores coordinate values, not `RangeIndex` step metadata. Its lattice checks
+uniformity from those values within tolerance, so large-coordinate rounding can make the
+snapshot refuse a lattice that the live geometry accepts using the exact index step.
 
 The private NumPy sampling description carries transform, dims, sizes, source coordinate values
 and exact index steps when available; offsets come from the source. Geometry supplies coordinate
@@ -80,11 +87,15 @@ linearly and reads retained scalars from the sampling description. It and `posit
 The existing `"raise"` and `"nan"` policies enforce the chosen samples/cells domain. A singleton
 has no step for forward fractional extrapolation; inverse lookup still admits only its coordinate.
 Retained scalars still refuse inverse lookup and coincidence pending a projection policy.
+Empty query batches return empty points or positions even on empty axes; non-empty queries on
+empty axes refuse. Interpolation preserves stored endpoints at integer positions. Shared result
+validation checks transform output shape, real dtype and finiteness before the NaN outside mask.
 
 ### Grid doors share the native binding
 
-`rf.grid` delegates to `Geometry.grid()`; it reads geometry coordinate buffers with their
-original dtype before constructing the frozen value. `rf.frame(grid)` checks geometry dimensions
+`rf.grid`, `Grid.isel` and `Grid.sel` share one private conversion from native binding
+coordinates to a Grid in binding dimension order, preserving coordinate dtype and validating
+units before freezing values. `rf.frame(grid)` checks geometry dimensions
 and sizes, then uses `native.grid_coordinates(grid)`. Matching existing coordinates keep their
 attrs; differing values or dtype kinds are replaced by the grid's coordinates with declared
 source units. Geometry validation still checks preserved coordinate attrs against the transform.
@@ -196,6 +207,9 @@ core `resample`, and frames the result with the target's coordinate transform an
 geometry dims. Core resampling takes Geometry or Grid targets, using their shared sampling
 math and restoring the source's non-geometry coordinate variables, including attrs that xarray
 would otherwise drop. Grid targets have the same values as equivalent framed-array targets.
+Only the target's source-axis coordinates contribute to the result. Unrelated target scalar
+context is ignored; source context is preserved, and a target geometry coordinate name that
+collides with source non-geometry context raises `ValueError` naming it.
 The result keeps the source's non-geometry dims and coords, name and attributes
 (restored explicitly because core `resample` drops attrs); the reserved `xarrayrf_binding`
 attribute is not carried. Unframed source or target raise `ValueError`; other target types raise

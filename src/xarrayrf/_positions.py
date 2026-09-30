@@ -25,7 +25,7 @@ from ._sampling import (
     position_to_coordinate,
     uniform_step,
 )
-from ._transform import SupportsAffine, SupportsInverse, check_transform
+from ._transform import SupportsAffine, SupportsInverse, SupportsPoints, check_transform
 from ._validation import _check_str_sequence, real_float_array
 
 type Outside = Literal["raise", "nan", "extrapolate"]
@@ -120,7 +120,7 @@ def locator(
     inverse = check_transform(transform.inverse())
 
     def locate(points: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        coordinates = inverse.transform_point(points)
+        coordinates = transform_points(inverse, real_float_array(points, field="points"))
         positions = np.stack(
             [
                 coordinate_to_position(
@@ -214,8 +214,16 @@ def positions_at(
     sampling: Sampling, points: npt.ArrayLike, *, domain: Domain, outside: Outside
 ) -> npt.NDArray[np.float64]:
     """Locate frame points with the requested outside policy."""
+    check_domain(domain)
     check_outside(outside)
-    positions = locator(sampling, domain, extrapolate=outside == "extrapolate")(points)
+    values = real_float_array(points, field="points")
+    if values.ndim == 0 or values.shape[-1] != len(sampling.frame.axes):
+        raise ValueError(
+            f"points must have shape (..., {len(sampling.frame.axes)}), got {values.shape}"
+        )
+    if 0 in values.shape[:-1]:
+        return np.empty((*values.shape[:-1], len(sampling.dims)), dtype=np.float64)
+    positions = locator(sampling, domain, extrapolate=outside == "extrapolate")(values)
     if outside == "raise" and np.isnan(positions).any():
         raise ValueError(
             f"points lie outside the {domain} domain; pass outside='nan' to mark them instead"
@@ -234,6 +242,8 @@ def points_at(
         raise ValueError(
             f"positions must have shape (..., {len(sampling.dims)}), got {values.shape}"
         )
+    if 0 in values.shape[:-1]:
+        return np.empty((*values.shape[:-1], len(sampling.frame.axes)), dtype=np.float64)
     located = located_axes(sampling, scalars=True)
     mask = np.zeros(values.shape[:-1], dtype=bool)
     bounded = values.copy()
@@ -262,10 +272,24 @@ def points_at(
         ],
         axis=-1,
     )
-    points = sampling.transform.transform_point(coordinates)
+    points = transform_points(sampling.transform, coordinates)
     if outside == "nan":
         points = np.where(mask[..., None], np.nan, points)
     return points
+
+
+def transform_points(
+    transform: SupportsPoints, coordinates: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Evaluate a transform and require finite real points of the declared target shape."""
+    mapped = real_float_array(transform.transform_point(coordinates), field="points")
+    expected = (*coordinates.shape[:-1], len(transform.target.axes))
+    if mapped.shape != expected:
+        raise ValueError(
+            f"{type(transform).__name__}.transform_point returned shape {mapped.shape}; "
+            f"expected {expected}"
+        )
+    return mapped
 
 
 def check_position(value: object, *, dim: str, size: int) -> int:

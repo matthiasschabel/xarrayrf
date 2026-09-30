@@ -14,7 +14,7 @@ import xarray as xr
 from xarray.indexes import PandasIndex
 
 from ._affine import AffineTransform
-from ._binding import BindingIndex, grid_variables
+from ._binding import BindingIndex, grid_from_binding, grid_variables
 from ._encoding import Decoder, MalformedDataError, encode
 from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
@@ -411,7 +411,8 @@ class _ReferenceFrameAccessor:
     @property
     def grid(self) -> Grid:
         """An immutable snapshot of this array's current binding coordinates."""
-        return self.geometry.grid()
+        self._require_binding()
+        return grid_from_binding(self._array.coords)
 
     def resample_to(
         self,

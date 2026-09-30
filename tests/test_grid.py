@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import pickle
+import warnings
 from typing import Any
 
 import dask.array as da
@@ -13,6 +14,7 @@ import pytest
 import xarray as xr
 from dask.callbacks import Callback
 from numpy.testing import assert_allclose
+from xarray.indexes import RangeIndex
 
 from xarrayrf import (
     AffineTransform,
@@ -227,7 +229,7 @@ def test_grid_constructor_endpoint_and_interval_refusals() -> None:
         ("point_at", (), {"i": True}, TypeError, "integer"),
         ("point_at", (), {"i": -1}, IndexError, "out of range"),
         ("isel", (), {"unknown": 0}, ValueError, "unknown"),
-        ("isel", (), {"i": True}, TypeError, "integer or slice"),
+        ("isel", (), {"i": True}, ValueError, "Multi-dimensional indexing"),
         ("isel", (), {"i": 10}, IndexError, "out of bounds"),
         ("isel", (), {"i": slice(None, None, 0)}, ValueError, "zero"),
         ("transpose", ("other",), {}, ValueError, "each geometry"),
@@ -337,6 +339,134 @@ def test_grid_copies_and_pickles(duplicate: Any) -> None:
     result = duplicate(grid)
     assert result == grid
     assert hash(result) == hash(grid)
+
+
+@pytest.mark.parametrize(
+    "duplicate", [lambda g: g, copy.copy, copy.deepcopy, lambda g: pickle.loads(pickle.dumps(g))]
+)
+def test_grid_coordinate_storage_stays_immutable(duplicate: Any) -> None:
+    original = Grid(
+        transform(("u", "v", "w")),
+        {"u": ("i", [0, 2, 5]), "v": ("j", [1.0, 3.0]), "w": 1.5},
+    ).transpose()
+    grid = duplicate(original)
+    expected = grid.points().copy()
+    expected_hash = hash(grid)
+    assert grid == original
+    for entry in grid.coordinates.values():
+        if not isinstance(entry, tuple):
+            continue
+        values = np.asarray(entry[1])
+        with pytest.raises(ValueError):
+            values[0] = 99
+        with pytest.raises(ValueError):
+            values.flags.writeable = True
+        # Re-typing a view in place is deprecated in NumPy 2.5, which is fine: the point is
+        # that a caller who still does it cannot reach the grid's storage.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            values.dtype = np.uint8  # type: ignore[misc]
+            values.shape = (values.size, 1)
+        np.testing.assert_array_equal(grid.points(), expected)
+        assert hash(grid) == expected_hash
+        assert grid == original
+
+
+@pytest.mark.parametrize("kind", ["grid", "geometry"])
+@pytest.mark.parametrize("method", ["point_at", "points", "points_at"])
+@pytest.mark.parametrize("invalid", ["shape", "nonfinite", "dtype"])
+def test_sampling_queries_validate_transform_results(kind: str, method: str, invalid: str) -> None:
+    class Invalid:
+        source = transform().source
+        target = transform().target
+
+        def transform_point(self, points: Any) -> Any:
+            if invalid == "shape":
+                return np.zeros(3)
+            shape = np.asarray(points).shape
+            return np.full(shape, np.nan if invalid == "nonfinite" else "invalid")
+
+    grid = Grid(Invalid(), {"offset": ("i", [0, 2])})
+    query = grid if kind == "grid" else geometry(grid)
+    error = TypeError if invalid == "dtype" else ValueError
+    match = {"shape": "returned shape", "nonfinite": "finite", "dtype": "real"}[invalid]
+    with pytest.raises(error, match=match):
+        if method == "point_at":
+            query.point_at(i=0)
+        elif method == "points":
+            query.points()
+        else:
+            query.points_at([[3]], outside="nan")
+
+
+@pytest.mark.parametrize("kind", ["grid", "geometry"])
+@pytest.mark.parametrize("values", [[1e16, 1.0], [-1e16, 1.0], [1e16, 1.0, -1e16]])
+def test_integer_positions_preserve_stored_endpoints(kind: str, values: list[float]) -> None:
+    grid = Grid(transform(), {"offset": ("i", values)})
+    query = grid if kind == "grid" else geometry(grid)
+    positions = np.arange(len(values), dtype=np.float64)[:, None]
+    expected = np.stack([np.asarray(query.point_at(i=i)) for i in range(len(values))])
+    # Integer positions must reproduce the stored endpoints without any rounding allowance.
+    np.testing.assert_array_equal(query.points_at(positions), expected)
+
+
+@pytest.mark.parametrize("kind", ["grid", "geometry"])
+def test_extrapolation_near_the_float_limit_stays_finite(kind: str) -> None:
+    grid = Grid(transform(), {"offset": ("i", [1e308, 1.1e308])})
+    query = grid if kind == "grid" else geometry(grid)
+    actual = query.points_at([[-1.0], [0.5]], outside="extrapolate")
+    np.testing.assert_allclose(actual, [[9e307], [1.05e308]], rtol=1e-14, atol=0)
+
+
+@pytest.mark.parametrize("indexer", [[2, 0], np.array([2, -1]), np.array([True, False, True])])
+def test_grid_isel_matches_xarray_indexers(indexer: Any) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 2, 5])})
+    selected = grid.isel(i=indexer)
+    expected = geometry(grid).array.isel(i=indexer)
+    assert selected == Geometry(expected, grid.transform, dims=("i",)).grid()
+
+
+@pytest.mark.parametrize("label", [2, [5, 0], slice(0, 2)])
+def test_grid_sel_matches_xarray_labels(label: Any) -> None:
+    from xarrayrf.native import frame_array
+
+    grid = Grid(transform(), {"offset": ("i", [0, 2, 5])})
+    expected = frame_array(np.zeros(3), grid).sel(offset=label).rf.grid
+    assert grid.sel(offset=label) == expected
+
+
+@pytest.mark.parametrize("kind", ["grid", "geometry"])
+@pytest.mark.parametrize("domain", ["samples", "cells"])
+@pytest.mark.parametrize("outside", ["raise", "nan", "extrapolate"])
+def test_empty_queries_on_empty_sampling(kind: str, domain: Any, outside: Any) -> None:
+    grid = Grid(transform(("u", "v")), {"u": ("i", []), "v": ("j", [0, 1])})
+    query = grid if kind == "grid" else geometry(grid)
+    assert query.points_at(np.empty((0, 2)), domain=domain, outside=outside).shape == (0, 2)
+    assert query.positions_at(np.empty((0, 2)), domain=domain, outside=outside).shape == (0, 2)
+
+
+def test_grid_snapshot_lattice_checks_range_index_values() -> None:
+    index = RangeIndex.arange(1e9, 1e9 + 3, 0.1, coord_name="offset", dim="i")
+    array = xr.DataArray(np.zeros(index.size), dims="i", coords=xr.Coordinates.from_xindex(index))
+    view = Geometry(array, transform(), dims=("i",))
+    assert_allclose(view.lattice().matrix, [[0.1]], atol=ATOL, rtol=0)
+    with pytest.raises(ValueError, match="not uniformly spaced"):
+        view.grid().lattice()
+
+
+def test_integer_only_sequences_avoid_float_promotion() -> None:
+    values = [np.int64(2**53 + 1), np.uint64(2**53 + 3)]
+    grid = Grid(transform(), {"offset": ("i", values)})
+    entry = grid.coordinates["offset"]
+    assert isinstance(entry, tuple)
+    assert np.asarray(entry[1]).dtype == np.int64
+    np.testing.assert_array_equal(entry[1], np.array([2**53 + 1, 2**53 + 3], dtype=np.int64))
+
+
+@pytest.mark.parametrize("values", [[-1, 2**63], [np.int64(2**63 - 1), np.uint64(2**63)]])
+def test_mixed_signed_integer_sequence_overflow_is_refused(values: Any) -> None:
+    with pytest.raises(ValueError, match="fit in int64"):
+        Grid(transform(), {"offset": ("i", values)})
 
 
 def test_grid_refuses_two_coordinates_on_one_dimension() -> None:

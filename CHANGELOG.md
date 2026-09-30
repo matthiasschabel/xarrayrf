@@ -184,7 +184,28 @@
 - Readers return lazily loaded, framed DataArrays through dask (`chunks=`), reading only the
   source region a resampling target touches.
 
+### Changed
+
+- `Grid.isel` uses xarray's positional indexing through a coordinate-only native binding,
+  including lists, integer arrays and boolean masks. `Grid.sel` adds source-coordinate label
+  selection. Both require xarray only when called; `transpose` stays NumPy-only.
+- Grid lattice checks use stored coordinate values within tolerance. Unlike live Geometry
+  queries, snapshots do not retain a `RangeIndex`'s exact step; this parity difference is
+  documented.
+
 ### Fixed
+
+- Grid coordinates remain immutable through copies and pickle round trips; editing a returned
+  array's dtype or shape leaves its points and hash unchanged.
+- Grid and Geometry sampling queries reject custom transform results with invalid shapes,
+  non-real dtypes or non-finite values before applying the NaN outside mask.
+- Fractional interpolation preserves stored endpoints exactly at integer positions, including
+  ascending and descending coordinates spanning large magnitudes.
+- Empty point and position batches return empty results on grids with size-zero dimensions.
+- Integer-only coordinate input is checked before NumPy promotion, preserving mixed signed and
+  unsigned integers exactly and refusing values outside int64.
+- Resampling ignores unrelated target context and preserves source non-geometry coordinates;
+  collisions with target geometry coordinate names raise a named `ValueError`.
 
 - Core resampling retains attrs and custom indexes on non-geometry coordinates for both
   `Geometry` and `Grid` targets.

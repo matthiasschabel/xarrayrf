@@ -14,7 +14,15 @@ from ._array_coordinates import ArrayCoordinates
 from ._coincidence import is_coincident
 from ._frame import ReferenceFrame
 from ._lattice import Lattice
-from ._positions import Outside, check_position, check_tolerance, lattice, points_at, positions_at
+from ._positions import (
+    Outside,
+    check_position,
+    check_tolerance,
+    lattice,
+    points_at,
+    positions_at,
+    transform_points,
+)
 from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling
 from ._transform import SupportsPoints, check_transform
 from ._validation import check_names, check_str, frozen_coordinate_array
@@ -130,13 +138,15 @@ class Grid:
 
     @property
     def coordinates(self) -> Mapping[str, Coordinate]:
-        """Read-only coordinates, with immutable NumPy buffers for varying axes."""
+        """Read-only coordinate views over immutable buffers; scalar axes are Python values."""
         by_dim = {axis.dim: axis for axis in self._axes if axis.dim is not None}
         ordered = [by_dim[dim] for dim in self._dims]
         ordered += [axis for axis in self._axes if axis.dim is None]
         return MappingProxyType(
             {
-                axis.axis: axis.values.item() if axis.dim is None else (axis.dim, axis.values)
+                axis.axis: axis.values.item()
+                if axis.dim is None
+                else (axis.dim, axis.values.view())
                 for axis in ordered
             }
         )
@@ -161,8 +171,10 @@ class Grid:
         """Locate one sample using a nonnegative integer position per dimension.
 
         Raises:
-            TypeError: If a position is not an integer or is a boolean.
-            ValueError: If positions do not name exactly the varying dimensions.
+            TypeError: If a position is not an integer, is a boolean, or the transform
+                returns non-real points.
+            ValueError: If positions do not name exactly the varying dimensions, or the
+                transform returns points of the wrong shape or non-finite values.
             IndexError: If a position is outside its dimension.
         """
         if set(positions) != set(self._dims):
@@ -179,10 +191,15 @@ class Grid:
             ],
             dtype=np.float64,
         )
-        return self._transform.transform_point(coordinates)
+        return transform_points(self._transform, coordinates)
 
     def points(self) -> npt.NDArray[np.float64]:
-        """Return all sample points shaped (*sizes, number of frame axes)."""
+        """Return all sample points shaped (*sizes, number of frame axes).
+
+        Raises:
+            TypeError: If the transform returns non-real points.
+            ValueError: If the transform returns points of the wrong shape or non-finite values.
+        """
         shape = tuple(self.sizes.values())
         columns = []
         for axis in self._axes:
@@ -192,7 +209,7 @@ class Grid:
                 axis_shape = [1] * len(shape)
                 axis_shape[self._dims.index(axis.dim)] = axis.values.size
                 columns.append(np.broadcast_to(axis.values.reshape(axis_shape), shape))
-        return self._transform.transform_point(np.stack(columns, axis=-1).astype(np.float64))
+        return transform_points(self._transform, np.stack(columns, axis=-1).astype(np.float64))
 
     def points_at(
         self,
@@ -208,9 +225,10 @@ class Grid:
         all-NaN rows, or outer-step extrapolation ("raise", "nan", "extrapolate").
 
         Raises:
-            TypeError: If positions have a non-real dtype.
+            TypeError: If positions or transformed points have a non-real dtype.
             ValueError: If positions have the wrong shape, domain or outside is unknown,
-                an empty or single-sample axis has no step, or positions are outside the domain.
+                an empty or single-sample axis has no step, positions are outside the domain,
+                or transformed points have the wrong shape or non-finite values.
         """
         return points_at(self._sampling(), positions, domain=domain, outside=outside)
 
@@ -261,31 +279,50 @@ class Grid:
             raise TypeError(f"other must be a Grid, got {type(other).__name__}")
         return is_coincident(self._sampling(), other._sampling(), check_tolerance(tolerance))
 
-    def isel(self, **indexers: int | np.integer[Any] | slice) -> Grid:
-        """Select, stride or reverse samples; integer selections retain scalar axes.
+    def isel(self, **indexers: Any) -> Grid:
+        """Select samples by dimension using xarray's positional indexing semantics.
 
-        Negative integer indices count from the end, as in NumPy and xarray.
+        Integers retain scalar axes; lists, integer arrays, boolean masks and slices
+        retain varying axes. Negative integer indices count from the end.
 
         Raises:
-            TypeError: If an indexer is not an integer or slice, or is a boolean.
-            ValueError: If an indexer names an unknown dimension or a slice has a zero step.
-            IndexError: If an integer is outside its dimension.
+            ImportError: If xarray is unavailable.
+            ValueError: If dimensions are unknown or indexing changes geometry dimensions.
+            IndexError: If an indexer is invalid or outside its dimension.
         """
-        unknown = set(indexers) - set(self._dims)
-        if unknown:
-            raise ValueError(f"unknown geometry dimensions {sorted(unknown)}")
-        coordinates: dict[str, Coordinate] = {}
-        for name, entry in self.coordinates.items():
-            if not isinstance(entry, tuple):
-                coordinates[name] = entry
-                continue
-            dim, values = entry
-            indexer = indexers.get(dim, slice(None))
-            if isinstance(indexer, bool) or not isinstance(indexer, int | np.integer | slice):
-                raise TypeError(f"indexer for dimension {dim!r} must be an integer or slice")
-            selected = np.asarray(values)[indexer]
-            coordinates[name] = selected.item() if selected.ndim == 0 else (dim, selected)
-        return Grid(self._transform, coordinates)
+        try:
+            import xarray as xr
+        except ImportError as error:
+            raise ImportError(
+                "Grid.isel requires xarray; install xarray to select samples"
+            ) from error
+        from ._binding import grid_from_binding
+        from .native import grid_coordinates
+
+        selected = xr.Dataset(coords=grid_coordinates(self)).isel(indexers)
+        return grid_from_binding(selected.coords)
+
+    def sel(self, **indexers: Any) -> Grid:
+        """Select samples by source-coordinate label using xarray's selection semantics.
+
+        Scalar labels retain scalar axes; lists and label slices retain varying axes.
+
+        Raises:
+            ImportError: If xarray is unavailable.
+            KeyError: If a coordinate or label is absent, or the source axis is fixed.
+            ValueError: If indexing changes geometry dimensions.
+        """
+        try:
+            import xarray as xr
+        except ImportError as error:
+            raise ImportError(
+                "Grid.sel requires xarray; install xarray to select samples"
+            ) from error
+        from ._binding import grid_from_binding
+        from .native import grid_coordinates
+
+        selected = xr.Dataset(coords=grid_coordinates(self)).sel(indexers)
+        return grid_from_binding(selected.coords)
 
     def transpose(self, *dims: str) -> Grid:
         """Reorder every varying dimension; with no arguments, reverse dimension order.
@@ -330,6 +367,10 @@ class Grid:
                 ),
             )
         )
+
+    def __reduce__(self) -> tuple[type[Grid], tuple[SupportsPoints, dict[str, Coordinate]]]:
+        """Reconstruct copies and pickles through the validated immutable constructor."""
+        return Grid, (self._transform, dict(self.coordinates))
 
     def __repr__(self) -> str:
         """Name the source axes, target frame, dimensions and sizes."""

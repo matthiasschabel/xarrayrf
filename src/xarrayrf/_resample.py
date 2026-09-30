@@ -594,7 +594,8 @@ def resample(
             source's samples cannot be located (no
             exact inverse, a retained scalar or multidimensional source coordinate, or
             non-monotonic coordinates), or a target geometry dimension name is used by a
-            non-geometry dimension of the source.
+            non-geometry dimension of the source, or a target geometry coordinate name
+            collides with a source non-geometry coordinate.
         ImportError: If scipy is not installed.
     """
     plan, source_values = _plan(
@@ -607,6 +608,17 @@ def resample(
         block_points=block_points,
     )
     other_dims = [str(dim) for dim in source.array.dims if dim not in plan.source_dims]
+    source_context = {
+        name
+        for name, coordinate in source.array.coords.items()
+        if name not in source.transform.source.axes and set(coordinate.dims) <= set(other_dims)
+    }
+    collisions = set(target.transform.source.axes) & source_context
+    if collisions:
+        raise ValueError(
+            f"target geometry coordinate {sorted(collisions)[0]!r} collides with a "
+            "source non-geometry coordinate"
+        )
     renamed = {dim: f"__xarrayrf_target_{dim}" for dim in plan.target_dims}
     ordered = source_values.transpose(*other_dims, *plan.source_dims)
     result: xr.DataArray = xr.apply_ufunc(
@@ -631,12 +643,12 @@ def resample(
     target_coordinates = {
         name: coordinate
         for name, coordinate in coordinates.items()
-        if set(coordinate.dims) <= set(plan.target_dims) and name not in other_dims
+        if name in target.transform.source.axes
     }
     source_coordinates = {
         name: coordinate.variable
         for name, coordinate in source.array.coords.items()
-        if set(coordinate.dims) <= set(other_dims) and name not in result.xindexes
+        if name in source_context and name not in result.xindexes
     }
     for name in result.xindexes:
         if name in source.array.coords and set(source.array.coords[name].dims) <= set(other_dims):

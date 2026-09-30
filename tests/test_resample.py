@@ -675,6 +675,34 @@ def test_geometry_target_keeps_nongeometry_coordinate_attrs() -> None:
         xr.testing.assert_identical(result.coords[name], source.array.coords[name])
 
 
+def test_resampling_target_context_does_not_replace_source_context() -> None:
+    source = volume(ramp(), extra={"context": ((), 7, {"description": "source context"})})
+    target = volume(np.zeros((2, 3, 4)), extra={"context": ((), 9, {})})
+    for axis, unit in zip(target.transform.source.axes, target.transform.source.units, strict=True):
+        target.array.coords[axis].attrs["units"] = unit
+    by_geometry = xrf.resample(source, target)
+    by_grid = xrf.resample(source, target.grid())
+    xr.testing.assert_identical(by_geometry, by_grid)
+    xr.testing.assert_identical(by_geometry.coords["context"], source.array.coords["context"])
+
+
+@pytest.mark.parametrize("target_kind", ["geometry", "grid"])
+def test_target_geometry_coordinate_cannot_replace_source_context(target_kind: str) -> None:
+    source = volume(ramp(), extra={"context": ((), 7, {})})
+    target = volume(np.zeros((2, 3, 4)))
+    coordinates = xrf.ArrayCoordinates(("context", "j", "k"), target.transform.source.units)
+    assert isinstance(target.transform, xrf.AffineTransform)
+    target = xrf.Geometry(
+        target.array.drop_vars("i").assign_coords(context=("i", target.array.coords["i"].values)),
+        target.transform.with_endpoints(source=coordinates),
+        dims=target.dims,
+    )
+    with pytest.raises(
+        ValueError, match=r"target geometry coordinate 'context'.*source non-geometry"
+    ):
+        xrf.resample(source, target.grid() if target_kind == "grid" else target)
+
+
 @pytest.mark.parametrize("target_kind", ["geometry", "grid"])
 def test_resampling_keeps_nongeometry_custom_index(target_kind: str) -> None:
     source = volume(np.stack([ramp(), ramp()]))

@@ -33,7 +33,13 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
     assert xrf.decode(xrf.encode(grid)) == grid
     assert hash(grid) == hash(xrf.decode(xrf.encode(grid)))
     assert grid.is_coincident(grid)
-    assert grid.isel(i=slice(None, None, -1)).dims == ("i",)
+    for method, indexers in (("isel", {"i": slice(None, None, -1)}), ("sel", {"i": 1})):
+        try:
+            getattr(grid, method)(**indexers)
+        except ImportError as error:
+            assert f"Grid.{method} requires xarray" in str(error)
+        else:
+            raise AssertionError(f"Grid.{method} must need xarray")
     assert grid.transpose().dims == ("i",)
     uniform = xrf.Grid(transform, {"i": ("i", [0, 1, 2])})
     np.testing.assert_allclose(uniform.lattice().origin, [1.0], atol=1e-12)
@@ -80,11 +86,28 @@ def test_core_modules_never_import_xarray_even_lazily() -> None:
     core = [
         path
         for path in package.glob("_*.py")
-        if path.stem not in INTEGRATION_MODULES and path.name != "__init__.py"
+        if path.stem not in INTEGRATION_MODULES | {"_grid"} and path.name != "__init__.py"
     ]
     assert core, "no core modules found; the check would pass vacuously"
     offenders = {path.name: xarray_imports(path.read_text()) for path in core}
     assert {name: lines for name, lines in offenders.items() if lines} == {}
+
+
+def test_grid_imports_xarray_only_inside_selection_methods() -> None:
+    source = (Path(xarrayrf.__file__).parent / "_grid.py").read_text()
+    allowed: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name in ("isel", "sel"):
+            imports = xarray_imports(ast.unparse(node))
+            assert len(imports) == 1
+            allowed.extend(
+                child.lineno
+                for child in ast.walk(node)
+                if isinstance(child, ast.Import)
+                and any(alias.name == "xarray" for alias in child.names)
+            )
+    assert len(allowed) == 2
+    assert xarray_imports(source) == sorted(allowed)
 
 
 def test_the_import_scan_detects_an_xarray_import() -> None:

@@ -14,7 +14,7 @@ from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
 from ._frame import ReferenceFrame
 from ._geometry import check_coordinate_unit
-from ._grid import Grid
+from ._grid import Coordinate, Grid
 from ._transform import SupportsPoints
 
 
@@ -29,6 +29,23 @@ def grid_variables(grid: Grid) -> dict[str, xr.Variable]:
         )
         for name, entry in grid.coordinates.items()
     }
+
+
+def grid_from_binding(coordinates: xr.Coordinates) -> Grid:
+    """Snapshot source coordinates in the dimension order carried by their binding."""
+    index = next(
+        index for index in coordinates.xindexes.values() if isinstance(index, BindingIndex)
+    )
+    entries: dict[str, Coordinate] = {}
+    for name in index.transform.source.axes:
+        coordinate = coordinates[name]
+        check_coordinate_unit(coordinate, name=name, declared=index.units[name])
+        if coordinate.ndim > 1:
+            raise ValueError("multidimensional coordinates cannot be snapshotted as a Grid")
+        entries[name] = (
+            (str(coordinate.dims[0]), coordinate.data) if coordinate.ndim else coordinate.data
+        )
+    return Grid(index.transform, entries).transpose(*index.dims)
 
 
 class BindingIndex(xr.Index):

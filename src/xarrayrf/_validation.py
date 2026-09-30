@@ -400,13 +400,26 @@ def frozen_coordinate_array(
     if isinstance(value, np.ma.MaskedArray):
         raise TypeError(f"{field} must not be a masked array")
     try:
-        array = np.asarray(value)
+        array = value if isinstance(value, np.ndarray) else np.asarray(value, dtype=object)
     except (TypeError, ValueError) as error:
         raise ValueError(f"{field} must be a rectangular numeric array") from error
-    if array.dtype.kind in "iu":
-        if array.size and (
-            int(array.min()) < np.iinfo(np.int64).min or int(array.max()) > np.iinfo(np.int64).max
-        ):
+    integer_only = array.dtype.kind in "iu" or (
+        not isinstance(value, np.ndarray)
+        and array.size > 0
+        and all(
+            isinstance(entry, int | np.integer) and not isinstance(entry, bool | np.bool_)
+            for entry in array.flat
+        )
+    )
+    if integer_only:
+        limits = np.iinfo(np.int64)
+        if array.dtype.kind in "iu":
+            out_of_range = bool(array.size) and (
+                int(array.min()) < limits.min or int(array.max()) > limits.max
+            )
+        else:
+            out_of_range = any(not limits.min <= int(entry) <= limits.max for entry in array.flat)
+        if out_of_range:
             raise ValueError(f"{field} integer values must fit in int64")
         return np.frombuffer(array.astype(np.int64).tobytes(), dtype=np.int64).reshape(array.shape)
-    return frozen_float_array(array, field=field)
+    return frozen_float_array(value, field=field)

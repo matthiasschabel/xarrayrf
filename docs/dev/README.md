@@ -7,6 +7,7 @@ reasons. The stable documents are [the design](../design.md),
 
 - [roadmap.md](roadmap.md): release criteria, planned and parked work, and the decisions most
   likely to be revisited. Start here.
+- [changelog.md](changelog.md): maintainer record of fixes found in review.
 
 ## architecture/
 
