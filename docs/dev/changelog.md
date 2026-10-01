@@ -2,6 +2,25 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-09-30] — QA fixes for declared intervals (grid plan stage 3)
+
+- **Problem**: A QA pass over declared intervals found that an empty varying axis with declared
+  intervals could not round-trip through either persistence API (its `(0, 2)` rows encoded as
+  `[]` and decoded with the wrong shape); that the magnitude-aware offset/interval agreement
+  tolerance could exceed a narrow interval's width, admitting a sample outside its own cell, which
+  the cells domain then refused to locate; and that binding-index equality raised pandas'
+  `InvalidIndexError` in one operand order when labels repeated, while the reverse returned
+  `False`.
+- **Resolution**: Empty interval lists decode as `(0, 2)` rows for empty varying axes, with strict
+  rejection kept elsewhere. Construction checks exact containment `lo <= sample <= hi` in addition
+  to the approximate offset agreement. `BindingIndex.equals` compares coordinate indexes before
+  any label lookup, so it returns a bool in both orders and merges raise xarray's `MergeError`.
+- **Files affected**: `src/xarrayrf/_encoding.py`, `_sampling.py`, `_binding.py`;
+  `tests/test_intervals.py`; `docs/core_interface.md`,
+  `docs/dev/architecture/geometry_and_resampling_design.md`, `CHANGELOG.md`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high), with fixes implemented by Codex
+  gpt-6.1-sol and verified by Claude Opus 5.5 (claude-opus-5-5)
+
 ## [2026-09-30] — QA fixes for freestanding grids (grid plan stages 1 and 2)
 
 - **Problem**: A QA pass over the `Grid` value and its doors found:

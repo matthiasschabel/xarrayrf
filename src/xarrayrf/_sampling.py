@@ -133,6 +133,8 @@ def freeze_intervals(
         )
         if not np.all(np.isfinite(samples)) or np.any(disagreement > tolerance):
             raise ValueError(f"intervals for source axis {name!r} disagree with sample_offset")
+        if np.any((samples < bounds[..., 0]) | (samples > bounds[..., 1])):
+            raise ValueError(f"source axis {name!r} sample lies outside its declared interval")
         result[name] = bounds
     return result
 

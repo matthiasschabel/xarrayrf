@@ -306,7 +306,8 @@ def decode_intervals(data: object) -> dict[str, Any]:
         if not isinstance(name, str):
             raise MalformedDataError("interval axis names must be strings")
         check_rows(rows)
-    return dict(intervals)
+    # JSON drops the trailing dimension of (0, 2) rows; coordinate validation checks the shape.
+    return {name: rows if rows else np.empty((0, 2)) for name, rows in intervals.items()}
 
 
 _FIELDS: Final = {

@@ -149,13 +149,13 @@ class BindingIndex(xr.Index):
         if not self._same_binding(other):
             return False
         return all(
-            self._intervals_equal(name, other)
-            for name in self.transform.source.axes
-            if name not in self.axes or exclude is None or self.axes[name].dim not in exclude
-        ) and all(
             index.equals(other.axes[name], exclude=exclude)
             for name, index in self.axes.items()
             if exclude is None or index.dim not in exclude
+        ) and all(
+            self._intervals_equal(name, other)
+            for name in self.transform.source.axes
+            if name not in self.axes or exclude is None or self.axes[name].dim not in exclude
         )
 
     def _same_binding(self, other: BindingIndex) -> bool:

@@ -158,6 +158,9 @@ uniform stack and millimetres for `slice_offset`.
   `max(1e-9 * (hi - lo), 8 * eps * max(|lo|, |hi|))`, where `s` is the source axis's sample
   offset and `eps` is float64 machine epsilon. `INTERVAL_ROUNDOFF_FACTOR = 8` allows arithmetic
   roundoff at large origins such as epoch seconds. Point-sampled axes (`s=None`) refuse intervals.
+- Independently of offset agreement, every sample must lie inside its declared interval exactly:
+  `lo <= sample <= hi`, for both varying axes and retained scalars. The magnitude allowance
+  cannot admit samples outside narrow cells.
 - The cells domain reaches the outer declared bounds; interior gaps remain interpolated.
   Multi-sample positions retain their piecewise-linear mapping and outer-step extrapolation.
   Only in the cells domain does a single sample use interval width as its step: positions `-s`

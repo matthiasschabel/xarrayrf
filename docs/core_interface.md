@@ -282,7 +282,9 @@ the source coordinate's own values and units. They are copied into immutable flo
 Each sample must equal `lo + s * (hi - lo)` for its declared `sample_offset=s`, within
 `max(1e-9 * (hi - lo), 8 * eps * max(|lo|, |hi|))`, where `eps` is float64 machine epsilon.
 The magnitude term admits rounding at large origins such as epoch seconds without relaxing
-the width-relative check near zero. Point-sampled axes (`s=None`) refuse intervals. Gaps and
+the width-relative check near zero. Independently of that tolerance, each sample must lie inside
+its declared interval exactly: `lo <= sample <= hi`, for both varying axes and retained scalars.
+Point-sampled axes (`s=None`) refuse intervals. Gaps and
 overlaps are allowed; tiling is not required. `Grid.intervals` returns a read-only mapping (empty when
 undeclared) of fresh read-only views, with the same header-isolation guarantee as coordinates.
 

@@ -201,6 +201,12 @@
 
 ### Fixed
 
+- Empty varying axes with declared intervals round-trip through core and native persistence,
+  including empty selections and disjoint inner joins.
+- Declared intervals require exact sample containment for varying axes and retained scalars,
+  even when the offset agreement tolerance exceeds a narrow cell's width.
+- Binding index equality returns `False` for differing coordinate indexes with repeated labels
+  in either operand order; coordinate merges raise xarray's `MergeError`.
 - Binding index equality returns a bool for interval mismatches and honours excluded
   dimensions; coordinate merges report conflicting intervals through xarray's `MergeError`.
   Direct index reindexing again refuses non-binding operands.

@@ -270,6 +270,25 @@ def test_merge_of_conflicting_intervals_raises_xarray_merge_error() -> None:
         left.coords.merge(right.coords)
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_binding_equality_with_repeated_labels_returns_false(reverse: bool) -> None:
+    left = frame_array(np.arange(3), grid())
+    right = left.isel(slice=[0, 0, 1])
+    if reverse:
+        left, right = right, left
+    assert left.xindexes["z"].equals(right.xindexes["z"]) is False
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_coordinate_merge_with_repeated_labels_raises_xarray_merge_error(reverse: bool) -> None:
+    left = frame_array(np.arange(3), grid())
+    right = left.isel(slice=[0, 0, 1])
+    if reverse:
+        left, right = right, left
+    with pytest.raises(xr.MergeError):
+        left.coords.merge(right.coords)
+
+
 def two_axis_array() -> xr.DataArray:
     transform = AffineTransform(
         source=ArrayCoordinates(("z", "x"), ("mm", "mm"), sample_offset=(0.5, 0.5)),
@@ -393,6 +412,7 @@ def test_every_framing_door_and_encoding_preserves_intervals() -> None:
     "bad",
     [
         None,
+        {"z": []},
         {"z": [[False, 1]]},
         {"z": [["-1", "1"]]},
         {"z": [[-1, float("inf")]]},
@@ -413,6 +433,42 @@ def test_grid_and_native_decode_strict_interval_validation(bad: Any) -> None:
     array.attrs["xarrayrf_binding"] = json.dumps(payload)
     with pytest.raises(MalformedDataError):
         array.rf.decode()
+
+
+def test_grid_and_native_decode_refuse_empty_intervals_for_scalar_coordinate() -> None:
+    value = Grid(mapping(), {"z": 0}, intervals={"z": [-1, 1]})
+    payload = encode(value)
+    payload["value"]["intervals"] = {"z": []}
+    with pytest.raises(MalformedDataError):
+        decode(payload)
+    array = frame_array(np.array(1), value).rf.encode()
+    payload = json.loads(array.attrs["xarrayrf_binding"])
+    payload["intervals"] = {"z": []}
+    array.attrs["xarrayrf_binding"] = json.dumps(payload)
+    with pytest.raises(MalformedDataError):
+        array.rf.decode()
+
+
+@pytest.mark.parametrize("origin", ["direct", "selection", "inner_join"])
+@pytest.mark.parametrize("native", [False, True])
+def test_empty_intervals_round_trip(origin: str, native: bool) -> None:
+    array = frame_array(np.empty(0), grid([]))
+    if origin == "selection":
+        array = frame_array(np.arange(3), grid()).isel(slice=[])
+    elif origin == "inner_join":
+        array, _ = xr.align(
+            frame_array(np.arange(3), grid()),
+            frame_array(np.arange(2), grid([10, 12])),
+            join="inner",
+        )
+    value = array.rf.grid
+    restored = (
+        array.rf.encode().rf.decode().rf.grid
+        if native
+        else decode(json.loads(json.dumps(encode(value))))
+    )
+    assert restored == value
+    assert restored.intervals["z"].shape == (0, 2)
 
 
 @pytest.mark.parametrize("method", ["nearest", "linear", "cubic"])
@@ -486,6 +542,24 @@ def test_epoch_scale_interval_agreement_accepts_roundoff_but_refuses_disagreemen
         else:
             with pytest.raises(ValueError, match="sample_offset"):
                 construct()
+
+
+@pytest.mark.parametrize("scalar", [False, True])
+@pytest.mark.parametrize("above", [False, True])
+def test_epoch_scale_narrow_interval_refuses_sample_outside(scalar: bool, above: bool) -> None:
+    lo = 1.7e9
+    hi = np.nextafter(lo, np.inf)
+    sample = lo + 2e-6 if above else lo - 2e-6
+    coordinates = {"z": sample if scalar else ("slice", [sample])}
+    intervals = {"z": [lo, hi] if scalar else [[lo, hi]]}
+    dims = () if scalar else ("slice",)
+    array = xr.DataArray(np.array(0) if scalar else [0], dims=dims, coords=coordinates)
+    for construct in (
+        lambda: Grid(mapping(), coordinates, intervals=intervals),
+        lambda: Geometry(array, mapping(), dims=dims, intervals=intervals),
+    ):
+        with pytest.raises(ValueError, match=r"source axis 'z'.*sample lies outside.*interval"):
+            construct()
 
 
 def test_geometry_rechecks_interval_agreement_after_coordinate_edit() -> None:
