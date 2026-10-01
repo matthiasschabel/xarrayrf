@@ -246,8 +246,21 @@ plt.show()"""
     ),
     md(
         """The NIfTI files were written by a different tool, in RAS rather than LPS, with a different
-array layout. NIfTI carries no study identifier, so we say which space it is in; after that it
-drops onto the DICOM grid and agrees to within `dcm2niix`'s single-precision affine."""
+array layout. NIfTI carries no study identifier, so its frame is **anonymous**: usable on its own,
+but never assumed to be the DICOM patient space, and the refusal says what to do."""
+    ),
+    code(
+        """unnamed = nifti.open(study_dir / "nifti" / "t2_haste_cor.nii.gz")
+print("anonymous frame:", unnamed.rf.reference_frame.is_anonymous)
+try:
+    unnamed.rf.resample_to(coronal)
+except ValueError as error:
+    print("refused:", error)"""
+    ),
+    md(
+        """We know it is the same session, so we say so when opening it (`rf.assume_frame` would do the
+same afterwards). The RAS-to-LPS conversion is derived automatically, and the NIfTI volume then
+drops onto the DICOM grid, agreeing to within `dcm2niix`'s single-precision affine."""
     ),
     code(
         """coronal_nifti = nifti.open(study_dir / "nifti" / "t2_haste_cor.nii.gz", frame=coronal)
@@ -257,7 +270,48 @@ difference = coronal_nifti.rf.resample_to(coronal) - views.coronal
 print(f"largest difference: {float(abs(difference).max()):.2f} on a signal up to {int(views.coronal.max())}")"""
     ),
     md(
-        """## 5. Ask where things are
+        """## 5. Reformat to a standard plane
+
+Each series knows its orientation: the direction each array index increases toward, in patient
+letters. DICOM's `SliceThickness` is kept as each slice's declared extent (its *cell*), separately
+from the spacing between slices. In this study the two are equal; for gapped or overlapping
+slices they differ, and the cells-domain queries and resampling respect the declared extent."""
+    ),
+    code(
+        """from xarrayrf import anatomy
+
+for name, series in [("coronal", coronal), ("sagittal", sagittal), ("axial", axial)]:
+    grid = series.rf.grid  # the sampling, without pixels
+    spacing = float(series.rf.geometry.lattice().spacing[0])  # mm between slice centres
+    lo, hi = grid.intervals["k"][0]  # declared cell of the first slice, in index units
+    print(f"{name:9s} {anatomy.orientation_codes(grid)}  slices {spacing:.1f} mm apart, "
+          f"{(hi - lo) * spacing:.1f} mm thick")"""
+    ),
+    md(
+        """`cardinal_grid` builds an axial target in the same patient space, covering every cell of the
+coronal series at 1 mm. Resampling both the coronal and the native axial series onto it
+reformats one and re-grids the other. The target covers cells, so resample in the cells domain to
+fill its edges."""
+    ),
+    code(
+        """target = anatomy.cardinal_grid(coronal.rf.grid, "axial", spacing=1.0)
+print("axial target:", dict(target.sizes), anatomy.orientation_codes(target))
+
+from_coronal = coronal.rf.resample_to(target, domain="cells").compute()
+from_axial = axial.rf.resample_to(target, domain="cells").compute()
+
+slice_dim = target.dims[0]  # the dimension pointing toward S
+cut = {slice_dim: target.sizes[slice_dim] // 2}
+fig, axes = plt.subplots(1, 2, figsize=(9, 4.6), constrained_layout=True)
+for ax, (title, array) in zip(axes, [("coronal, reformatted to axial", from_coronal),
+                                     ("native axial, same grid", from_axial)], strict=True):
+    ax.imshow(array.isel(cut), cmap=gray, vmin=0, vmax=top)
+    ax.set_title(title)
+    ax.set_axis_off()
+plt.show()"""
+    ),
+    md(
+        """## 6. Ask where things are
 
 Every framed array answers geometric questions in patient space. Pick a voxel in the coronal
 series, ask where it is in millimetres, then ask which voxel of the *native* sagittal and axial
@@ -273,9 +327,10 @@ for name, series in [("sagittal", sagittal), ("axial", axial)]:
     print(f"  in the native {name} series it is voxel ({located})")"""
     ),
     md(
-        """## 6. Brain atlases: a subject in MNI space
+        """## 7. Brain atlases: a subject in MNI space
 
-A T1-weighted MRI from a public study (OpenNeuro ds000001) lives in its own scanner space. The
+A T1-weighted MRI from a public study (OpenNeuro ds000001) lives in its own scanner space, an
+anonymous frame because the file does not name it. The
 MNI152 template and the Schaefer 2018 parcellation are NIfTI files coded as MNI space, so they
 share one frame automatically, without any registration between them."""
     ),
@@ -350,7 +405,7 @@ McConnell Brain Imaging Centre, MNI, McGill University; Schaefer et al. 2018 par
 TemplateFlow.</sub>"""
     ),
     md(
-        """## 7. Satellite imagery: public Sentinel-2 scenes
+        """## 8. Satellite imagery: public Sentinel-2 scenes
 
 True-colour Sentinel-2 images (10 m pixels, 10 980 × 10 980 each) are public Cloud-Optimized
 GeoTIFFs. Three scenes from one satellite pass over northern Italy: two neighbouring tiles in
@@ -418,7 +473,7 @@ except ValueError as error:
 <sub>Contains modified Copernicus Sentinel data 2023.</sub>"""
     ),
     md(
-        """## 8. Physics: the same machinery in spacetime
+        """## 9. Physics: the same machinery in spacetime
 
 Nothing above is specific to images. A reference frame can be an inertial frame and a transform a
 Lorentz boost. Take an object of arbitrary shape, at rest in its own frame, and ask what a
@@ -465,7 +520,7 @@ ax.set_title("Same object, contracted by 1/γ")  # noqa: RUF001 (Lorentz factor)
 plt.show()"""
     ),
     md(
-        """## 9. Save and reload
+        """## 10. Save and reload
 
 `rf.encode()` stores the binding as ordinary attributes, so framed arrays round-trip through
 Zarr or netCDF with any xarray backend; `rf.decode()` restores and validates it."""
@@ -481,7 +536,8 @@ print("same placement after the round trip:", restored.rf.coordinate_transform =
 xarrayrf is early and unreleased. It builds on xarray's custom-index machinery; a few operations
 need small fixes to xarray that we maintain as a patch series for upstream submission (this
 notebook runs with them). Known gaps are tracked openly, and geographic longitude/latitude and
-celestial coordinates are next on the design list.
+celestial coordinates are next on the design list. Pixel-free grids, declared slice thickness,
+anatomical reformatting and anonymous frames are in place.
 
 **Try it**
 

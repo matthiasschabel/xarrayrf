@@ -1,6 +1,6 @@
 # Freestanding grids
 
-**Status:** Active
+**Status:** Implemented
 **Last updated:** 2026-10-01
 **Scope:** A NumPy-only `Grid` value describing an array's sampling without pixels; the doors that
 bind, snapshot, resample onto and persist it; declared intervals carried by grids and bindings;
@@ -226,7 +226,8 @@ plus intervals in the native binding encoding. Decoding rebuilds through constru
 
 ## Next Steps
 
-Each stage updates `core_interface.md` (normative) and its design note in the same change, and is
+All stages are implemented; each was reviewed and given a QA pass
+([maintainer changelog](../changelog.md)). Each stage updates `core_interface.md` (normative) and its design note in the same change, and is
 reviewed separately.
 
 1. **Done.** `Grid` value, shared sampling module with `Geometry`, `Geometry.grid()`,
@@ -256,4 +257,5 @@ reviewed separately.
    both remedies with identical points; shared-identity arrays with different grids still refuse
    arithmetic and resample onto each other; an underivable change refuses with its reason; a
    reloaded anonymous array still combines with its partners.
-6. Design, viewer plan and roadmap updates.
+6. **Done.** Design, viewer plan, roadmap, README architecture overview and examples, and a
+   tour section on reformatting; README examples are executed by `tests/test_readme.py`.

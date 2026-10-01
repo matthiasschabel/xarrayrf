@@ -30,7 +30,7 @@ interface requires a bound transform to persist only through such an encoding.
   `{"value": ..., "dtype": ...}` for retained scalars. `intervals` is always emitted as an
   object mapping source axis names to `[lo, hi]` rows (possibly empty). Decoding
   checks exact coordinate fields and numeric types, then rebuilds through `Grid`; constructor
-  refusals are chained `MalformedDataError`. Stage 2 requires an explicit `"dtype": "int64"`
+  refusals are chained `MalformedDataError`. Schema 1 requires an explicit `"dtype": "int64"`
   or `"dtype": "float64"` on every coordinate record, including scalars and empty arrays.
   int64 accepts only JSON integers fitting in int64; float64 accepts finite numbers, including
   integral JSON numbers. Numeric kind survives tools rewriting `2.0` to `2`. Integer values

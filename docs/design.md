@@ -1,11 +1,12 @@
 # Reference frames as an xarray extension
 
 **Status:** Active
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-01
 **Scope:** Independent reference-frame semantics for xarray; DICOM and other scientific-image
-producers; geometry-aware downstream algorithms. The value objects, the `Geometry` view, the native
-`.rf` binding (a private index that jointly owns an array's source coordinates), persistence and
-the DICOM, NIfTI, NGFF and GeoTIFF adapters are implemented. The native-operation lifecycle is
+producers; geometry-aware downstream algorithms. The value objects, the `Grid` sampling value and
+the `Geometry` view, declared cell intervals, anatomical grid operations, complete and anonymous
+frames, the native `.rf` binding (a private index that jointly owns an array's source
+coordinates), persistence and the DICOM, NIfTI, NGFF and GeoTIFF adapters are implemented. The native-operation lifecycle is
 measured per xarray lane in [the operation inventory](dev/binding/binding_operation_inventory.md): complete on
 the pinned patched lane, with the stock-lane gaps tracked by the upstream pull requests in
 [the patch manifest](dev/xarray-upstream/xarray_patches.md).
@@ -58,10 +59,10 @@ the binding. There is no companion mutable frame shape or hidden parent image.
 ```text
 DICOM producer       generic image producer       optional WCS adapter
         \                    |                         /
-         +------ construct space + coordinate mapping ------+
+         +--- construct space + coordinate mapping + Grid ---+
                                    |
-                                   v
-           native DataArray: values + coordinates + binding
+                                   v      (Grid: the same sampling without pixels,
+           native DataArray: values + coordinates + binding    for targets and ROIs)
                                    |
                  xarray operations and alignment
                  + reference-binding validation
@@ -82,6 +83,10 @@ Responsibilities:
 - **Xarray integration:** apply operation semantics and validate all declared bindings.
 - **Producer adapters:** construct valid bindings from domain metadata, without participating in
   subsequent generic arithmetic or selection.
+
+- **Sampling values:** describe which samples a geometry has, with or without pixels
+  (`Grid`, its live counterpart `Geometry`, declared intervals), so targets, regions of interest
+  and file grid blocks need no second grid type in applications.
 
 These are conceptual responsibilities, not a requirement for five public classes. Start with
 one immutable declaration and an accessor-derived geometry view. Keep construction, validation
@@ -657,6 +662,35 @@ transform declarations, the accessor-derived `Geometry` view and the `.rf` bindi
 requires an array shape. Runtime indexes may maintain derived positional state but not a
 competing domain.
 
+### 9. Sampling values, declared cells, anatomy and frame completeness
+
+The [grid plan](dev/architecture/grid_plan.md) records the decisions; this section states the
+architecture they produce.
+
+- **`Grid` is the pixel-free sampling value.** It holds what a binding holds (the coordinate
+  transform, the 0-D and 1-D source coordinate values, declared intervals) and nothing else: no
+  pixels, no non-geometry dimensions. `Geometry` stays the live view of an array and shares one
+  sampling implementation with `Grid`, so the two cannot disagree. Arrays and grids convert both
+  ways through one internal path (`rf.grid`, `rf.frame(grid)`, `native.frame_array`,
+  `native.grid_coordinates`); `Grid.isel`/`sel` run xarray's own selection on a coordinate-only
+  Dataset, so there is one slicing implementation. A grid is a resampling target like a framed
+  array.
+- **Cells may be declared.** A declared interval per sample, in its own coordinate values,
+  describes thickness, gaps and overlap. The binding index carries intervals through selection,
+  roll and rename and requires them to agree on alignment; `domain="cells"` uses them. Spacing
+  never stands in for thickness: DICOM import declares intervals from `SliceThickness`.
+- **Anatomy is grid algebra.** `xarrayrf.anatomy` names orientations (`orientation_codes`),
+  reorders without moving samples (`reoriented`) and builds axis-aligned targets
+  (`cardinal_grid`); reformatting is `rf.resample_to(cardinal_grid(...))`, not a separate
+  resampler. Labels are nearest-axis, as nibabel's `aff2axcodes`.
+- **Identity is explicit, and absence of identity is visible.** A frame is complete when it
+  has an identity (declared, or a local frame created and shared on purpose) and anonymous when
+  its source names no space. Nothing guesses an identity: no hashing, path fingerprints or shared
+  default world. `rf.assume_frame` and the readers' `frame=` (NIfTI, DICOM, GeoTIFF) share one adoption
+  contract, including
+  derivable coordinate-system changes, and never bypass grid checks. Refusals name the remedy
+  that applies.
+
 ### Local xarray fixes are an intended development route
 
 Prefer a clean change in xarray itself whenever that is the appropriate abstraction boundary.
@@ -728,14 +762,12 @@ independent contract is proven.
 1. Land the five upstream bug-fix pull requests and retire the matching local patches as
    releases ship them ([manifest](dev/xarray-upstream/xarray_patches.md)); consolidate the remaining hook patches
    to two methods before proposing them ([index hook design](dev/xarray-upstream/index_hook_design.md)).
-2. Declared cells beyond the sample offset: slice thickness and intervals
-   ([geometry and resampling design](dev/architecture/geometry_and_resampling_design.md)).
-3. A bounded nonlinear provider through the capability protocols (section 7); no adapter yet
+2. A bounded nonlinear provider through the capability protocols (section 7); no adapter yet
    exercises one.
-4. Validation with downstream consumers that bind their own arrays through `rf.frame`, such as
-   an application-level DICOM series assembler.
-5. Core support needed by interactive viewers, in priority order: selection overhead, backend
-   neutrality, pixel-free target domains with source footprints, checked on-plane inversion
+3. Validation with downstream consumers that bind their own arrays through `rf.frame`, or hold
+   array-free geometry as `Grid` values, such as an application-level DICOM series assembler.
+4. Core support needed by interactive viewers, in priority order: selection overhead, backend
+   neutrality, source footprints for `Grid` targets, checked on-plane inversion
    ([viewer boundary plan](dev/architecture/viewer_boundary_plan.md)).
 
 ## Sources and Evidence

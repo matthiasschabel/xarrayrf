@@ -28,7 +28,7 @@ make the geometry wrong raise an error rather than returning a plausible but inc
 It is intended for any field that works with sampled data in a physical or reference space:
 medical imaging, microscopy, brain atlases, remote sensing and physics simulations.
 
-## Example
+## A first example
 
 ```python
 import numpy as np
@@ -63,26 +63,149 @@ the two are known to be the same space.
 For a longer introduction on real data from microscopy, medical imaging, brain atlases and
 satellite imagery, see [the xarrayrf tour](https://github.com/matthiasschabel/xarrayrf/blob/main/examples/xarrayrf_tour.ipynb).
 
-## Concepts
+## Architecture
 
-- **Reference frame** (`ReferenceFrame`): a named physical space, such as a patient, a
-  microscope stage or a map projection. Two arrays are comparable only if they are in the same
-  frame. A frame either has a private identity (`ReferenceFrame.local`) or adopts an external
-  one, such as a DICOM Frame of Reference UID (`ReferenceFrame.declared`).
-- **Coordinate system** (`CoordinateSystem`): how points in a frame are written down, with ordered
-  axes, units and, optionally, the direction each axis increases toward. One frame can be
-  written in several coordinate systems; LPS and RAS are two coordinate systems for the same
-  patient, and `coordinate_system_change` derives the conversion between them.
-- **Transform** (`AffineTransform`, `CompositeTransform`, or your own class implementing the
-  `Transform` protocols): a mapping from an array's own coordinates (`ArrayCoordinates`) into a
-  frame, or from one frame to another.
-- **Geometry** (`Geometry`, or `array.rf.geometry`): where a particular array's current samples
-  sit. It reads the array's coordinate values as stored, so irregular slice positions or
-  one-based labels are used exactly, with no spacing inferred.
+xarrayrf separates *which space* data lives in, *how* an array's coordinates map into it, and
+*which samples* an array has. Each is a small immutable value; the binding on a `DataArray`
+ties them to actual coordinates, and xarray's own operations carry the binding.
 
-The coordinate classes depend only on NumPy and can be used without xarray. The full
-vocabulary and API contract are in
+```text
+ format adapters                  value objects (NumPy only)
+ dicom · nifti · ngff · geotiff   ReferenceFrame ── CoordinateSystem ── DirectionVocabulary
+          │                            ▲
+          │ build                      │ target
+          ▼                            │
+       Grid  ── transform: ArrayCoordinates ──► ReferenceFrame   (AffineTransform,
+  (sampling, no pixels)                                          CompositeTransform, ...)
+          │ rf.frame(grid) / frame_array(data, grid)      ▲ rf.grid (snapshot)
+          ▼                                                │
+  framed DataArray ── .rf accessor: grid · resample_to · assume_frame · encode/decode
+          │       └── rf.geometry: Geometry, a live view of the array's current samples
+          │
+  ordinary xarray operations (isel, sel, arithmetic, align, concat along time, Datasets, ...)
+```
+
+| Component | What it is | Use it to |
+|---|---|---|
+| `ReferenceFrame` | The identity of a space: a patient, a slide, a map projection. **Complete** frames have an identity: `declared` (an external name such as a DICOM Frame of Reference UID or a template space) or `local` (created on purpose and shared by passing the object). **Anonymous** frames (`ReferenceFrame.anonymous`, `is_anonymous`) have geometry but no known identity. | Decide whether two arrays can be compared. |
+| `CoordinateSystem`, `DirectionVocabulary` | How points in a frame are written: ordered axes, units, and optionally the direction each axis increases toward. One frame can be written in several systems (LPS and RAS for one patient). | Convert between systems with `coordinate_system_change`. |
+| `ArrayCoordinates` | An array's own coordinate axes as a transform endpoint, with units and where each sample sits in its cell (`sample_offset`). | Be the source of the transform that places samples. |
+| `AffineTransform`, `CompositeTransform`, the `Transform` protocols | Point mappings from array coordinates into a frame, or between frames (a registration result). | Place samples; relate frames explicitly. |
+| `Grid` | An immutable sampling without pixels: the transform plus the coordinate values of each geometry dimension and, optionally, declared cell intervals (slice thickness). | Describe a target for resampling, a region of interest, or any geometry you need without an array; persist it with `encode`. |
+| `Geometry` (`array.rf.geometry`) | A live view of a framed array's current samples, re-read on every query. | Ask where samples are (`point_at`, `points_at`) and which samples are at given points (`positions_at`). |
+| `Lattice` | The regular special case: origin, spacing, direction and the homogeneous affine used by NIfTI and ITK. | Interoperate with affine-based libraries. |
+| The binding (`array.rf`) | A private xarray index that owns the geometry coordinates of a framed `DataArray`, so selection, arithmetic and alignment carry or refuse it. | Frame, query, resample, re-identify and persist arrays. |
+| `xarrayrf.anatomy` | Anatomical vocabulary and grid operations: `orientation_codes`, `reoriented`, `cardinal_grid`. | Name orientations and reformat to axial, coronal or sagittal planes. |
+| Adapters | `dicom`, `nifti`, `ngff`, `geotiff`: read headers into grids and frames, and pixels lazily. | Load data with its geometry attached. |
+
+Typical uses, and where they live:
+
+- **Load and combine data from different formats**: the adapters plus `rf.resample_to`, once
+  the data share a frame (a declared identity, or one asserted with `frame=` or
+  `rf.assume_frame`); conversions between coordinate systems of one frame (LPS and RAS) are
+  then applied automatically.
+- **Process without losing geometry**: ordinary xarray code on framed arrays.
+- **Resample or reformat**: `rf.resample_to(target)` onto a framed array, a `Geometry` or a
+  `Grid`; `anatomy.cardinal_grid` builds axial, coronal or sagittal targets.
+- **Work with geometry but no pixels**: `Grid` for regions of interest, viewer planes or
+  registration domains; `array.rf.grid` and `frame_array` convert both ways.
+- **Describe slices with thickness or gaps**: declared intervals on a `Grid` or binding; the
+  `domain="cells"` queries and resampling use them.
+- **Relate data whose source names no space**: anonymous frames, completed explicitly with
+  `frame=` when loading (NIfTI, DICOM and GeoTIFF readers) or `rf.assume_frame` afterwards (any
+  framed array, including NGFF).
+- **Save and restore**: `rf.encode`/`rf.decode` for arrays, `encode`/`decode` for value objects.
+
+The value objects depend only on NumPy and can be used without xarray. The full vocabulary and
+API contract are in
 [the core interface](https://github.com/matthiasschabel/xarrayrf/blob/main/docs/core_interface.md).
+
+## More examples
+
+### Grids, slice thickness and reformatting
+
+```python
+from xarrayrf import anatomy
+from xarrayrf.native import frame_array
+
+# Four 2 mm thick axial slices, 3 mm apart, of 5 x 6 one-millimetre voxels, in LPS millimetres.
+patient = xrf.ReferenceFrame.local(anatomy.patient_coordinate_system(anatomy.LPS, "mm"))
+index_to_patient = xrf.AffineTransform(
+    source=xrf.ArrayCoordinates(("k", "j", "i"), ("1", "1", "1"), sample_offset=(0.5, 0.5, 0.5)),
+    target=patient,
+    matrix=[[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [3.0, 0.0, 0.0]],  # columns: k, j, i
+    translation=[-2.5, -2.0, 0.0],
+)
+k = np.arange(4)
+grid = xrf.Grid(
+    index_to_patient,
+    {"k": ("k", k), "j": ("j", np.arange(5)), "i": ("i", np.arange(6))},
+    # Declared cells in the k coordinate's own units: 2 mm thick on a 3 mm step is +-1/3.
+    intervals={"k": np.stack([k - 1 / 3, k + 1 / 3], axis=-1)},
+)
+
+grid.point_at(k=1, j=0, i=0)  # [-2.5, -2.0, 3.0] mm: a sample's position
+grid.points_at([[0.5, 0.0, 0.0]])  # fractional positions in, points out
+grid.positions_at([[0.0, 0.0, 4.5]])  # [[1.5, 2.0, 2.5]]: and back again
+anatomy.orientation_codes(grid)  # "SPL": index increases toward S, P and L
+
+# The same geometry on pixels, without copying or reading them.
+volume = frame_array(np.arange(120.0).reshape(4, 5, 6), grid)
+assert volume.rf.grid == grid
+assert volume.isel(k=slice(1, 3)).rf.grid == grid.isel(k=slice(1, 3))
+
+# Reformat to a sagittal grid ("RIP") covering every source cell at 1 mm, then resample.
+# The target covers cells, so resample in the cells domain to fill its edges.
+sagittal = anatomy.cardinal_grid(grid, "sagittal", spacing=1.0)
+resliced = volume.rf.resample_to(sagittal, domain="cells", method="nearest")
+anatomy.orientation_codes(resliced.rf.grid)  # "RIP"
+
+# Grids are values: compare them, select from them, save them.
+assert xrf.decode(xrf.encode(grid)) == grid
+```
+
+`orientation_codes` names, for each dimension, the direction its index increases toward,
+written either as patient letters (`R` means toward the right, as in nibabel's
+`aff2axcodes`) or as explicit RFC-4 tokens such as `"inferior-to-superior"`. Codes are
+nearest-axis labels, so a strongly oblique grid's codes change as it rotates through 45°; read
+`CoordinateSystem.axis_codes` for the remaining angle. `reoriented` permutes and reverses
+dimensions without moving any sample.
+
+### Data whose source does not name its space
+
+A scanner-space NIfTI file, or a DICOM series without a Frame of Reference UID, has geometry
+but no identity. Its frame is **anonymous**: fully usable on its own, but never assumed to be
+the same space as anything else.
+
+```python
+def acquisition() -> xr.DataArray:
+    """Stands in for nifti.open(...) on a file that names no space."""
+    frame = xrf.ReferenceFrame.anonymous(anatomy.patient_coordinate_system(anatomy.RAS, "mm"))
+    to_frame = xrf.AffineTransform(
+        source=xrf.ArrayCoordinates(("i", "j", "k"), ("1", "1", "1")),
+        target=frame,
+        matrix=np.eye(3),
+        translation=np.zeros(3),
+    )
+    coords = {name: (name, np.arange(n)) for name, n in zip("ijk", (3, 4, 2))}
+    return frame_array(np.ones((3, 4, 2)), xrf.Grid(to_frame, coords))
+
+
+t1, t2 = acquisition(), acquisition()
+assert t1.rf.reference_frame.is_anonymous
+try:
+    t1 + t2
+except ValueError as error:
+    refusal = str(error)  # names the anonymous operands and says rf.assume_frame alone suffices
+
+combined = t1 + t2.rf.assume_frame(t1)  # your statement that both share one space
+```
+
+With files, say so at load time instead: `nifti.open("t2.nii.gz", frame=t1)`; the NIfTI, DICOM
+and GeoTIFF readers take `frame=`, and NGFF arrays use `rf.assume_frame`. Both follow one
+contract: they adopt the other frame's identity and apply any
+derivable coordinate-system change, such as RAS to LPS. Asserting a shared space never makes
+two different grids compatible; resample one onto the other with `rf.resample_to`.
 
 ## What it does
 
@@ -96,23 +219,38 @@ vocabulary and API contract are in
   lattice when there is one (origin, spacing, direction and the homogeneous affine used by NIfTI
   and ITK, 4×4 for a 3-D image in a 3-D frame), the location of given frame points among the samples (`positions_at`), and frame
   coordinates usable for nearest-point selection.
-- **Resampling.** `resample` and `rf.resample_to` move values onto another array's samples.
-  Conversions between coordinate systems of one frame, such as LPS to RAS, are applied
-  automatically; moving between different frames requires an explicit transform.
-- **Orientation.** Axis directions are written as explicit `from-to` tokens following
-  [OME-NGFF RFC-4](https://ngff.openmicroscopy.org/rfc/4/). Letter codes such as `RAI` are
-  refused, because libraries disagree about whether each letter names where an axis points from
-  or to. `xarrayrf.anatomy` provides the anatomical vocabulary.
-- **Persistence.** `rf.encode()` stores the binding as ordinary attributes before writing to
-  netCDF or Zarr, and `rf.decode()` restores it after reading. An array read without
-  `rf.decode()` is unframed.
+- **Grids.** `Grid` describes sampling without pixels and converts both ways with framed arrays
+  (`rf.grid`, `rf.frame(grid)`, `frame_array`). `Grid.isel` and `Grid.sel` use xarray's own
+  selection rules.
+- **Declared cells.** Samples can declare their extent as intervals (slice thickness, gaps,
+  overlap). They follow selection, must agree when arrays align, and set the reach of the
+  `domain="cells"` queries and resampling. DICOM import declares them from `SliceThickness`.
+- **Resampling.** `resample` and `rf.resample_to` move values onto another array's samples or
+  onto a `Grid`. Conversions between coordinate systems of one frame, such as LPS to RAS, are
+  applied automatically; moving between different frames requires an explicit transform.
+- **Orientation.** Coordinate-system axis directions are written as explicit `from-to` tokens
+  following [OME-NGFF RFC-4](https://ngff.openmicroscopy.org/rfc/4/); `CoordinateSystem` refuses
+  letter codes such as `RAI`, because libraries disagree about whether a letter names where an
+  axis points from or to. The `xarrayrf.anatomy` functions alone accept patient letters, with
+  one stated convention: each letter names the direction an index increases toward (`"RAS"`,
+  as nibabel's `aff2axcodes`). Named planes keep DICOM display order in-plane (rows, then
+  columns), with the slice axis toward S, P and R: axial `SPL`, coronal `PIL`, sagittal `RIP`.
+- **Frame identity.** Sources that name their space (a Frame of Reference UID, a template space,
+  a CRS authority code, an NGFF store) give declared frames that match across files. Sources that
+  do not give anonymous frames; relating them is the caller's explicit act (`frame=` on the
+  NIfTI, DICOM and GeoTIFF readers, or `rf.assume_frame`), and refusals say which remedy
+  applies.
+- **Persistence.** `rf.encode()` stores the binding, including declared intervals, as ordinary
+  attributes before writing to netCDF or Zarr, and `rf.decode()` restores it after reading. An
+  array read without `rf.decode()` is unframed.
 - **Format readers.** Optional adapters read frames, transforms and lazy (dask) pixel data:
 
   ```python
+  # Needs the data files named below.
   from xarrayrf import dicom, geotiff, ngff, nifti
 
-  image = nifti.open("sub-01_T1w.nii.gz")
-  label = nifti.open("sub-01_dseg.nii.gz", frame=image)  # declare a shared scanner frame
+  image = nifti.open("sub-01_T1w.nii.gz")  # scanner space: an anonymous frame
+  label = nifti.open("sub-01_dseg.nii.gz", frame=image)  # declare the shared scanner frame
   series = dicom.open("study/002-t2_haste")  # one spatial stack, classic or enhanced
   level0 = ngff.open("image.zarr")  # OME-Zarr 0.4, 0.5 or 0.6
   scene = geotiff.open("scene.tif")  # projected CRSs only
@@ -141,7 +279,9 @@ vocabulary and API contract are in
 
 xarrayrf is pre-alpha. The following are planned but not implemented:
 
-- Declared sample cells beyond a point or centred offset, such as slice thickness and intervals.
+- Concatenating framed arrays along a geometry dimension (stitching slabs). Concatenation along
+  other dimensions, such as time, keeps the binding when the grids are identical; differing
+  grids align like any join, so pass `join="exact"` to require identical ones.
 - Nonlinear transforms. The `Transform` protocols allow them, but no implementation or adapter
   provides one yet.
 - Approximate or user-declared inverses for transforms without an exact inverse.

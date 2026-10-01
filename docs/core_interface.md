@@ -7,6 +7,23 @@ adapter contract of xarrayrf. Every public name follows this document. Where
 [the core model design](dev/architecture/core_model_design.md) or [the architecture](design.md) disagree with it,
 this document wins.
 
+## Overview
+
+The public surface has five layers. Each section below is normative for its layer.
+
+| Layer | Names | Section |
+|---|---|---|
+| Value objects (NumPy only) | `ReferenceFrame` (declared, local, anonymous), `CoordinateSystem`, `DirectionVocabulary`, `ArrayCoordinates` | [Value objects](#value-objects), [Glossary](#glossary) |
+| Transforms | `AffineTransform`, `CompositeTransform`, `compose`, `coordinate_system_change`, the `Transform` protocols | [Transforms](#transforms) |
+| Sampling | `Grid` (immutable, no pixels), `Geometry` (live view of an array), `Lattice` (regular case), declared intervals, `xarrayrf.anatomy` grid operations | [Grid values](#grid-values), [Anatomical grids](#anatomical-grids), [Geometry queries](#geometry-queries) |
+| Binding and operations | the `.rf` accessor (`frame`, `grid`, `geometry`, `resample_to`, `assume_frame`, `encode`/`decode`, `unframe`), `native.frame_array`, `native.grid_coordinates`, `resample` | [Native binding](#native-binding), [Native grid doors](#native-grid-doors), [Resampling](#resampling) |
+| Persistence and adapters | `encode`/`decode`, `dicom`, `nifti`, `ngff`, `geotiff` | [Persistence](#persistence), [Adapters](#adapters) |
+
+A framed array's identity question ("is this the same space?") is answered by its
+`ReferenceFrame`; its sampling question ("which samples, where?") by its `Grid` or `Geometry`.
+Combining arrays requires both to agree; `rf.assume_frame` and adapter `frame=` change only the
+first, and `rf.resample_to` changes only the second.
+
 ## Native binding
 
 Import `xarrayrf.native` to register the DataArray `.rf` accessor; importing `xarrayrf` alone
@@ -46,10 +63,10 @@ decoded. A missing attribute,
 malformed payload or already framed input raises; custom transform decoders are caller supplied.
 Schema 1 remains provisional.
 
-The stage-2 suite marks known xarray gaps with strict xfails. A test for mixed labelled
-operands requiring xarray PR #11532 is marked only when xarray is imported from the locked
-2026.7.0 environment; it must pass against upstream main. Other strict xfails remain on both
-lanes until the later xarray hook stage.
+The test suite marks known xarray gaps with strict xfails. A test for mixed labelled operands
+requiring xarray PR #11532 is marked only when xarray is imported from the locked 2026.7.0
+environment; it must pass against upstream main. The other strict xfails mark operations that
+need the xarray index hooks of the patched lane.
 
 Declared intervals live in the binding index, keyed by source axis name. Positional and label
 selection (slices, strides, reversals, integer arrays and boolean masks) take rows with labels;
@@ -103,6 +120,9 @@ Each term has one meaning. Public names, docstrings, errors and docs use these m
 | **Direction** | A token `<from>-to-<to>` naming the way an axis increases, from a direction vocabulary. |
 | **Role** | The descriptive label `"world"` or `"object"` on a frame. The word "world" is used for nothing else. |
 | **Geometry dimensions** | The array dimensions a `Geometry`'s source axes vary along (`Geometry.dims`), which may include time, as for a spacetime or fMRI array. Every other dimension, such as echo or channel, is a non-geometry dimension, carried through unchanged. |
+| **Grid** | An immutable sampling without pixels: a coordinate transform plus the values of each 0-D or 1-D source coordinate and optional declared intervals. `Grid`; a framed array's snapshot is `rf.grid`. |
+| **Declared interval** | A sample's declared cell, `[lo, hi]` in its source axis's own coordinate values, keyed by source axis name. Overrides the sample-offset default for the `"cells"` domain; may leave gaps or overlap. |
+| **Orientation code** | For each varying dimension, the direction its index increases toward, as an RFC-4 token or a patient letter (`R` = toward the right). `xarrayrf.anatomy.orientation_codes`. |
 | **Binding** | The association of a transform from array coordinates with a particular array, held by a private index that owns the source coordinates (`array.rf.frame`). |
 | **Unframed** | An array with no binding. |
 
