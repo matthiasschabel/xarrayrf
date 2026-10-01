@@ -80,7 +80,7 @@ arrays through `frame_array` in `xarrayrf.native`.
 | `equals`, `join`, `reindex_like` | Require the same transform, dims and fixed terms; otherwise `ValueError` that says whether the frames differ (resample with a transform, or `rf.assume_frame`) or only the grids (use `rf.resample_to`). |
 | `rename` | Source axis names follow; the affine transform is rebuilt with renamed `ArrayCoordinates` (non-affine transforms refuse a source-axis rename). |
 | `roll` | Rolls owned labels with their geometry axes. |
-| `concat` | Raises `ValueError` (concatenation of framed arrays is unsupported in v1). |
+| `concat` | Called only for concatenation along a dimension the binding owns, which raises `ValueError` (unsupported in v1). Along other dimensions xarray aligns the operands' bindings instead (`equals`/`join`), so time or echo stacking keeps the binding; differing grids outer-join unless `join="exact"`. |
 | `swap_dims`, `join_overlapping`, `check_unindexed_coord_conflicts`, `check_override`, `check_stack`, `check_pad`, `check_coarsen` | Implementations of opt-in hooks that exist only in the patched xarray lane (below). |
 
 ### Test lanes and xarray patches
@@ -288,7 +288,8 @@ encoding.
   Treating no-op geometry coarsen and zero-width pad as identities is a smaller follow-up.
 - Dataset `rf` accessor and Dataset persistence; consulting `should_add_coord_to_array` in
   Dataset reductions (#11215 follow-up).
-- Framed `concat`, refused in v1.
+- Framed `concat` along a geometry dimension (stitching slabs that share a transform), refused
+  in v1; overlapping labels would stack samples at the same place.
 
 ## Next Steps
 

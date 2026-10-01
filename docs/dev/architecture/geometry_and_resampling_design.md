@@ -173,7 +173,7 @@ uniform stack and millimetres for `slice_offset`.
   `reindex_like` hook refuses non-binding operands. Equality returns `False` for interval
   mismatches and skips axes on excluded dimensions; coordinate merging raises xarray's
   `MergeError`. Joins and compatibility checks still raise `ValueError` naming the axis.
-  Concat remains refused.
+  Concat refuses along a geometry dimension; along other dimensions bindings only align.
 - All grid doors and native encoding preserve intervals. Native resampling carries only the
   target's support; core resampling continues to return an unframed array. Existing xarray
   hook requirements still apply to mixed-index operations and `swap_dims`.

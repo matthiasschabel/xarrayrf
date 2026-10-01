@@ -89,7 +89,7 @@ Approved lifecycle (implemented in stage 3):
 | Alignment and join, matched labels | Intervals must be equal; conflicting support refuses |
 | Join or reindex introducing labels the binding has no interval for | Refuses (no invented support) |
 | Operand with a plain index and no intervals | Known-label subsets retain support; introducing labels without intervals refuses |
-| `concat` | Refused for framed arrays, as before |
+| `concat` | Refused along a geometry dimension, as before; along other dimensions bindings align as in any join (`join="exact"` requires identical grids) |
 | `rf.grid`, `frame_array`, `rf.frame(grid)`, encoding | Preserved exactly |
 | `resample_to(target)` | The result carries the target's intervals, never the source's |
 

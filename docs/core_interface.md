@@ -62,12 +62,15 @@ excluded from alignment. Coordinate merging reports conflicting intervals as xar
 Joins introducing labels take their rows from the binding operand that declares them. A plain
 index in mixed alignment or a binding reindex target may select known labels, but cannot
 introduce labels without declared support. Mixed-index alignment and `swap_dims` require the
-existing optional xarray hooks; stock xarray's known refusals remain. Plain `DataArray.reindex` / `reindex_like` can
-be refused by xarray before dispatch, even for subsets on the current patched lane; use label
-selection for such subsets. The public Index `reindex_like` hook refuses non-binding operands.
-Concatenation of framed arrays stays refused. Native resampling results carry the target's
-intervals, never the source's; core `resample` retains
-its ordinary unframed result contract.
+existing optional xarray hooks; stock xarray's known refusals remain. Plain `DataArray.reindex`
+/ `reindex_like` can be refused by xarray before dispatch, even for subsets on the current
+patched lane; use label selection for such subsets. The public Index `reindex_like` hook refuses
+non-binding operands. Concatenation along a geometry dimension refuses. Along any other
+dimension (time, echo, a new stacking dimension) xarray only aligns the operands' bindings:
+identical grids pass through, and differing grids join like any alignment, so pass
+`join="exact"` to require identical ones (xarray is moving its `concat` default to `"exact"`).
+Native resampling results carry the target's intervals, never the source's; core `resample`
+retains its ordinary unframed result contract.
 
 ## Glossary
 

@@ -334,10 +334,43 @@ def test_plain_index_new_labels_refuse_with_axis_message() -> None:
         xr.align(array, plain, join="outer")
 
 
-def test_concat_remains_refused() -> None:
+def test_concat_along_a_geometry_dimension_refuses() -> None:
     array = frame_array(np.arange(3), grid())
     with pytest.raises(ValueError, match="concatenation"):
         xr.concat([array, array], dim="slice")
+
+
+@pytest.mark.parametrize("dim", ["time", "echo"])
+def test_concat_along_other_dimensions_keeps_binding_and_intervals(dim: str) -> None:
+    def series(start: int) -> xr.DataArray:
+        return frame_array(
+            np.zeros((2, 3)),
+            grid(),
+            dims=("time", "slice"),
+            coords={"time": ("time", np.arange(start, start + 2), {})},
+        )
+
+    second = series(2) if dim == "time" else series(0)
+    result = xr.concat([series(0), second], dim=dim)
+    assert result.rf.grid == grid()
+    assert result.sizes[dim] == (4 if dim == "time" else 2)
+
+
+def test_concat_along_time_with_differing_grids_aligns_or_refuses_exactly() -> None:
+    def series(values: Any, start: int) -> xr.DataArray:
+        return frame_array(
+            np.zeros((1, 3)),
+            grid(values),
+            dims=("time", "slice"),
+            coords={"time": ("time", np.array([start]), {})},
+        )
+
+    first, second = series((0, 2, 5), 0), series((1, 3, 6), 1)
+    joined = xr.concat([first, second], dim="time", join="outer")
+    assert joined.sizes["slice"] == 6
+    assert joined.rf.is_framed
+    with pytest.raises(ValueError):
+        xr.concat([first, second], dim="time", join="exact")
 
 
 def test_every_framing_door_and_encoding_preserves_intervals() -> None:
