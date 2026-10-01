@@ -4,6 +4,12 @@
 
 ### Added
 
+- Anatomical grid operations: `anatomy.orientation_codes`, `reoriented` and `cardinal_grid`,
+  with patient letters, RFC-4 tokens and DICOM display planes. Reorientation preserves samples
+  and cells, including singleton reflections; cardinal targets cover exact source cell or
+  sample corners with requested spacing and retain singleton slab support. Ambiguous anatomical
+  assignments and undetermined default spacing refuse explicitly.
+
 - Declared per-source-axis intervals on grids, geometry views and native bindings, including
   retained scalars, selection and roll propagation, exact support checks during alignment,
   all grid doors, target support on native resampling and provisional schema-1 persistence.

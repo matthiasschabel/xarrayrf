@@ -328,6 +328,112 @@ selection or permutation, preserving the coordinate transform, sample offsets an
 Selection takes interval rows with the labels; reversing an axis never swaps `lo` and `hi`.
 Scalar selection retains its `(2,)` interval with the fixed source coordinate.
 
+### Anatomical grids
+
+`xarrayrf.anatomy` supplies three operations on `Grid` values. They require an affine
+transform (`SupportsAffine`) into a frame with three spatial (`axis_types="space"`) axes
+oriented in `anatomy.VOCABULARY`, sharing one unit. Non-affine transforms raise `TypeError`;
+an unsuitable frame raises `ValueError`.
+
+An **orientation** names, per varying dimension in `grid.dims` order, the direction in which
+its index increases. Accept a case-sensitive string of patient letters (the nibabel
+`aff2axcodes` convention) or a tuple of RFC-4 direction tokens:
+
+| Letter | Direction token |
+|---|---|
+| `R` | `left-to-right` |
+| `L` | `right-to-left` |
+| `A` | `posterior-to-anterior` |
+| `P` | `anterior-to-posterior` |
+| `S` | `inferior-to-superior` |
+| `I` | `superior-to-inferior` |
+
+Named planes use the DICOM display convention, with dimensions ordered `(slice, row, column)`:
+`"axial"` and its alias `"transverse"` mean `"SPL"`, `"coronal"` means `"PIL"`, and
+`"sagittal"` means `"RIP"`. They are accepted wherever an orientation is accepted. Direction
+pairs must be distinct and the direction count must match the output dimensions. Invalid
+directions, counts, or repeated pairs raise `ValueError`; unsupported argument types raise
+`TypeError`. Codes are returned as a letter string when every direction has a patient letter,
+otherwise as a tuple of direction tokens.
+
+**`orientation_codes(grid)`** assigns varying dimensions to anatomical frame axes one-to-one
+by maximizing the sum of absolute cosines between their unit step directions and the frame
+axes, considering all permutations (including partial assignments for fewer than three dims).
+Each sign comes from its assigned cosine. A step direction is the affine matrix column times
+the sign of the coordinate step; descending coordinates point the other way. A size-1 dim
+uses its column alone. Retained scalar axes are ignored; a fully scalar grid returns `""`.
+The best and second-best scores differing by at most `ASSIGNMENT_TOLERANCE=1e-6` are ambiguous
+and raise `ValueError`, asking the caller to resample to a cardinal grid first. This tolerance
+detects exact ties; it does not bound obliquity. These are nearest-axis labels in the manner of
+nibabel's `aff2axcodes`, so an oblique rotation's codes flip as it crosses 45°. Callers needing
+an angular bound must read and bound the residual angle from `CoordinateSystem.axis_codes`,
+consistent with that method's policy. Parallel or antiparallel anatomical step directions
+instead refuse with "dimensions ... point along the same direction". More than three
+varying dims, empty dims, nonmonotonic coordinates, and zero or non-finite anatomical step
+lengths also refuse. Nonuniform but strictly monotonic coordinates can have an orientation.
+Components along unoriented frame axes are ignored for anatomical direction and length.
+
+**`reoriented(grid, orientation)`** returns the same samples with varying dims permuted by
+`transpose` and reversed by negative-step `isel`. Corresponding sample points and cells are
+unchanged; declared intervals follow selection. Requests must be a signed permutation of
+the grid's assigned axes; otherwise `ValueError` names the available orientation (a plane
+assigned to `S` and `P` cannot supply `L`). For a singleton reversal, selection has no step
+to reverse: negate its affine matrix column and coordinate, mirror its declared interval
+`[lo, hi]` to `[-hi, -lo]`, and complement its sample offset `s` to `1-s` only when it has a
+declared interval. Offsets are measured toward higher coordinate values. A singleton without
+an interval has no cells (the cells domain refuses it); reflection leaves its offset unchanged,
+and a double reflection is an exact grid identity. With an interval, a double reflection restores
+points, coordinates and intervals exactly, but `1-(1-s)` can round: it differs from `0.3` by one
+ulp and from `0.1` by two ulps. An offset-relative one-ulp bound is therefore not guaranteed.
+This is the only case that changes the transform: the reflected transform is rebuilt as an
+`AffineTransform` from the source's affine matrix, replacing any other `SupportsAffine` type.
+It preserves the sample and cell exactly, including non-centred cells.
+Negating the int64 minimum yields its exactly representable float64
+opposite because the positive value does not fit int64. Other integer coordinates stay int64.
+Nonsingleton reversals use `Grid.isel` and therefore require xarray.
+
+**`cardinal_grid(grid, orientation, *, spacing=None, dims=None, cover="cells")`** builds a
+target grid in the same frame for `rf.resample_to`. It requires three varying dims (size 1
+is allowed) and refuses retained scalar axes. Output dims take the names of the source dims
+assigned to the same frame axes; `dims=` overrides them with three unique, non-empty names.
+The output transform is an `AffineTransform` from dimensionless `ArrayCoordinates`, using
+int64 coordinates `0..n-1`. The sample offsets are `(0.5,)*3` for cells mode and `(None,)*3`
+for samples mode (point support).
+Its columns are exactly `spacing[d] * direction[d]` along the requested signed frame axes.
+Spacing never shrinks to land on the far bound.
+
+`spacing=None` uses the assigned source dim's uniform coordinate step length in frame units,
+with uniformity tested within `LATTICE_TOLERANCE=1e-6` coordinate steps. A size-1 source dim
+uses its declared interval width times its column length. Nonuniform or undetermined spacing
+refuses with a request for explicit spacing. A positive scalar specifies isotropic spacing;
+three finite positive values specify spacing in output dim order. Invalid spacing or dim
+counts raise `ValueError`.
+
+Coverage projects the exact source corners onto the requested output directions:
+
+- `cover="cells"` uses declared interval bounds where present, otherwise the sample-offset
+  cells (outer steps extrapolate nonuniform coordinates). Every source dim must describe
+  cells; point support or a singleton without an interval refuses. The first output cell's
+  lower edge sits at the projected minimum. There are
+  `max(1, ceil(extent / spacing - COVERAGE_TOLERANCE))` cells.
+- `cover="samples"` uses the sample hull. The first sample sits at its projected minimum and
+  there are `max(1, ceil(extent / spacing - COVERAGE_TOLERANCE) + 1)` samples. The last sample
+  reaches or passes the maximum, within the tolerance.
+
+`COVERAGE_TOLERANCE=1e-9` is in output steps and absorbs rounding near integer counts.
+Coverage starts at the near edge; any overshoot (under one step) is on the far side.
+In cells mode, a size-1 output dim with positive covered extent declares an interval of that
+exact extent, expressed in its index coordinate units. Its sample is centred on the covered
+extent, preserving a slab even when explicit spacing is wider than the slab. This singleton
+support takes precedence over using a full spacing-wide cell. Samples mode declares no
+intervals, including for singleton outputs; other output dims also declare no intervals.
+Unknown cover modes, counts exceeding int64, or source variation along an unoriented frame
+axis that a three-axis cardinal box cannot cover raise `ValueError`. The unoriented-axis
+check uses the affine cross rows weighted by covered source coordinate spans and accepts
+only floating-point roundoff: `CROSS_ROW_ROUNDOFF` (64 machine epsilons) times the transform's
+largest coefficient and index span. It does not depend on the axes' units, and a large
+translation cannot hide real variation; the output takes the midpoint of tolerated noise.
+
 ### Native grid doors
 
 `array.rf.frame(grid)` requires every grid dimension to be an array dimension with the same
@@ -531,8 +637,9 @@ Format adapters are optional subpackages of the xarrayrf distribution, each with
 `xarrayrf.native.frame_array` (duck-array and shape check, then framing on the imported
 `Grid`), `index_coordinate`, and the `CoordinateSpec`,
 `Report` and `DuckArray` aliases.
-`xarrayrf.anatomy` holds the
-canonical anatomical vocabulary and is dependency-free.
+`xarrayrf.anatomy` holds the canonical anatomical vocabulary and grid operations; it depends
+only on the NumPy core. Reorientation delegates nonsingleton reversal to `Grid.isel`, which
+imports xarray lazily.
 
 - The core never imports an adapter; an adapter imports only the core (including
   `xarrayrf.native`), `xarrayrf.anatomy` and its own format library. The import-boundary test

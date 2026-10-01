@@ -465,3 +465,17 @@ def test_slice_thickness_intervals_attach_in_slice_coordinate_units(
     assert_allclose(array.rf.grid.intervals[axis], expected, rtol=0, atol=ATOL)
     assert geometry.slice_intervals is not None
     assert_allclose(array.rf.grid.intervals[axis], geometry.slice_intervals, rtol=0, atol=ATOL)
+
+
+@pytest.mark.parametrize("axis_aligned", [False, True])
+def test_imported_grid_anatomical_orientation(axis_aligned: bool) -> None:
+    from xarrayrf.anatomy import orientation_codes
+
+    datasets = [image(0), image(2), image(4)]
+    if axis_aligned:
+        for k, dataset in enumerate(datasets):
+            dataset.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+            dataset.ImagePositionPatient = [10, 20, 30 + 2 * k]
+    geometry = from_datasets(datasets)
+    array = to_dataarray(geometry, np.zeros((3, 4, 5)))
+    assert orientation_codes(array.rf.grid) == ("SPL" if axis_aligned else "ASL")

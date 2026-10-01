@@ -93,23 +93,53 @@ Approved lifecycle (implemented in stage 3):
 | `rf.grid`, `frame_array`, `rf.frame(grid)`, encoding | Preserved exactly |
 | `resample_to(target)` | The result carries the target's intervals, never the source's |
 
-### 4. Anatomy on grids (`xarrayrf.anatomy`)
+### 4. Anatomy on grids (`xarrayrf.anatomy`) — Done
 
-Affine transforms into anatomically oriented frames only; nonlinear transforms refuse.
+Affine transforms into frames with three RFC-4 anatomical spatial axes in one common unit;
+nonlinear transforms refuse. Orientations name the direction of index increase, using either
+case-sensitive patient letters (`R=left-to-right`, `L=right-to-left`,
+`A=posterior-to-anterior`, `P=anterior-to-posterior`, `S=inferior-to-superior`,
+`I=superior-to-inferior`) or RFC-4 token tuples. Codes are letters when all directions have
+letters, otherwise tokens. Named DICOM display planes in `(slice, row, column)` order are
+`axial=SPL`, `coronal=PIL`, `sagittal=RIP`, with `transverse` an alias for `axial`.
 
 - `orientation_codes(grid)`: the anatomical direction of each dim. Dims are assigned to frame
   axes one-to-one by the permutation maximizing the summed absolute cosines of the unit step
   directions (at most 3! candidates); if the best and second-best permutations are within
-  tolerance, it refuses as ambiguous. Strongly sheared grids may therefore refuse; resample them
-  to a cardinal grid first.
+  `ASSIGNMENT_TOLERANCE=1e-6` in summed cosines, it refuses as ambiguous. Steps use the matrix
+  column times the coordinate-step sign (the column alone for size 1). Retained scalars are
+  ignored; partial assignments handle fewer than three varying dims. The tolerance detects
+  exact ties, not an obliquity bound: nearest-axis labels flip across 45°, as with nibabel's
+  `aff2axcodes`. Use the residual angle from `CoordinateSystem.axis_codes` to bound obliquity.
+  Parallel or antiparallel anatomical step directions refuse with their own message;
+  ambiguous assignments ask the caller to resample to a cardinal grid first.
 - `reoriented(grid, orientation)`: the same samples with dims permuted and reversed to match a
-  requested orientation (pure `transpose` + reversing `isel`; points unchanged).
-- `cardinal_grid(grid, orientation, *, spacing=None, cover="cells")`: a new axis-aligned grid in
+  requested orientation (`transpose` + reversing `isel`; points and cells unchanged). Requested
+  axes must be a signed permutation of the assigned axes. Singleton reversal negates its
+  column and coordinate, mirrors its interval and complements its sample offset only when
+  an interval is declared, preserving exact support. Without an interval it keeps its offset
+  and a double reflection is an exact identity. With an interval, points, coordinates and
+  intervals return exactly, but offset subtraction can round (two ulps for 0.1, one for 0.3).
+  This is the sole case that changes the transform; it rebuilds an `AffineTransform` from
+  the source affine matrix, replacing any other `SupportsAffine` type.
+- `cardinal_grid(grid, orientation, *, spacing=None, dims=None, cover="cells")`: a new axis-aligned grid in
   the same frame, for `resample_to`: the reformat-to-axial/sagittal/coronal case. It covers the
   source's cell extent (declared intervals, else sample-offset cells) or, with `cover="samples"`,
   its sample hull. Default spacing per output axis is the step of the source axis assigned to
-  it; a nonuniform source axis needs explicit `spacing`. A single thick slice keeps its
-  declared interval as the output slice's interval.
+  it; a nonuniform source axis needs explicit `spacing`, and a size-1 source uses its declared
+  interval width. Requires three varying dims with no retained scalar axes. Default names follow
+  assigned source axes, or three unique `dims=` override them. The transform maps dimensionless
+  int64 indices with columns equal to requested spacing times cardinal direction.
+  Samples mode uses point support (`sample_offset=None`); cells mode uses centred offsets.
+  Exact cell or sample corners determine the projected box. Counts round upward with
+  `COVERAGE_TOLERANCE=1e-9` output steps; cells start at the minimum edge, samples at the minimum
+  sample, and spacing is never shrunk to meet the maximum. Any overshoot, under one step,
+  is on the far side. In cells mode a size-1 output declares the exact covered interval and
+  is centred on it, even with explicit spacing wider than the slab. Samples mode declares no
+  intervals. These singleton support rules take precedence over a full spacing-wide cell.
+  Non-anatomical cross-row variation is checked from affine coefficients and covered source
+  spans and accepts only roundoff (`CROSS_ROW_ROUNDOFF` times the coefficient and index scale),
+  independent of units and translation.
 
 ### 5. Complete and anonymous frames
 
@@ -204,8 +234,10 @@ reviewed separately.
    scalars, roll, rename, `swap_dims`, support conflicts, joins, missing-label refusals, concat
    refusal and target support. Existing xarray hook limitations remain on the stock lane;
    mixed-index subsets and `swap_dims` are exercised against the local patched lane.
-4. Anatomy functions. Accept: an oblique volume, a single thick slice, and a sheared grid whose
-   per-dim largest cosines collide.
+4. **Done.** Anatomy functions, patient-letter/token notation and DICOM display planes. Public
+   tests cover LPS/RAS and DICOM grids, oblique volumes, all 48 signed permutations (including
+   singleton reflection), exact projected coverage, thick slices in their own and perpendicular
+   planes, nonuniform spacing, assignment collisions/ambiguity, and exact same-grid resampling.
 5. Anonymous frames: `ReferenceFrame.anonymous` and `is_anonymous`; adapter call sites
    classified (anonymous versus deliberate local); `frame=` accepting a framed array where it
    does not yet; `assume_frame` applying derivable coordinate-system changes through the same
