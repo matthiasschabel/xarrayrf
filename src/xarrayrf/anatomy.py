@@ -55,10 +55,10 @@ COVERAGE_TOLERANCE = 1e-9
 """Slack in output steps subtracted before rounding a coverage count upward."""
 
 CROSS_ROW_ROUNDOFF = 64 * float(np.finfo(np.float64).eps)
-"""Roundoff allowed on a non-anatomical frame axis, relative to the transform's coefficient scale.
+"""Roundoff allowed on a non-anatomical frame axis, relative to covered column contributions.
 
 The check only has to absorb floating-point noise from composing transforms, which scales with
-the largest coefficient and index span, so it never depends on the axes' units.
+each column's largest coefficient times its own coordinate span.
 """
 
 _LETTER_TOKENS = {
@@ -98,9 +98,9 @@ def _codes(tokens: tuple[str, ...]) -> str | tuple[str, ...]:
     return tokens
 
 
-def _assignment(
+def _anatomical_grid(
     grid: Grid,
-) -> tuple[SupportsAffine, tuple[AxisSampling, ...], tuple[int, ...], tuple[str, ...]]:
+) -> tuple[SupportsAffine, tuple[AxisSampling, ...], tuple[int, ...], npt.NDArray[np.float64]]:
     if not isinstance(grid, Grid):
         raise TypeError("grid must be a Grid")
     transform = grid.transform
@@ -142,20 +142,36 @@ def _assignment(
             raise ValueError(
                 f"dimensions {axes[j].dim!r} and {axes[k].dim!r} point along the same direction"
             )
+    return transform, axes, oriented, cosines
+
+
+def _axis_assignment(
+    cosines: npt.NDArray[np.float64], *, ambiguity_message: str
+) -> tuple[int, ...]:
     candidates = sorted(
         (
             (sum(abs(float(cosines[j, i])) for j, i in enumerate(order)), order)
-            for order in permutations(range(3), len(axes))
+            for order in permutations(range(3), len(cosines))
         ),
         reverse=True,
     )
     if len(candidates) > 1 and candidates[0][0] - candidates[1][0] <= ASSIGNMENT_TOLERANCE:
-        raise ValueError(
-            "anatomical axis assignment is ambiguous; resample to a cardinal grid first"
-        )
-    assigned = tuple(oriented[i] for i in candidates[0][1])
+        raise ValueError(ambiguity_message)
+    return candidates[0][1]
+
+
+def _assignment(
+    grid: Grid,
+) -> tuple[SupportsAffine, tuple[AxisSampling, ...], tuple[int, ...], tuple[str, ...]]:
+    transform, axes, oriented, cosines = _anatomical_grid(grid)
+    order = _axis_assignment(
+        cosines,
+        ambiguity_message="anatomical axis assignment is ambiguous; resample to a cardinal grid first",
+    )
+    assigned = tuple(oriented[i] for i in order)
+    system = grid.frame.coordinate_system
     tokens = []
-    for j, i in enumerate(candidates[0][1]):
+    for j, i in enumerate(order):
         token = system.orientation[oriented[i]]
         assert token is not None
         tokens.append(token if cosines[j, i] >= 0 else VOCABULARY.opposite(token))
@@ -193,9 +209,9 @@ def reoriented(grid: Grid, orientation: str | tuple[str, ...]) -> Grid:
     and complement the sample offset only when an interval is declared. Without an
     interval a singleton has no cells, so its offset stays unchanged and two reflections
     restore the grid exactly. With an interval, two reflections restore points,
-    coordinates and intervals exactly; offset subtraction can round (two ulps for 0.1,
-    one for 0.3). This is the only transform change: the source affine matrix is rebuilt
-    as an ``AffineTransform``, replacing any other ``SupportsAffine`` implementation.
+    coordinates and intervals exactly; offset subtraction can round within the absolute
+    bound ``np.spacing(1.0)``. This is the only transform change: the source affine matrix
+    is rebuilt as an ``AffineTransform``, replacing any other ``SupportsAffine`` implementation.
 
     Raises:
         TypeError: As on orientation_codes, or if orientation has the wrong type.
@@ -298,6 +314,8 @@ def cardinal_grid(
     the same frame axes unless overridden. Spacing is a positive scalar or three values
     in output order; omitted, use assigned source step lengths (uniform within
     ``LATTICE_TOLERANCE``), or a singleton's declared interval width in frame units.
+    An ambiguous assignment requires both explicit spacing and dims. Output directions
+    and coverage depend only on the frame and source corners, not on that assignment.
 
     Exact source corners are projected onto output axes. Counts round upward after
     subtracting ``COVERAGE_TOLERANCE`` (1e-9 output steps); spacing is never shrunk.
@@ -307,23 +325,28 @@ def cardinal_grid(
     on it. Samples mode is point support and declares no intervals.
     The affine maps int64 indices from dimensionless ArrayCoordinates.
     Non-anatomical cross-row variation must be roundoff only: within ``CROSS_ROW_ROUNDOFF``
-    times the transform's largest coefficient and index span, independent of units. The output
-    takes the midpoint of any tolerated variation on such an axis.
+    times the largest matched contribution (each column's largest absolute coefficient
+    times its covered source coordinate span), independent of source coordinate scaling.
+    The output takes the midpoint of any tolerated variation on such an axis.
 
     Raises:
         TypeError: As on orientation_codes, or for invalid orientation, spacing or dims types.
         ValueError: As on orientation_codes, or if the requested directions are unavailable,
             there are not three varying dims without retained axes, cover or dims are invalid,
             spacing is not finite and positive, default spacing is undetermined, cells have no
-            support, or the source varies along a non-anatomical frame axis.
+            support, anatomical directions lack rank three, or the source varies along a
+            non-anatomical frame axis. Assignment ambiguity refuses only when spacing or
+            dims is omitted.
     """
-    transform, axes, assigned, _ = _assignment(grid)
+    transform, axes, oriented, cosines = _anatomical_grid(grid)
     if len(axes) != 3 or len(transform.source.axes) != 3:
         raise ValueError("cardinal_grid requires three varying dims and no retained scalar axes")
+    if np.linalg.matrix_rank(cosines) < 3:
+        raise ValueError("cardinal_grid requires anatomical step directions of rank three")
     requested = _orientation(orientation, 3)
     system = grid.frame.coordinate_system
     frame_pairs = {}
-    for i in assigned:
+    for i in oriented:
         token = system.orientation[i]
         assert token is not None
         frame_pairs[VOCABULARY.pair(token)] = i
@@ -332,7 +355,14 @@ def cardinal_grid(
             f"requested axes are unavailable; available frame directions are {system.orientation!r}"
         )
     output_axes = [frame_pairs[VOCABULARY.pair(token)] for token in requested]
-    source_order = [assigned.index(i) for i in output_axes]
+    source_order = []
+    if spacing is None or dims is None:
+        order = _axis_assignment(
+            cosines,
+            ambiguity_message="anatomical axis assignment is ambiguous; pass explicit spacing and dims",
+        )
+        assigned = tuple(oriented[i] for i in order)
+        source_order = [assigned.index(i) for i in output_axes]
     names = (
         tuple(grid.dims[j] for j in source_order)
         if dims is None
@@ -355,7 +385,7 @@ def cardinal_grid(
                 )
             column = transform.source.axes.index(axis.axis)
             lengths.append(
-                abs(step) * float(np.linalg.norm(transform.matrix[list(assigned), column]))
+                abs(step) * float(np.linalg.norm(transform.matrix[list(oriented), column]))
             )
         steps = np.asarray(lengths)
     else:
@@ -372,12 +402,11 @@ def cardinal_grid(
     source_corners = _source_corners(grid, axes, cover)
     corners = transform.transform_point(source_corners)
     coordinate_extent = np.ptp(source_corners, axis=0)
-    roundoff = (
-        CROSS_ROW_ROUNDOFF
-        * float(np.max(np.abs(transform.matrix)))
-        * float(np.max(coordinate_extent, initial=0.0))
+    roundoff = CROSS_ROW_ROUNDOFF * float(
+        np.max(np.max(np.abs(transform.matrix), axis=0) * coordinate_extent)
     )
-    for i in set(range(len(grid.frame.axes))) - set(assigned):
+    unoriented = set(range(len(grid.frame.axes))) - set(oriented)
+    for i in unoriented:
         cross_extent = float(np.abs(transform.matrix[i]) @ coordinate_extent)
         if cross_extent > roundoff:
             raise ValueError(
@@ -399,7 +428,7 @@ def cardinal_grid(
             width = extent[j] / steps[j]
             intervals[name] = np.array([[-width / 2, width / 2]])
     origin = direction @ first
-    for i in set(range(len(grid.frame.axes))) - set(assigned):
+    for i in unoriented:
         origin[i] = (corners[:, i].min() + corners[:, i].max()) / 2
     return Grid(
         AffineTransform(

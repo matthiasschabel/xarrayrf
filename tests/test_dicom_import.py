@@ -13,6 +13,7 @@ from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence as DicomSequence
 
 from xarrayrf import AffineTransform, ArrayCoordinates, Geometry
+from xarrayrf.anatomy import cardinal_grid
 from xarrayrf.dicom import DicomGeometry, from_datasets, from_enhanced, patient_frame, to_dataarray
 
 ATOL = 1e-9  # Synthetic Decimal Strings use exact short decimal inputs.
@@ -78,6 +79,62 @@ R = np.array([0.8, 0.6, 0.0])
 C = np.array([-0.36, 0.48, 0.8])
 N = np.cross(R, C)
 ORIGIN = np.array([10.0, 20.0, 30.0])
+
+
+def test_oblique_dicom_cardinal_grid_resamples_linear_data_and_masks_outside() -> None:
+    geometry = from_datasets([image(0), image(2), image(4)])
+    k, j, i = np.indices((3, 4, 5), dtype=float)
+    points = ORIGIN + 2 * k[..., None] * N + 2 * j[..., None] * C + 3 * i[..., None] * R
+    coefficients = np.array([2.0, -3.0, 0.5])
+    source = to_dataarray(geometry, 7 + points @ coefficients)
+    target = cardinal_grid(source.rf.grid, "axial", spacing=1)
+    result = source.rf.resample_to(target)
+    target_points = target.points()
+    displacement = target_points - ORIGIN
+    positions = np.stack(
+        (displacement @ N / 2, displacement @ C / 2, displacement @ R / 3), axis=-1
+    )
+    inside = np.all((positions >= -ATOL) & (positions <= np.array([2, 3, 4]) + ATOL), axis=-1)
+    assert inside.any() and (~inside).any()
+    np.testing.assert_array_equal(np.isnan(result.values), ~inside)
+    assert_allclose(
+        result.values[inside], (7 + target_points @ coefficients)[inside], rtol=0, atol=ATOL
+    )
+    assert not target.intervals
+    assert result.rf.grid == target
+
+
+def test_thick_dicom_slice_cardinal_resampling_keeps_intervals_and_cell_mask() -> None:
+    dataset = image(7, thickness=4)
+    dataset.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+    dataset.ImagePositionPatient = [10, 20, 37]
+    geometry = from_datasets([dataset])
+    _, j, i = np.indices((1, 4, 5), dtype=float)
+    values = 7 + 2 * (10 + 3 * i) - 3 * (20 + 2 * j)
+    source = to_dataarray(geometry, values)
+    target = cardinal_grid(source.rf.grid, "axial", spacing=(10, 1.3, 1.3))
+    result = source.rf.resample_to(target, domain="cells")
+    points = target.points()
+    positions = (points - [10, 20, 37]) / [3, 2, 1]
+    inside = np.all(
+        (positions >= np.array([-0.5, -0.5, -2]) - ATOL)
+        & (positions <= np.array([4.5, 3.5, 2]) + ATOL),
+        axis=-1,
+    )
+    assert inside.any() and (~inside).any()
+    np.testing.assert_array_equal(np.isnan(result.values), ~inside)
+    # Cells outside the sample hull hold the edge sample's value.
+    expected = (
+        7
+        + 2 * (10 + 3 * np.clip(positions[..., 0], 0, 4))
+        - 3 * (20 + 2 * np.clip(positions[..., 1], 0, 3))
+    )
+    assert_allclose(result.values[inside], expected[inside], rtol=0, atol=ATOL)
+    assert target.sizes["k"] == 1
+    assert set(target.intervals) == {"k"}
+    assert_allclose(target.intervals["k"], [[-0.2, 0.2]], rtol=0, atol=ATOL)
+    assert_allclose(points[..., 2], 37, rtol=0, atol=ATOL)
+    assert result.rf.grid == target
 
 
 def test_to_dataarray_orders_classic_pixels_with_positions() -> None:

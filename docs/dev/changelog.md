@@ -2,6 +2,28 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-01] — QA fixes for anatomy on grids (grid plan stage 4)
+
+- **Problem**: A QA pass over `xarrayrf.anatomy` found that `cardinal_grid` always assigned
+  source dimensions to frame axes, so a source whose assignment is ambiguous (a 45° volume)
+  was refused even with explicit `spacing` and `dims`, although the ambiguity error tells
+  callers to resample to a cardinal grid; and that the roundoff bound on non-anatomical frame
+  axes multiplied the largest coefficient by the largest source span independently, so
+  rescaling one source coordinate loosened it enough to accept a real one-second time
+  variation. Committed tests also did not resample onto a cardinal grid, and the reflection
+  offset bound was worded inconsistently.
+- **Resolution**: Output directions come from the requested orientation and the frame;
+  the source assignment is used only for default spacing and dimension names, which refuse an
+  ambiguous source with advice to pass them explicitly. The roundoff bound uses each source
+  column's own physical scale (coefficient times span), so equivalent representations decide
+  alike. Integration tests resample an oblique DICOM-like volume and a thick single slice onto
+  cardinal grids against a linear oracle. The offset bound is stated as `np.spacing(1.0)`.
+- **Files affected**: `src/xarrayrf/anatomy.py`; `tests/test_anatomy.py`,
+  `tests/test_dicom_import.py`; `docs/core_interface.md`, `docs/dev/architecture/grid_plan.md`,
+  `CHANGELOG.md`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high), with fixes implemented by Codex
+  gpt-6.1-sol and verified by Claude Opus 5.5 (claude-opus-5-5)
+
 ## [2026-09-30] — QA fixes for declared intervals (grid plan stage 3)
 
 - **Problem**: A QA pass over declared intervals found that an empty varying axis with declared

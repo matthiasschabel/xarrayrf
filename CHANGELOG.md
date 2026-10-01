@@ -207,6 +207,14 @@
 
 ### Fixed
 
+- `anatomy.cardinal_grid` accepts ambiguous source orientations when both `spacing` and `dims`
+  are explicit; ambiguous defaults now request both arguments. Frame and rank validation,
+  output directions and coverage do not require a source-axis assignment.
+- Cardinal-grid non-anatomical roundoff bounds match each affine column to its own covered
+  coordinate span, so source-coordinate rescaling cannot hide real variation.
+- Singleton reflection's documented offset error uses the absolute bound `np.spacing(1.0)`;
+  sample points and declared cells remain exact.
+
 - Empty varying axes with declared intervals round-trip through core and native persistence,
   including empty selections and disjoint inner joins.
 - Declared intervals require exact sample containment for varying axes and retained scalars,

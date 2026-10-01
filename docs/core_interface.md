@@ -383,8 +383,8 @@ to reverse: negate its affine matrix column and coordinate, mirror its declared 
 declared interval. Offsets are measured toward higher coordinate values. A singleton without
 an interval has no cells (the cells domain refuses it); reflection leaves its offset unchanged,
 and a double reflection is an exact grid identity. With an interval, a double reflection restores
-points, coordinates and intervals exactly, but `1-(1-s)` can round: it differs from `0.3` by one
-ulp and from `0.1` by two ulps. An offset-relative one-ulp bound is therefore not guaranteed.
+points, coordinates and intervals exactly, but `1-(1-s)` can round. The absolute offset error
+is bounded by `np.spacing(1.0)`, one ulp at unit scale, rather than an offset-relative ulp.
 This is the only case that changes the transform: the reflected transform is rebuilt as an
 `AffineTransform` from the source's affine matrix, replacing any other `SupportsAffine` type.
 It preserves the sample and cell exactly, including non-centred cells.
@@ -396,6 +396,12 @@ Nonsingleton reversals use `Grid.isel` and therefore require xarray.
 target grid in the same frame for `rf.resample_to`. It requires three varying dims (size 1
 is allowed) and refuses retained scalar axes. Output dims take the names of the source dims
 assigned to the same frame axes; `dims=` overrides them with three unique, non-empty names.
+Frame, affine-transform and direction-rank validation are independent of source-dim assignment:
+the anatomical step directions must have rank three. Output directions come from the requested
+orientation and the frame; coverage comes from projected source corners. Assignment is needed
+only for default `spacing` or default `dims`. If either is omitted and assignment is ambiguous,
+the error asks callers to pass explicit `spacing` and `dims`. Supplying both permits a 45°
+volume to produce a cardinal target; `orientation_codes` still refuses the tie.
 The output transform is an `AffineTransform` from dimensionless `ArrayCoordinates`, using
 int64 coordinates `0..n-1`. The sample offsets are `(0.5,)*3` for cells mode and `(None,)*3`
 for samples mode (point support).
@@ -430,9 +436,12 @@ intervals, including for singleton outputs; other output dims also declare no in
 Unknown cover modes, counts exceeding int64, or source variation along an unoriented frame
 axis that a three-axis cardinal box cannot cover raise `ValueError`. The unoriented-axis
 check uses the affine cross rows weighted by covered source coordinate spans and accepts
-only floating-point roundoff: `CROSS_ROW_ROUNDOFF` (64 machine epsilons) times the transform's
-largest coefficient and index span. It does not depend on the axes' units, and a large
-translation cannot hide real variation; the output takes the midpoint of tolerated noise.
+only floating-point roundoff: `CROSS_ROW_ROUNDOFF` (64 machine epsilons) times
+`max_j(max_k(abs(M[k, j])) * span_j)`, where `span_j` is the covered source coordinate span
+for column `j`. Each column's coefficient is matched to its own span, so rescaling a source
+coordinate and inversely scaling its column leaves the bound unchanged. The check uses the
+frame's unoriented axes, independently of assignment. It does not depend on the axes' units,
+and a large translation cannot hide real variation; the output takes the midpoint of tolerated noise.
 
 ### Native grid doors
 

@@ -372,6 +372,49 @@ def test_default_spacing_uses_oblique_anatomical_column_norms() -> None:
     assert_allclose(output.lattice().spacing, [4, 9, 16], rtol=0, atol=ATOL)
 
 
+def test_cardinal_grid_resamples_ambiguous_orientation_with_explicit_spacing_and_dims() -> None:
+    from xarrayrf.native import frame_array
+
+    grid = volume(angle=45)
+    with pytest.raises(ValueError, match=r"ambiguous.*cardinal grid"):
+        orientation_codes(grid)
+    target = cardinal_grid(grid, "RAS", spacing=1, dims=("x", "y", "z"))
+    assert orientation_codes(target) == "RAS"
+    coefficients = np.array([2.0, -3.0, 0.5])
+    source = frame_array(7 + grid.points() @ coefficients, grid=grid)
+    result = source.rf.resample_to(target)
+    transform = grid.transform
+    assert isinstance(transform, AffineTransform)
+    positions = (target.points() - transform.translation) @ np.linalg.inv(transform.matrix).T
+    inside = np.all((positions >= -ATOL) & (positions <= np.array([2, 3, 1]) + ATOL), axis=-1)
+    assert inside.any() and (~inside).any()
+    np.testing.assert_array_equal(np.isnan(result.values), ~inside)
+    assert_allclose(
+        result.values[inside], (7 + target.points() @ coefficients)[inside], rtol=0, atol=ATOL
+    )
+    assert result.rf.grid == target
+
+
+@pytest.mark.parametrize("spacing,dims", [(None, None), (1, None), (None, ("x", "y", "z"))])
+def test_ambiguous_cardinal_defaults_request_explicit_spacing_and_dims(
+    spacing: float | None, dims: tuple[str, ...] | None
+) -> None:
+    with pytest.raises(ValueError, match=r"ambiguous.*pass explicit spacing and dims"):
+        cardinal_grid(volume(angle=45), "RAS", spacing=spacing, dims=dims)
+
+
+def test_explicit_cardinal_grid_still_requires_rank_three_anatomical_directions() -> None:
+    grid = volume()
+    transform = AffineTransform(
+        source=grid.transform.source,
+        target=grid.frame,
+        matrix=[[1, 0, 1], [0, 1, 1], [0, 0, 0]],
+        translation=[0, 0, 0],
+    )
+    with pytest.raises(ValueError, match="rank three"):
+        cardinal_grid(Grid(transform, grid.coordinates), "RAS", spacing=1, dims=("x", "y", "z"))
+
+
 def test_cardinal_self_orientation_resamples_by_exact_gather(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -528,8 +571,8 @@ def test_singleton_without_interval_keeps_noncentred_offset_on_reflection() -> N
         grid.points_at([[0, 0, 0]], domain="cells")
 
 
-@pytest.mark.parametrize("offset,ulps", [(0.1, 2), (0.3, 1)])
-def test_singleton_interval_reflection_preserves_exact_support(offset: float, ulps: int) -> None:
+@pytest.mark.parametrize("offset", [0.1, 0.3])
+def test_singleton_interval_reflection_preserves_exact_support(offset: float) -> None:
     grid = volume(
         values=([2], [0, 1], [0, 1]),
         offsets=(offset, 0.5, 0.5),
@@ -556,16 +599,10 @@ def test_singleton_interval_reflection_preserves_exact_support(offset: float, ul
         np.testing.assert_array_equal(restored_entry[1], original_entry[1])
     for name in grid.intervals:
         np.testing.assert_array_equal(restored.intervals[name], grid.intervals[name])
-    # Subtraction at 1.0 loses two ulps of 0.1, but only one ulp of 0.3.
     assert isinstance(restored.transform.source, ArrayCoordinates)
     restored_offset = restored.transform.source.sample_offset[0]
     assert restored_offset is not None
-    assert_allclose(
-        restored_offset,
-        offset,
-        rtol=0,
-        atol=ulps * np.spacing(offset),
-    )
+    assert abs(restored_offset - offset) <= np.spacing(1.0)
 
 
 def test_nonlinear_transform_refuses() -> None:
@@ -650,6 +687,43 @@ def test_cardinal_non_anatomical_cross_rows_allow_only_roundoff(
         assert orientation_codes(output) == "RAS"
         assert isinstance(output.transform, AffineTransform)
         np.testing.assert_array_equal(output.transform.matrix[3], [0, 0, 0])
+
+
+@pytest.mark.parametrize("coordinate_scale", [1.0, 1e15])
+@pytest.mark.parametrize("spatial_step,unit", [(1.0, "mm"), (1000.0, "um")])
+@pytest.mark.parametrize("cross_step", [1.0, 1e-17])
+def test_cardinal_cross_row_bound_matches_each_column_to_its_coordinate_span(
+    coordinate_scale: float, spatial_step: float, unit: str, cross_step: float
+) -> None:
+    system = CoordinateSystem(
+        ("x", "y", "z", "t"),
+        (unit, unit, unit, "s"),
+        axis_types=("space", "space", "space", "time"),
+        vocabulary=VOCABULARY,
+        orientation=(*RAS, None),
+    )
+    transform = AffineTransform(
+        source=ArrayCoordinates(("a", "b", "c"), ("1",) * 3),
+        target=ReferenceFrame.local(system),
+        matrix=np.array(
+            [[spatial_step, 0, 0], [0, spatial_step, 0], [0, 0, spatial_step], [0, 0, cross_step]]
+        )
+        / [coordinate_scale, 1, 1],
+        translation=np.zeros(4),
+    )
+    grid = Grid(
+        transform, {"a": ("a", [0, coordinate_scale]), "b": ("b", [0, 1]), "c": ("c", [0, 1])}
+    )
+    if cross_step > 1e-6:
+        with pytest.raises(ValueError, match="non-anatomical"):
+            cardinal_grid(grid, "RAS", spacing=spatial_step, dims=("x", "y", "z"), cover="samples")
+    else:
+        output = cardinal_grid(
+            grid, "RAS", spacing=spatial_step, dims=("x", "y", "z"), cover="samples"
+        )
+        assert isinstance(output.transform, AffineTransform)
+        np.testing.assert_array_equal(output.transform.matrix[3], [0, 0, 0])
+        assert_allclose(output.lattice().matrix[:3], np.eye(3) * spatial_step, rtol=0, atol=ATOL)
 
 
 def test_coverage_count_roundoff_keeps_exact_spacing() -> None:

@@ -1,7 +1,7 @@
 # Freestanding grids
 
 **Status:** Active
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
 **Scope:** A NumPy-only `Grid` value describing an array's sampling without pixels; the doors that
 bind, snapshot, resample onto and persist it; declared intervals carried by grids and bindings;
 anatomical grid operations; and complete versus anonymous frames.
@@ -119,7 +119,8 @@ letters, otherwise tokens. Named DICOM display planes in `(slice, row, column)` 
   column and coordinate, mirrors its interval and complements its sample offset only when
   an interval is declared, preserving exact support. Without an interval it keeps its offset
   and a double reflection is an exact identity. With an interval, points, coordinates and
-  intervals return exactly, but offset subtraction can round (two ulps for 0.1, one for 0.3).
+  intervals return exactly, but offset subtraction can round within the absolute bound
+  `np.spacing(1.0)` (one ulp at unit scale).
   This is the sole case that changes the transform; it rebuilds an `AffineTransform` from
   the source affine matrix, replacing any other `SupportsAffine` type.
 - `cardinal_grid(grid, orientation, *, spacing=None, dims=None, cover="cells")`: a new axis-aligned grid in
@@ -128,7 +129,12 @@ letters, otherwise tokens. Named DICOM display planes in `(slice, row, column)` 
   its sample hull. Default spacing per output axis is the step of the source axis assigned to
   it; a nonuniform source axis needs explicit `spacing`, and a size-1 source uses its declared
   interval width. Requires three varying dims with no retained scalar axes. Default names follow
-  assigned source axes, or three unique `dims=` override them. The transform maps dimensionless
+  assigned source axes, or three unique `dims=` override them. Frame and affine validation,
+  including rank-three anatomical step directions, are independent of source-dim assignment.
+  Output directions use the requested orientation and frame, and coverage uses projected corners.
+  Assignment is needed only for default spacing or dims; an ambiguous default asks for explicit
+  `spacing` and `dims`. With both supplied, a 45° volume succeeds while `orientation_codes`
+  still refuses its tie. The transform maps dimensionless
   int64 indices with columns equal to requested spacing times cardinal direction.
   Samples mode uses point support (`sample_offset=None`); cells mode uses centred offsets.
   Exact cell or sample corners determine the projected box. Counts round upward with
@@ -138,8 +144,10 @@ letters, otherwise tokens. Named DICOM display planes in `(slice, row, column)` 
   is centred on it, even with explicit spacing wider than the slab. Samples mode declares no
   intervals. These singleton support rules take precedence over a full spacing-wide cell.
   Non-anatomical cross-row variation is checked from affine coefficients and covered source
-  spans and accepts only roundoff (`CROSS_ROW_ROUNDOFF` times the coefficient and index scale),
-  independent of units and translation.
+  spans on the frame's unoriented axes, independently of assignment. It accepts only roundoff:
+  `CROSS_ROW_ROUNDOFF * max_j(max_k(abs(M[k, j])) * span_j)`. Matching each column's largest
+  coefficient to its own covered span makes the bound invariant under source-coordinate
+  rescaling. It is independent of units and translation.
 
 ### 5. Complete and anonymous frames
 
