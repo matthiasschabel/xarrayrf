@@ -930,13 +930,15 @@ def test_coarsen_nongeometry_keeps_binding(
     plain_source = plain_array.to_dataset(name="signal") if dataset else plain_array
     plain = plain_source.coarsen(echo=2)
     if operation == "mean":
-        result = coarsened.mean()  # type: ignore[union-attr]  # xarray adds reductions dynamically
+        # xarray adds coarsen reductions dynamically, so their stubs differ between releases.
+        result = cast(Any, coarsened).mean()
         expected = plain.mean()
     else:
         result = coarsened.construct(echo=("group", "member"))
         expected = plain.construct(echo=("group", "member"))
     result_array = result["signal"] if dataset else result
     expected_array = expected["signal"] if dataset else expected
+    assert isinstance(result_array, xr.DataArray)
     _assert_same_binding_and_points(result_array, array)
     for name in ("y", "x"):
         assert result_array.xindexes[name] is array.xindexes[name]
