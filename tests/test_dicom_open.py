@@ -124,8 +124,8 @@ def test_dicom_directory_selection_and_bad_files(tmp_path: Path) -> None:
         open([tmp_path / "junk"])
     with pytest.raises(ValueError, match="unknown series_uid"):
         open([tmp_path / "a.dcm"], series_uid="bad")
-    with pytest.raises(ValueError, match="frames requires"):
-        open([tmp_path / "a.dcm"], frames=[0])
+    with pytest.raises(ValueError, match="frame_indices requires"):
+        open([tmp_path / "a.dcm"], frame_indices=[0])
     with pytest.raises(FileNotFoundError):
         open(tmp_path / "missing.dcm")
 
@@ -188,8 +188,8 @@ def test_dicom_empty_and_argument_errors(tmp_path: Path) -> None:
         open(path, series_uid=3)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="modality_lut"):
         open(path, modality_lut="yes")  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="frames"):
-        open(path, frames=3)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="frame_indices"):
+        open(path, frame_indices=3)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("enhanced_input", [False, True])

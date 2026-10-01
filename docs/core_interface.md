@@ -740,13 +740,12 @@ NIfTI `from_header`/`open`, DICOM `from_datasets`/`from_enhanced`/`open`, and Ge
 explicitly overrides the imported identity through the shared adoption contract above,
 even a declared DICOM Frame of Reference UID or CRS authority. Metadata consistency checks
 within a source still apply; DICOM reports the override as `frame-override`, naming any
-discarded Frame of Reference UID. Note the two similar names: `frame=` (singular) is always the
-identity to adopt, while `frames=` is DICOM's multiframe selection and NGFF's mapping for reusing
-named systems.
+discarded Frame of Reference UID. `frame=` is always the identity to adopt; DICOM's multiframe
+selection is `frame_indices=`, and NGFF's reuse of earlier imports is `resolved_frames=`.
 
 **File readers:** `xarrayrf.nifti.open(path, *, frame=None, template=None, xform="best",
 spatial_unit="mm", time=False, chunks="auto")`, `xarrayrf.dicom.open(paths, *,
-frame=None, series_uid=None, frames=None, modality_lut=True, orientation_tolerance=1e-4,
+frame=None, series_uid=None, frame_indices=None, modality_lut=True, orientation_tolerance=1e-4,
 slice_tolerance=0.01, chunks="auto")`, and `xarrayrf.ngff.open(store, *, group="",
 multiscale=None, level=None, chunks="auto")` each return one framed `DataArray`. Default
 pixels are lazy dask arrays. NIfTI uses nibabel's scaled proxy dtype and values. DICOM accepts
@@ -765,9 +764,10 @@ the intrinsic system; additional transforms remain available through `from_multi
 
 **DICOM import:** `xarrayrf.dicom.from_datasets(datasets, *, frame=None, orientation_tolerance=1e-4,
 slice_tolerance=0.01) -> DicomGeometry` imports a classic single-frame stack, and
-`xarrayrf.dicom.from_enhanced(dataset, *, frames=None, frame=None, orientation_tolerance=1e-4,
-slice_tolerance=0.01) -> DicomGeometry` imports one enhanced multiframe object. `frames`
-selects frame indices forming one stack. Both consume metadata-only pydicom datasets and refuse
+`xarrayrf.dicom.from_enhanced(dataset, *, frame_indices=None, frame=None,
+orientation_tolerance=1e-4, slice_tolerance=0.01) -> DicomGeometry` imports one enhanced
+multiframe object. `frame_indices` selects the zero-based indices of the frames forming one
+stack. Both consume metadata-only pydicom datasets and refuse
 duplicate positions. `DicomGeometry` is a frozen declaration with `dims`, `coords`, `transform`,
 `frame`, `order`, `patient_position`, `slice_intervals` and `report`. `order` maps sorted slices to
 input dataset or frame indices. The frame is declared as
@@ -854,12 +854,13 @@ convert to RAS, and coupled space-time mappings. Two-dimensional export is defer
 
 **NGFF (OME-Zarr 0.6 import).** `xarrayrf.ngff.coordinate_system(cs, *, store=None,
 group="") -> tuple[ReferenceFrame, Report]` imports a named v06 system.
-`transform(t, systems, *, store=None, group="", dims=None, frames=None) ->
+`transform(t, systems, *, store=None, group="", dims=None, resolved_frames=None) ->
 tuple[AffineTransform, Report]` imports a transform between named systems or a path-only array
 endpoint. `from_multiscale(ms, *, shapes, dims=None, store=None, group="",
-frames=None) -> NgffMultiscale` returns a shared intrinsic frame, levels keyed by path (each with
+resolved_frames=None) -> NgffMultiscale` returns a shared intrinsic frame, levels keyed by path (each with
 `dims`, xarray-compatible integer-index `coords`, and `transform`), additional transforms, and
-an import `report`. `from_scene(scene, *, systems, store=None, group="", frames=None) -> NgffScene`
+an import `report`. `from_scene(scene, *, systems, store=None, group="", resolved_frames=None) ->
+NgffScene`
 returns frame-to-frame `transforms` and an import `report`. All four accept v06 models or
 equivalent JSON attributes; the adapter reads metadata only. `shapes` supplies each dataset's
 array shape, `dims` supplies dimension names by path, and a scene's `systems` supplies systems
@@ -872,7 +873,7 @@ an unnamed axis or non-string unit is refused.
 With `store`, a named system's identity is `("ome-zarr", "store/group#quoted-name")`, omitting
 the group slash at the root. `store` has no trailing slash; `group` is relative and has no
 empty, `.` or `..` segments. Without `store`, frames are anonymous; pass a mapping from
-`(group path, name)` to `ReferenceFrame` as `frames` to reuse them across imports. A path-only
+`(group path, name)` to `ReferenceFrame` as `resolved_frames` to reuse them across imports. A path-only
 array endpoint
 uses centred cells (`sample_offset=0.5`) and unit `"1"`. All affine members, including rectangular
 `affine`, `rotation`, `mapAxis`, `projectAxis`, `sequence`, `byDimension` and an inverse-checked

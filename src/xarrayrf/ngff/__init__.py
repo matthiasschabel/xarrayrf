@@ -20,8 +20,8 @@ from ._export import to_multiscale_level as to_multiscale_level
 from ._export import to_transform as to_transform
 from ._metadata import NAMESPACE as NAMESPACE
 from ._metadata import (
-    FrameMap,
     JsonObject,
+    ResolvedFrames,
     _frame,
     _import_transform,
     _join,
@@ -111,7 +111,7 @@ def transform(
     store: str | None = None,
     group: str = "",
     dims: Mapping[str, Sequence[str]] | None = None,
-    frames: FrameMap | None = None,
+    resolved_frames: ResolvedFrames | None = None,
 ) -> tuple[AffineTransform, Report]:
     """Import a v06 coordinate transform as one affine between resolved endpoints.
 
@@ -121,7 +121,8 @@ def transform(
         store: Optional resolved store URI.
         group: Relative group path.
         dims: Dimension names indexed by array path for path-only endpoints.
-        frames: Previously resolved frames indexed by ``(group path, name)``.
+        resolved_frames: Frames resolved by an earlier import, keyed by ``(group path, name)``,
+            reused instead of minting new ones; a store-derived identity cannot be replaced.
 
     Returns:
         An affine transform and an import report; discrete identity axes are omitted.
@@ -135,14 +136,16 @@ def transform(
         raise TypeError("systems must be a sequence of v06 coordinate systems")
     if dims is not None and not isinstance(dims, Mapping):
         raise TypeError("dims must map array paths to dimension names")
-    if frames is not None and not isinstance(frames, Mapping):
-        raise TypeError("frames must map (group path, name) to ReferenceFrame")
+    if resolved_frames is not None and not isinstance(resolved_frames, Mapping):
+        raise TypeError("resolved_frames must map (group path, name) to ReferenceFrame")
     checked = [_system(cs) for cs in systems]
     if len({cs.name for cs in checked}) != len(checked):
         raise ValueError("systems must have unique names")
     scope = {(group, cs.name): cs for cs in checked}
     report: list[tuple[str, str]] = []
-    imported = _import_transform(_transform(t), scope, dims, store, group, frames, {}, report)
+    imported = _import_transform(
+        _transform(t), scope, dims, store, group, resolved_frames, {}, report
+    )
     return imported, tuple(report)
 
 
@@ -153,7 +156,7 @@ def from_multiscale(
     dims: Mapping[str, Sequence[str]] | None = None,
     store: str | None = None,
     group: str = "",
-    frames: FrameMap | None = None,
+    resolved_frames: ResolvedFrames | None = None,
 ) -> NgffMultiscale:
     """Import array levels and additional transforms from v06 multiscale metadata.
 
@@ -163,7 +166,7 @@ def from_multiscale(
         dims: Optional dimension names keyed by dataset path.
         store: Optional resolved store URI.
         group: Relative group path.
-        frames: Previously resolved frames.
+        resolved_frames: Frames resolved by an earlier import, keyed by ``(group path, name)``.
 
     Returns:
         The intrinsic frame, levels, other transforms and an import report.
@@ -177,8 +180,8 @@ def from_multiscale(
         raise TypeError("shapes must map dataset paths to array shapes")
     if dims is not None and not isinstance(dims, Mapping):
         raise TypeError("dims must map dataset paths to dimension names")
-    if frames is not None and not isinstance(frames, Mapping):
-        raise TypeError("frames must map (group path, name) to ReferenceFrame")
+    if resolved_frames is not None and not isinstance(resolved_frames, Mapping):
+        raise TypeError("resolved_frames must map (group path, name) to ReferenceFrame")
     if not isinstance(ms, Multiscale):
         _reject_rotation_path(ms)
     model = ms if isinstance(ms, Multiscale) else Multiscale.model_validate(ms)
@@ -201,7 +204,7 @@ def from_multiscale(
     if intrinsic_name is None:
         raise ValueError("multiscale needs at least one dataset with an intrinsic system")
     intrinsic_system = systems[(group, intrinsic_name)]
-    full_frame = _frame(intrinsic_system, store, group, frames, cache, report)
+    full_frame = _frame(intrinsic_system, store, group, resolved_frames, cache, report)
     kept = [
         i
         for i, axis in enumerate(intrinsic_system.axes)
@@ -242,7 +245,7 @@ def from_multiscale(
             {path: names},
             store,
             group,
-            frames,
+            resolved_frames,
             cache,
             report,
         )
@@ -251,7 +254,7 @@ def from_multiscale(
             raise ValueError(f"duplicate dataset path {path!r}")
         result[path] = NgffLevel(names, MappingProxyType(spec), level_transform)
     extra = tuple(
-        _import_transform(t, systems, None, store, group, frames, cache, report)
+        _import_transform(t, systems, None, store, group, resolved_frames, cache, report)
         for t in model.coordinateTransformations or ()
     )
     for additional in extra:
@@ -266,7 +269,7 @@ def from_scene(
     systems: Mapping[str, Sequence[ct.CoordinateSystem | JsonObject]],
     store: str | None = None,
     group: str = "",
-    frames: FrameMap | None = None,
+    resolved_frames: ResolvedFrames | None = None,
 ) -> NgffScene:
     """Import scene frame-to-frame transforms using referenced image systems.
 
@@ -275,7 +278,7 @@ def from_scene(
         systems: Coordinate systems of referenced images, keyed by image path.
         store: Optional resolved store URI.
         group: Relative scene group path.
-        frames: Previously resolved image frames.
+        resolved_frames: Image frames resolved by an earlier import, keyed by ``(group path, name)``.
 
     Returns:
         Scene transforms in metadata order and an import report.
@@ -287,8 +290,8 @@ def from_scene(
     store, group = _location(store, group)
     if not isinstance(systems, Mapping):
         raise TypeError("systems must map image paths to coordinate systems")
-    if frames is not None and not isinstance(frames, Mapping):
-        raise TypeError("frames must map (group path, name) to ReferenceFrame")
+    if resolved_frames is not None and not isinstance(resolved_frames, Mapping):
+        raise TypeError("resolved_frames must map (group path, name) to ReferenceFrame")
     if not isinstance(scene, SceneAttrs):
         _reject_rotation_path(scene)
     model = scene if isinstance(scene, SceneAttrs) else SceneAttrs.model_validate(scene)
@@ -301,7 +304,7 @@ def from_scene(
     cache: dict[tuple[str, str], ReferenceFrame] = {}
     report: list[tuple[str, str]] = []
     transforms = tuple(
-        _import_transform(t, scope, None, store, group, frames, cache, report)
+        _import_transform(t, scope, None, store, group, resolved_frames, cache, report)
         for t in model.coordinateTransformations
     )
     return NgffScene(transforms, tuple(report))

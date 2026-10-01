@@ -155,7 +155,7 @@ def test_to_dataarray_orders_classic_pixels_with_positions() -> None:
 
 
 def test_to_dataarray_selects_original_enhanced_frames() -> None:
-    geometry = from_enhanced(enhanced([0, 0, 2]), frames=[2, 1])
+    geometry = from_enhanced(enhanced([0, 0, 2]), frame_indices=[2, 1])
     source = np.stack([np.full((4, 5), value) for value in (10, 20, 30)])
     array = to_dataarray(geometry, source)
     assert geometry.order == (1, 2)
@@ -370,7 +370,7 @@ def test_enhanced_selection_and_duplicate_positions() -> None:
     source = enhanced([0, 0, 2])
     with pytest.raises(ValueError, match=r"duplicate slice positions.*0 and 1"):
         from_enhanced(source)
-    selected = from_enhanced(source, frames=[2, 1])
+    selected = from_enhanced(source, frame_indices=[2, 1])
     assert selected.order == (1, 2)
     assert_allclose(point(selected, 1), ORIGIN + 2 * N, rtol=0, atol=ATOL)
 
@@ -384,7 +384,7 @@ def test_enhanced_group_and_count_errors() -> None:
     del source.PerFrameFunctionalGroupsSequence[0].PlanePositionSequence
     source.SharedFunctionalGroupsSequence[0].PlanePositionSequence = DicomSequence([Dataset()])
     with pytest.raises(ValueError, match="frame 1 has PlanePositionSequence in both"):
-        from_enhanced(source, frames=[0])
+        from_enhanced(source, frame_indices=[0])
     source = enhanced([0, 2])
     source.PerFrameFunctionalGroupsSequence.pop()
     with pytest.raises(ValueError, match="length must equal NumberOfFrames"):
@@ -450,10 +450,10 @@ def test_enhanced_public_validation() -> None:
     with pytest.raises(ValueError, match="SharedFunctionalGroupsSequence requires one item"):
         from_enhanced(source)
     source = enhanced([0])
-    with pytest.raises(TypeError, match="frames must be a sequence"):
-        from_enhanced(source, frames=3)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="frames must contain unique indices"):
-        from_enhanced(source, frames=[0, 0])
+    with pytest.raises(TypeError, match="frame_indices must be a sequence"):
+        from_enhanced(source, frame_indices=3)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="frame_indices must contain unique indices"):
+        from_enhanced(source, frame_indices=[0, 0])
     source = enhanced([0])
     source.NumberOfFrames = 0
     with pytest.raises(ValueError, match="positive integer NumberOfFrames"):
@@ -469,7 +469,11 @@ def test_enhanced_public_validation() -> None:
         (lambda: from_datasets([Dataset()]), ValueError, "requires PixelSpacing"),
         (lambda: from_datasets([image(0)], slice_tolerance=0), ValueError, "slice_tolerance"),
         (lambda: from_enhanced(Dataset()), ValueError, "NumberOfFrames"),
-        (lambda: from_enhanced(enhanced([0]), frames=[1]), ValueError, "frames must contain"),
+        (
+            lambda: from_enhanced(enhanced([0]), frame_indices=[1]),
+            ValueError,
+            "frame_indices must contain",
+        ),
     ],
 )
 def test_public_input_errors(call: object, error: type[Exception], message: str) -> None:

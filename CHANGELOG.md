@@ -207,6 +207,11 @@
 
 ### Changed
 
+- Adapter parameters no longer share the name `frames` with the reference-frame parameter
+  `frame=`: DICOM's multiframe selection (`dicom.open`, `dicom.from_enhanced`) is now
+  `frame_indices=`, and NGFF's mapping of frames resolved by an earlier import
+  (`ngff.transform`, `ngff.from_multiscale`, `ngff.from_scene`) is now `resolved_frames=`. The old
+  names are removed without aliases (pre-alpha, no users).
 - `Grid.isel` uses xarray's positional indexing through a coordinate-only native binding,
   including lists, integer arrays and boolean masks. `Grid.sel` adds source-coordinate label
   selection. Both require xarray only when called; `transpose` stays NumPy-only.

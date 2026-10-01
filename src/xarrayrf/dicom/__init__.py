@@ -413,7 +413,7 @@ def _group(shared: Dataset, frame: Dataset, name: str, index: int) -> Dataset:
 def from_enhanced(
     dataset: Dataset,
     *,
-    frames: Sequence[int] | None = None,
+    frame_indices: Sequence[int] | None = None,
     frame: ReferenceFrame | xr.DataArray | None = None,
     orientation_tolerance: float = 1e-4,
     slice_tolerance: float = 0.01,
@@ -422,7 +422,7 @@ def from_enhanced(
 
     Args:
         dataset: Enhanced object; pixels are never accessed.
-        frames: Optional frame indices selecting one spatial stack.
+        frame_indices: Optional zero-based frame indices selecting one spatial stack.
         frame: Frame or framed array to adopt, explicitly overriding even a declared UID.
         orientation_tolerance: Maximum cosine error or disagreement.
         slice_tolerance: Slice residual in steps and in-plane shift in pixel spacings.
@@ -456,12 +456,12 @@ def from_enhanced(
                 and getattr(frame_item, name, None) is not None
             ):
                 raise ValueError(f"frame {index} has {name} in both shared and per-frame groups")
-    if frames is None:
+    if frame_indices is None:
         selected = tuple(range(count))
     else:
-        if not isinstance(frames, Sequence) or isinstance(frames, str | bytes):
-            raise TypeError("frames must be a sequence of frame indices")
-        selected = tuple(frames)
+        if not isinstance(frame_indices, Sequence) or isinstance(frame_indices, str | bytes):
+            raise TypeError("frame_indices must be a sequence of frame indices")
+        selected = tuple(frame_indices)
         if (
             not selected
             or any(
@@ -470,7 +470,7 @@ def from_enhanced(
             )
             or len(set(selected)) != len(selected)
         ):
-            raise ValueError("frames must contain unique indices within NumberOfFrames")
+            raise ValueError("frame_indices must contain unique indices within NumberOfFrames")
     slices: list[_Slice] = []
     for index in selected:
         frame_item = frame_items[index]

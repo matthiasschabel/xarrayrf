@@ -250,7 +250,7 @@ def test_multiscale_reuses_oriented_frame_after_channel_drop() -> None:
     assert first.frame.coordinate_system.orientation == (None, anatomy.RAS[0], None)
     assert {code for code, _ in first.report} == {"discrete-axis-dropped"}
     reused = from_multiscale(
-        metadata, shapes={"0": (2, 3, 4, 5)}, frames={("", "intrinsic"): first.frame}
+        metadata, shapes={"0": (2, 3, 4, 5)}, resolved_frames={("", "intrinsic"): first.frame}
     )
     assert reused.frame == first.frame
     assert reused.levels["0"].transform.target == first.frame
@@ -500,7 +500,9 @@ def test_scene_reuses_supplied_local_frames() -> None:
         ],
         "coordinateSystems": [{"name": "world", "axes": [{"name": "x"}]}],
     }
-    result = from_scene(scene, systems={"tile": [physical]}, frames={("tile", "physical"): known})
+    result = from_scene(
+        scene, systems={"tile": [physical]}, resolved_frames={("tile", "physical"): known}
+    )
     assert isinstance(result.transforms[0].source, ReferenceFrame)
     assert result.transforms[0].source == known
     assert result.report == ()
@@ -543,7 +545,7 @@ def test_scene_reuses_geometry_frame_after_channel_drop() -> None:
         ],
     }
     result = from_scene(
-        scene, systems={"tile": [physical]}, frames={("tile", "physical"): image.frame}
+        scene, systems={"tile": [physical]}, resolved_frames={("tile", "physical"): image.frame}
     )
     assert result.transforms[0].source == image.frame
     assert result.transforms[0].source.axes == ("y", "x")
@@ -588,12 +590,12 @@ def test_public_model_argument_types() -> None:
         transform({"type": "identity"}, "bad")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="dims must map array paths"):
         transform({"type": "identity"}, [], dims=[])  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="frames must map"):
-        transform({"type": "identity"}, [], frames=[])  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="resolved_frames must map"):
+        transform({"type": "identity"}, [], resolved_frames=[])  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="systems must map image paths"):
         from_scene({}, systems=[])  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="frames must map"):
-        from_scene({}, systems={}, frames=[])  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="resolved_frames must map"):
+        from_scene({}, systems={}, resolved_frames=[])  # type: ignore[arg-type]
 
 
 def test_unvalidated_transform_models_still_fail_clearly() -> None:
@@ -716,20 +718,20 @@ def test_frame_mapping_must_agree_with_declared_axes() -> None:
         transform(
             {"type": "identity", "input": {"name": "a"}, "output": {"name": "b"}},
             systems,
-            frames={("", "a"): known},
+            resolved_frames={("", "a"): known},
         )
     with pytest.raises(ValueError, match="identity inconsistent with store"):
         transform(
             {"type": "identity", "input": {"name": "a"}, "output": {"name": "b"}},
             systems,
             store="file:///data",
-            frames={("", "a"): coordinate_system(systems[0])[0]},
+            resolved_frames={("", "a"): coordinate_system(systems[0])[0]},
         )
     with pytest.raises(TypeError, match="must be a ReferenceFrame"):
         transform(
             {"type": "identity", "input": {"name": "a"}, "output": {"name": "b"}},
             systems,
-            frames={("", "a"): "bad"},  # type: ignore[dict-item]
+            resolved_frames={("", "a"): "bad"},  # type: ignore[dict-item]
         )
 
 
@@ -805,8 +807,8 @@ def test_multiscale_shape_and_output_validation() -> None:
         from_multiscale(ms, shapes=[])  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="dims must map dataset paths"):
         from_multiscale(ms, shapes={"s0": (2, 2)}, dims=[])  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="frames must map"):
-        from_multiscale(ms, shapes={"s0": (2, 2)}, frames=[])  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="resolved_frames must map"):
+        from_multiscale(ms, shapes={"s0": (2, 2)}, resolved_frames=[])  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="dataset 's0' needs a shape"):
         from_multiscale(ms, shapes={})
     with pytest.raises(TypeError, match="dataset 's0' dims must be a sequence"):

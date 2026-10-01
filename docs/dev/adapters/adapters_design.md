@@ -62,7 +62,8 @@ coordinate systems and transform graphs), and GeoTIFF (projected rasters with a 
 - **`frame=`** on NIfTI `from_header`/`open`, DICOM `from_datasets`/`from_enhanced`/`open`,
   and GeoTIFF `from_profile`/`open` accepts a frame or a framed DataArray. The supplied declaration
   explicitly overrides the imported identity, including a DICOM UID or CRS authority.
-  NGFF retains `frames=` for reusing named systems.
+  NGFF's lower-level imports take `resolved_frames=` to reuse frames from an earlier import; it
+  cannot replace a store-derived identity.
 - **`array.rf.assume_frame(other)`** and these `frame=` parameters call the same private core
   adoption function. It adopts identity, definition and context and composes a derivable exact
   coordinate-system change, such as RAS to LPS. Underivable changes name their reason; non-affine
@@ -177,7 +178,7 @@ export.
 - **Enhanced import** (`from_enhanced`) reads plane position, orientation and pixel measures from
   the shared or per-frame functional groups; a group in both is refused (C.7.6.16), as is a
   per-frame count differing from `NumberOfFrames`. Frames go through the same assembly; duplicate
-  positions are refused unless `frames=` selects one stack.
+  positions are refused unless `frame_indices=` selects one stack.
 - **Equipment mapping** (`equipment_transform`): patient frame to a fresh anonymous equipment frame
   (unoriented `x, y, z` mm). Only `ISOCENTER` and a finite rigid matrix with homogeneous last row
   are accepted (C.7.6.21). Equipment frames never share identity across datasets.
@@ -209,7 +210,7 @@ equivalent JSON attributes, validated through the same models.
   of element 0 is coordinate 0 (so `sample_offset=0.5`, unit `"1"`).
 - **Identity.** With `store`, a named system is declared
   `("ome-zarr", f"{store}/{group}#{quote(name)}")` (no trailing slash, normalized group, the slash
-  dropped at the root). Without `store`, frames are anonymous and reused across calls via `frames`,
+  dropped at the root). Without `store`, frames are anonymous and reused across calls via `resolved_frames`,
   since a name alone is not an identity across stores.
 - **Transforms.** `identity`, `scale`, `translation`, inline (rectangular) `affine`, `rotation`,
   `mapAxis`, `projectAxis`, `sequence`, `byDimension` and `bijection` collapse into one

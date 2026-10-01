@@ -77,7 +77,7 @@ def open(
     *,
     frame: ReferenceFrame | xr.DataArray | None = None,
     series_uid: str | None = None,
-    frames: Sequence[int] | None = None,
+    frame_indices: Sequence[int] | None = None,
     modality_lut: bool = True,
     orientation_tolerance: float = 1e-4,
     slice_tolerance: float = 0.01,
@@ -94,7 +94,8 @@ def open(
         paths: Directory, file, or explicit sequence of files.
         frame: Frame or framed array to adopt, overriding the imported identity.
         series_uid: SeriesInstanceUID to select when more than one exists.
-        frames: Enhanced multiframe indices forming one stack.
+        frame_indices: Zero-based indices of the frames of one enhanced multiframe file
+            that form one spatial stack.
         modality_lut: Apply rescale or modality LUT to pixels.
         orientation_tolerance: Geometry importer orientation tolerance.
         slice_tolerance: Geometry importer slice tolerance.
@@ -129,8 +130,10 @@ def open(
         raise TypeError("paths must be a path or sequence of paths")
     if series_uid is not None and not isinstance(series_uid, str):
         raise TypeError("series_uid must be a string or None")
-    if frames is not None and (not isinstance(frames, Sequence) or isinstance(frames, str | bytes)):
-        raise TypeError("frames must be a sequence of frame indices or None")
+    if frame_indices is not None and (
+        not isinstance(frame_indices, Sequence) or isinstance(frame_indices, str | bytes)
+    ):
+        raise TypeError("frame_indices must be a sequence of frame indices or None")
     if not isinstance(modality_lut, bool):
         raise TypeError("modality_lut must be a bool")
     series: dict[str, list[tuple[Path, Dataset]]] = {}
@@ -167,14 +170,14 @@ def open(
     if enhanced:
         geometry: DicomGeometry = from_enhanced(
             selected[0][1],
-            frames=frames,
+            frame_indices=frame_indices,
             frame=frame,
             orientation_tolerance=orientation_tolerance,
             slice_tolerance=slice_tolerance,
         )
     else:
-        if frames is not None:
-            raise ValueError("frames requires one enhanced multiframe file")
+        if frame_indices is not None:
+            raise ValueError("frame_indices requires one enhanced multiframe file")
         geometry = from_datasets(
             [ds for _, ds in selected],
             frame=frame,

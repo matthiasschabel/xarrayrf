@@ -32,7 +32,9 @@ always names both endpoint frames, because no engine records which frames its re
 from xarrayrf import castalign as xca
 
 frames = xca.frames(graph, units="1")  # one local ReferenceFrame per node, axes (z, y, x)
-t = xca.transform(graph, "invivo", "fish3d", frames=frames)  # CompositeTransform of wrapped edges
+t = xca.transform(
+    graph, "invivo", "fish3d", resolved_frames=frames
+)  # CompositeTransform of wrapped edges
 arr = xca.frame(img, frames["fish3d"])  # ndarray_shifted -> framed DataArray
 xrf.resample(invivo_arr.rf.geometry, fish_arr.rf.geometry, transform=t.inverse())
 ```

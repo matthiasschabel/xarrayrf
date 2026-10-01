@@ -18,7 +18,7 @@ from xarrayrf.units import canonical
 NAMESPACE = "ome-zarr"
 """Namespace for store-resolved OME-Zarr coordinate system identities."""
 
-type FrameMap = Mapping[tuple[str, str], ReferenceFrame]
+type ResolvedFrames = Mapping[tuple[str, str], ReferenceFrame]
 type JsonObject = Mapping[str, object]
 
 _TRANSFORM_ADAPTER: TypeAdapter[ct.AnyTransform] = TypeAdapter(ct.AnyTransform)
@@ -91,7 +91,7 @@ def _frame(
     system: ct.CoordinateSystem,
     store: str | None,
     group: str,
-    frames: FrameMap | None,
+    resolved_frames: ResolvedFrames | None,
     cache: dict[tuple[str, str], ReferenceFrame],
     report: list[tuple[str, str]],
 ) -> ReferenceFrame:
@@ -107,7 +107,7 @@ def _frame(
                 report.append(
                     ("long-name-deferred", f"axis {axis.name!r}: longName is not retained")
                 )
-    existing = cache.get(key) or (frames.get(key) if frames is not None else None)
+    existing = cache.get(key) or (resolved_frames.get(key) if resolved_frames is not None else None)
     if existing is not None:
         if not isinstance(existing, ReferenceFrame):
             raise TypeError(f"frame for {key!r} must be a ReferenceFrame")
@@ -316,7 +316,7 @@ def _resolve(
     dims: Mapping[str, Sequence[str]] | None,
     store: str | None,
     group: str,
-    frames: FrameMap | None,
+    resolved_frames: ResolvedFrames | None,
     cache: dict[tuple[str, str], ReferenceFrame],
     report: list[tuple[str, str]],
 ) -> tuple[ReferenceFrame | ArrayCoordinates, tuple[bool, ...]]:
@@ -339,7 +339,7 @@ def _resolve(
     system = systems.get((path, endpoint.name))
     if system is None:
         raise ValueError(f"unresolved coordinate system {endpoint.name!r} at path {path!r}")
-    frame = _frame(system, store, path, frames, cache, report)
+    frame = _frame(system, store, path, resolved_frames, cache, report)
     return frame, tuple(axis.discrete is True or axis.type == "channel" for axis in system.axes)
 
 
@@ -349,12 +349,16 @@ def _import_transform(
     dims: Mapping[str, Sequence[str]] | None,
     store: str | None,
     group: str,
-    frames: FrameMap | None,
+    resolved_frames: ResolvedFrames | None,
     cache: dict[tuple[str, str], ReferenceFrame],
     report: list[tuple[str, str]],
 ) -> AffineTransform:
-    source, source_discrete = _resolve(t.input, systems, dims, store, group, frames, cache, report)
-    target, target_discrete = _resolve(t.output, systems, dims, store, group, frames, cache, report)
+    source, source_discrete = _resolve(
+        t.input, systems, dims, store, group, resolved_frames, cache, report
+    )
+    target, target_discrete = _resolve(
+        t.output, systems, dims, store, group, resolved_frames, cache, report
+    )
     if isinstance(source, ArrayCoordinates) and len(source_discrete) == len(target_discrete):
         source_discrete = target_discrete
         source = ArrayCoordinates(
