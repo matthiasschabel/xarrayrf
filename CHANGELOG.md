@@ -4,6 +4,10 @@
 
 ### Added
 
+- `ngff.open` accepts `frame=` as a frame or framed DataArray, matching every other reader.
+  The override replaces anonymous or store-derived identities and composes derivable
+  coordinate-system changes for OME-Zarr 0.4, 0.5 and 0.6.
+
 - Anonymous reference frames with distinct persisted identities and visible repr markers.
   Sources without a declared world now import as anonymous; deliberate local frames and
   declared template, DICOM UID, NGFF store and CRS identities keep their existing meaning.

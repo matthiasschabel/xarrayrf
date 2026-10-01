@@ -735,19 +735,19 @@ imports xarray lazily.
   coordinates, and refuses what the format cannot represent. It never resamples.
 - After import, xarrayrf never calls back into the format.
 
-NIfTI `from_header`/`open`, DICOM `from_datasets`/`from_enhanced`/`open`, and GeoTIFF
-`from_profile`/`open` accept `frame=None` or a frame/framed DataArray. A supplied frame
+Every reader accepts `frame=None` or a frame/framed DataArray, as do NIfTI `from_header`,
+DICOM `from_datasets`/`from_enhanced`, and GeoTIFF `from_profile`. A supplied frame
 explicitly overrides the imported identity through the shared adoption contract above,
-even a declared DICOM Frame of Reference UID or CRS authority. Metadata consistency checks
-within a source still apply; DICOM reports the override as `frame-override`, naming any
-discarded Frame of Reference UID. `frame=` is always the identity to adopt; DICOM's multiframe
-selection is `frame_indices=`, and NGFF's reuse of earlier imports is `resolved_frames=`.
+even a declared DICOM Frame of Reference UID, CRS authority or NGFF store identity. Metadata
+consistency checks within a source still apply; DICOM reports the override as `frame-override`,
+naming any discarded Frame of Reference UID. `frame=` is always the identity to adopt; DICOM's
+multiframe selection is `frame_indices=`, and NGFF's reuse of earlier imports is `resolved_frames=`.
 
 **File readers:** `xarrayrf.nifti.open(path, *, frame=None, template=None, xform="best",
 spatial_unit="mm", time=False, chunks="auto")`, `xarrayrf.dicom.open(paths, *,
 frame=None, series_uid=None, frame_indices=None, modality_lut=True, orientation_tolerance=1e-4,
 slice_tolerance=0.01, chunks="auto")`, and `xarrayrf.ngff.open(store, *, group="",
-multiscale=None, level=None, chunks="auto")` each return one framed `DataArray`. Default
+multiscale=None, level=None, frame=None, chunks="auto")` each return one framed `DataArray`. Default
 pixels are lazy dask arrays. NIfTI uses nibabel's scaled proxy dtype and values. DICOM accepts
 a directory, file, or explicit file sequence; one enhanced object or one classic series is
 selected. Modality LUT output is float64 when requested, and MONOCHROME1 values are not display

@@ -112,8 +112,7 @@ Typical uses, and where they live:
 - **Describe slices with thickness or gaps**: declared intervals on a `Grid` or binding; the
   `domain="cells"` queries and resampling use them.
 - **Relate data whose source names no space**: anonymous frames, completed explicitly with
-  `frame=` when loading (NIfTI, DICOM and GeoTIFF readers) or `rf.assume_frame` afterwards (any
-  framed array, including NGFF).
+  `frame=` when loading (every reader) or `rf.assume_frame` afterwards (any framed array).
 - **Save and restore**: `rf.encode`/`rf.decode` for arrays, `encode`/`decode` for value objects.
 
 The value objects depend only on NumPy and can be used without xarray. The full vocabulary and
@@ -201,11 +200,11 @@ except ValueError as error:
 combined = t1 + t2.rf.assume_frame(t1)  # your statement that both share one space
 ```
 
-With files, say so at load time instead: `nifti.open("t2.nii.gz", frame=t1)`; the NIfTI, DICOM
-and GeoTIFF readers take `frame=`, and NGFF arrays use `rf.assume_frame`. Both follow one
-contract: they adopt the other frame's identity and apply any
-derivable coordinate-system change, such as RAS to LPS. Asserting a shared space never makes
-two different grids compatible; resample one onto the other with `rf.resample_to`.
+With files, say so at load time instead: `nifti.open("t2.nii.gz", frame=t1)`; every reader
+takes `frame=`. Both `frame=` and `rf.assume_frame` follow one contract: they adopt the other
+frame's identity and apply any derivable coordinate-system change, such as RAS to LPS.
+Asserting a shared space never makes two different grids compatible; resample one onto the
+other with `rf.resample_to`.
 
 ## What it does
 
@@ -237,9 +236,8 @@ two different grids compatible; resample one onto the other with `rf.resample_to
   columns), with the slice axis toward S, P and R: axial `SPL`, coronal `PIL`, sagittal `RIP`.
 - **Frame identity.** Sources that name their space (a Frame of Reference UID, a template space,
   a CRS authority code, an NGFF store) give declared frames that match across files. Sources that
-  do not give anonymous frames; relating them is the caller's explicit act (`frame=` on the
-  NIfTI, DICOM and GeoTIFF readers, or `rf.assume_frame`), and refusals say which remedy
-  applies.
+  do not give anonymous frames; relating them is the caller's explicit act (`frame=` on every
+  reader, or `rf.assume_frame`), and refusals say which remedy applies.
 - **Persistence.** `rf.encode()` stores the binding, including declared intervals, as ordinary
   attributes before writing to netCDF or Zarr, and `rf.decode()` restores it after reading. An
   array read without `rf.decode()` is unframed.

@@ -8,11 +8,12 @@ from typing import Any, cast
 import dask.array as da
 import numpy as np
 import pytest
+import xarray as xr
 import zarr
 from dask.callbacks import Callback
 from numpy.testing import assert_allclose
 
-from xarrayrf import anatomy, coordinate_system_change
+from xarrayrf import CoordinateSystem, ReferenceFrame, anatomy, coordinate_system_change
 from xarrayrf.ngff import open
 
 AXES = [
@@ -53,8 +54,11 @@ def test_ngff_rfc4_orientation_relates_to_lps(tmp_path: Path) -> None:
                         "path": "0",
                         "coordinateTransformations": [
                             {
-                                "type": "scale",
-                                "scale": [1, 2, 3, 4],
+                                "type": "sequence",
+                                "transformations": [
+                                    {"type": "scale", "scale": [1, 2, 3, 4]},
+                                    {"type": "translation", "translation": [0, 5, 7, 9]},
+                                ],
                                 "input": {"path": "0"},
                                 "output": {"name": "intrinsic"},
                             }
@@ -64,7 +68,8 @@ def test_ngff_rfc4_orientation_relates_to_lps(tmp_path: Path) -> None:
             }
         ],
     }
-    frame = open(path).rf.geometry.frame
+    original = open(path)
+    frame = original.rf.geometry.frame
     assert frame.coordinate_system.vocabulary == anatomy.VOCABULARY
     assert frame.coordinate_system.orientation == anatomy.RAS
     lps = frame.with_coordinate_system(anatomy.patient_coordinate_system(anatomy.LPS, "um"))
@@ -72,6 +77,31 @@ def test_ngff_rfc4_orientation_relates_to_lps(tmp_path: Path) -> None:
     # The expected change is an exact signed permutation; allow only rounding error.
     assert_allclose(change.matrix, np.diag([-1.0, -1.0, 1.0]), rtol=0, atol=1e-12)
     assert_allclose(change.translation, 0.0, rtol=0, atol=1e-12)
+    target = ReferenceFrame.declared(
+        ("synthetic", "shared"),
+        anatomy.patient_coordinate_system(anatomy.LPS, "um"),
+        definition={"space": "asserted"},
+        context={"epoch": 1},
+    )
+    adopted = open(path, frame=target)
+    assert adopted.rf.reference_frame == target
+    assert adopted.rf.reference_frame.definition == target.definition
+    assert adopted.rf.reference_frame.context == target.context
+    assert_allclose(
+        adopted.rf.coordinate_transform.matrix,
+        np.diag([-1.0, -1.0, 1.0]) @ original.rf.coordinate_transform.matrix,
+        rtol=0,
+        atol=1e-12,
+    )
+    assert_allclose(
+        adopted.rf.coordinate_transform.translation,
+        original.rf.coordinate_transform.translation * [-1, -1, 1],
+        rtol=0,
+        atol=1e-12,
+    )
+    assert (
+        adopted.rf.coordinate_transform == original.rf.assume_frame(target).rf.coordinate_transform
+    )
 
 
 def make_store(tmp_path: Path, version: str) -> str:
@@ -251,3 +281,49 @@ def test_ngff_urls_go_to_zarr_and_name_the_frame(
 def test_store_units_are_canonicalized(tmp_path: Path) -> None:
     opened = open(make_store(tmp_path, "0.5"))
     assert opened.rf.reference_frame.coordinate_system.units == ("s", "um", "um")
+
+
+@pytest.mark.parametrize("version", ["0.4", "0.5", "0.6"])
+def test_ngff_anonymous_opens_combine_after_frame_override(tmp_path: Path, version: str) -> None:
+    store = zarr.storage.LocalStore(make_store(tmp_path, version), read_only=True)
+    first, second = open(store), open(store)
+    assert first.rf.reference_frame.is_anonymous
+    assert second.rf.reference_frame.is_anonymous
+    assert first.rf.reference_frame != second.rf.reference_frame
+    with pytest.raises(ValueError, match=r"anonymous.*rf.assume_frame alone suffices"):
+        _ = first + second
+    for target in (first, first.rf.reference_frame):
+        shared = open(store, frame=target)
+        assert shared.rf.grid == first.rf.grid
+        assert isinstance(shared.data, da.Array)
+        assert_allclose((first + shared).compute(), 2 * first.compute(), rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("version", ["0.4", "0.5", "0.6"])
+def test_ngff_frame_override_replaces_store_identity(tmp_path: Path, version: str) -> None:
+    path = make_store(tmp_path, version)
+    first = open(path, level="1", chunks=None)
+    assert not first.rf.reference_frame.is_anonymous
+    assert first.rf.reference_frame.identifier[0] == "ome-zarr"
+    assert first.rf.reference_frame.identifier[1].startswith(path + "#")
+    target = ReferenceFrame.local(first.rf.reference_frame.coordinate_system, context={"epoch": 1})
+    shared = open(path, level="1", frame=target, chunks=None)
+    assert shared.rf.reference_frame == target
+    assert shared.rf.reference_frame.context == target.context
+    assert shared.rf.coordinate_transform == first.rf.assume_frame(target).rf.coordinate_transform
+    assert_allclose(shared, first, rtol=0, atol=1e-12)
+
+
+def test_ngff_frame_override_rejects_underivable_system_and_invalid_inputs(tmp_path: Path) -> None:
+    path = make_store(tmp_path, "0.6")
+    target = ReferenceFrame.local(
+        CoordinateSystem(
+            ("time", "a", "b"), ("s", "um", "um"), axis_types=("time", "space", "space")
+        )
+    )
+    with pytest.raises(ValueError, match=r"cannot adopt frame.*unoriented axis"):
+        open(path, frame=target)
+    with pytest.raises(TypeError, match="frame must be a ReferenceFrame or framed DataArray"):
+        open(path, frame="bad")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="unframed"):
+        open(path, frame=xr.DataArray([1]))

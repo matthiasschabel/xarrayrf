@@ -686,9 +686,8 @@ architecture they produce.
 - **Identity is explicit, and absence of identity is visible.** A frame is complete when it
   has an identity (declared, or a local frame created and shared on purpose) and anonymous when
   its source names no space. Nothing guesses an identity: no hashing, path fingerprints or shared
-  default world. `rf.assume_frame` and the readers' `frame=` (NIfTI, DICOM, GeoTIFF) share one adoption
-  contract, including
-  derivable coordinate-system changes, and never bypass grid checks. Refusals name the remedy
+  default world. `rf.assume_frame` and every reader's `frame=` share one adoption contract,
+  including derivable coordinate-system changes, and never bypass grid checks. Refusals name the remedy
   that applies.
 
 ### Local xarray fixes are an intended development route

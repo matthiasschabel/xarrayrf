@@ -59,9 +59,10 @@ coordinate systems and transform graphs), and GeoTIFF (projected rasters with a 
 - **Anonymous** frames (`ReferenceFrame.anonymous`) are minted fresh per import when the source
   supplies geometry without a shared world identity. Matching headers or paths never relate
   them. **Local** frames remain deliberate caller-created worlds.
-- **`frame=`** on NIfTI `from_header`/`open`, DICOM `from_datasets`/`from_enhanced`/`open`,
-  and GeoTIFF `from_profile`/`open` accepts a frame or a framed DataArray. The supplied declaration
-  explicitly overrides the imported identity, including a DICOM UID or CRS authority.
+- **`frame=`** on every reader, plus NIfTI `from_header`, DICOM `from_datasets`/`from_enhanced`,
+  and GeoTIFF `from_profile`, accepts a frame or a framed DataArray. The supplied declaration
+  explicitly overrides the imported identity, including a DICOM UID, CRS authority or NGFF
+  store identity.
   NGFF's lower-level imports take `resolved_frames=` to reuse frames from an earlier import; it
   cannot replace a store-derived identity.
 - **`array.rf.assume_frame(other)`** and these `frame=` parameters call the same private core
@@ -235,7 +236,9 @@ equivalent JSON attributes, validated through the same models.
 - **Reader.** `open` binds the first (full-resolution) level unless `level` is given, selects
   among several multiscales by index or name (ambiguity raises with a listing), and uses
   `dask.array.from_zarr`. For 0.6 it binds the intrinsic system; other systems stay reachable
-  through `from_multiscale(...).transforms`.
+  through `from_multiscale(...).transforms`. For every supported version, `frame=` adopts the
+  supplied frame on the selected level before binding, including any derivable coordinate-system
+  change. `open` returns only a DataArray and does not expose the metadata import report.
 - **Export.** `to_multiscale_level` writes one regular affine level. v06 restricts dataset
   transforms to scale then translation, so a diagonal lattice uses the frame's axes directly,
   while a non-diagonal lattice gets an array-aligned intrinsic system (column norms, zero

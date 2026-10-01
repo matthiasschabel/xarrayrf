@@ -69,8 +69,9 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   `rf.frame`.
 - **Datasets follow the shared-grid rule**: a binding belongs to its geometry dimensions, not
   to individual variables ([binding design](binding/binding_design.md)).
-- **Identity is explicit.** `rf.assume_frame` and the readers' `frame=` (NIfTI, DICOM and
-  GeoTIFF; one adoption contract) are the only overrides; there is no global switch and no value-based frame matching. Sources that
+- **Identity is explicit.** `rf.assume_frame` and every reader's `frame=` (one adoption
+  contract) are the only overrides; there is no global switch and no value-based frame
+  matching. Sources that
   name no space give anonymous frames, never a guessed identity (content hashes, path
   fingerprints and a shared default world were rejected; [grid plan](architecture/grid_plan.md)
   section 5). Unnamed NIfTI MNI152 and Talairach files share one frame; every other NIfTI frame

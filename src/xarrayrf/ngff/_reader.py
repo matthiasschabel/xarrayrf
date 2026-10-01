@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 import dask.array as da
@@ -12,6 +13,9 @@ import xarray as xr
 import zarr
 from ome_zarr_models.v04.multiscales import Multiscale as MultiscaleV04
 from ome_zarr_models.v05.multiscales import Multiscale as MultiscaleV05
+
+from xarrayrf import ReferenceFrame
+from xarrayrf._geometry import adopt_frame
 
 
 def _older_multiscale(value: Mapping[str, Any], version: str) -> dict[str, Any]:
@@ -60,6 +64,7 @@ def open(
     group: str = "",
     multiscale: int | str | None = None,
     level: str | None = None,
+    frame: ReferenceFrame | xr.DataArray | None = None,
     chunks: Any = "auto",
 ) -> xr.DataArray:
     """Open one OME-Zarr level as a framed DataArray.
@@ -73,6 +78,7 @@ def open(
         group: Relative group containing multiscales.
         multiscale: Index or name; omitted only when exactly one is present.
         level: Dataset path; omitted selects the first, full resolution level.
+        frame: Frame or framed DataArray to adopt, overriding the imported identity.
         chunks: Dask chunks, ``auto`` by default; ``None`` reads eagerly.
 
     Returns:
@@ -84,6 +90,10 @@ def open(
         FileNotFoundError: If a local store does not exist.
     """
     from . import from_multiscale, to_dataarray
+
+    # Checked before the store is read, as the other readers do.
+    if frame is not None and not isinstance(frame, ReferenceFrame | xr.DataArray):
+        raise TypeError("frame must be a ReferenceFrame or framed DataArray")
 
     if not isinstance(group, str):
         raise TypeError("group must be a string")
@@ -161,10 +171,15 @@ def open(
         arrays[path] = candidate
     shapes = {path: array.shape for path, array in arrays.items()}
     imported = from_multiscale(metadata, shapes=shapes, store=identity, group=group)
+    selected_level = imported.levels[level]
+    if frame is not None:
+        selected_level = replace(
+            selected_level, transform=adopt_frame(selected_level.transform, frame, name="frame")
+        )
     array = arrays[level]
     pixels = (
         np.asarray(array[...]) if chunks is None else da.from_zarr(array)  # type: ignore[no-untyped-call]
     )
     if chunks is not None and chunks != "auto":
         pixels = pixels.rechunk(chunks)  # type: ignore[union-attr]
-    return to_dataarray(imported.levels[level], pixels)
+    return to_dataarray(selected_level, pixels)
