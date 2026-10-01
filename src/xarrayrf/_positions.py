@@ -23,6 +23,7 @@ from ._sampling import (
     cell_extent,
     coordinate_to_position,
     position_to_coordinate,
+    singleton_step,
     uniform_step,
 )
 from ._transform import SupportsAffine, SupportsInverse, SupportsPoints, check_transform
@@ -126,7 +127,7 @@ def locator(
                 coordinate_to_position(
                     sampling.values,
                     coordinates[..., axis],
-                    sampling.step,
+                    singleton_step(sampling, domain),
                     extent,
                     extrapolate=extrapolate,
                 )
@@ -267,7 +268,11 @@ def points_at(
         [
             np.full(values.shape[:-1], float(axis.values))
             if axis.dim is None
-            else position_to_coordinate(axis.values, bounded[..., sampling.dims.index(axis.dim)])
+            else position_to_coordinate(
+                axis.values,
+                bounded[..., sampling.dims.index(axis.dim)],
+                singleton_step(axis, domain),
+            )
             for axis in sampling.axes
         ],
         axis=-1,

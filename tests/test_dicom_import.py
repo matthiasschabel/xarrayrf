@@ -429,3 +429,39 @@ def test_to_dataarray_orders_coordinates_by_dimension(
 ) -> None:
     geometry = from_datasets([image(offset) for offset in offsets])
     assert list(to_dataarray(geometry, np.zeros((3, 4, 5))).coords) == expected
+
+
+@pytest.mark.parametrize("thickness", [None, 4.0])
+def test_single_slice_declared_thickness_cells(thickness: float | None) -> None:
+    geometry = from_datasets([image(0, thickness=thickness)])
+    array = to_dataarray(geometry, np.zeros((1, 4, 5)))
+    if thickness is None:
+        assert not array.rf.grid.intervals
+        with pytest.raises(ValueError, match="single sample"):
+            array.rf.geometry.points_at([[0, 0, 0]], domain="cells")
+    else:
+        assert_allclose(array.rf.grid.intervals["slice_offset"], [[-2, 2]], rtol=0, atol=ATOL)
+        positions = np.array([[-0.5, 0, 0], [0.5, 0, 0]])
+        points = array.rf.geometry.points_at(positions, domain="cells")
+        assert_allclose(points, [ORIGIN - 2 * N, ORIGIN + 2 * N], rtol=0, atol=ATOL)
+        assert_allclose(
+            array.rf.geometry.positions_at(points, domain="cells"), positions, rtol=0, atol=ATOL
+        )
+        assert array.rf.grid == array.rf.encode().rf.decode().rf.grid
+
+
+@pytest.mark.parametrize(
+    "offsets,axis,expected",
+    [
+        ([0, 2, 4], "k", [[-1, 1], [0, 2], [1, 3]]),
+        ([0, 2, 5], "slice_offset", [[-2, 2], [0, 4], [3, 7]]),
+    ],
+)
+def test_slice_thickness_intervals_attach_in_slice_coordinate_units(
+    offsets: list[int], axis: str, expected: list[list[int]]
+) -> None:
+    geometry = from_datasets([image(offset, thickness=4) for offset in offsets])
+    array = to_dataarray(geometry, np.zeros((3, 4, 5)))
+    assert_allclose(array.rf.grid.intervals[axis], expected, rtol=0, atol=ATOL)
+    assert geometry.slice_intervals is not None
+    assert_allclose(array.rf.grid.intervals[axis], geometry.slice_intervals, rtol=0, atol=ATOL)

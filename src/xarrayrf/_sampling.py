@@ -14,8 +14,10 @@ from typing import Literal, cast
 import numpy as np
 import numpy.typing as npt
 
+from ._array_coordinates import ArrayCoordinates
 from ._frame import ReferenceFrame
 from ._transform import SupportsPoints
+from ._validation import frozen_float_array
 
 LATTICE_TOLERANCE = 1e-6
 """Default allowed deviation from uniform spacing, as a fraction of one step."""
@@ -61,6 +63,7 @@ class AxisSampling:
     dim: str | None
     values: npt.NDArray[np.float64]
     step: float | None = None
+    intervals: npt.NDArray[np.float64] | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,63 @@ class Sampling:
         """The transform's target frame."""
         assert isinstance(self.transform.target, ReferenceFrame)
         return self.transform.target
+
+
+INTERVAL_TOLERANCE = 1e-9
+"""Maximum sample/interval disagreement as a fraction of declared cell width."""
+
+INTERVAL_ROUNDOFF_FACTOR = 8
+"""Float64 epsilon multiples allowed at the bounds' magnitude for offset agreement.
+
+Large origins, such as epoch seconds, can round more than the width-relative tolerance.
+The agreement check uses the larger of the width tolerance and this roundoff allowance.
+"""
+
+
+def freeze_intervals(
+    source: ArrayCoordinates,
+    values: Mapping[str, npt.ArrayLike],
+    intervals: Mapping[str, npt.ArrayLike] | None,
+) -> dict[str, npt.NDArray[np.float64]]:
+    """Validate declared support against samples and freeze its float64 rows."""
+    if intervals is None:
+        return {}
+    if not isinstance(intervals, Mapping):
+        raise TypeError("intervals must be a mapping from source axis names to rows")
+    unknown = set(intervals) - set(source.axes)
+    if unknown:
+        raise ValueError(f"intervals name unknown source axes {sorted(unknown)}")
+    result = {}
+    for name, rows in intervals.items():
+        offset = source.sample_offset[source.axes.index(name)]
+        if offset is None:
+            raise ValueError(f"source axis {name!r} is point-sampled and cannot declare intervals")
+        samples = np.asarray(values[name], dtype=np.float64)
+        bounds = frozen_float_array(rows, field=f"intervals for source axis {name!r}")
+        expected = (*samples.shape, 2)
+        if samples.ndim > 1 or bounds.shape != expected:
+            raise ValueError(f"intervals for source axis {name!r} must have shape {expected}")
+        with np.errstate(over="ignore", invalid="ignore"):
+            width = bounds[..., 1] - bounds[..., 0]
+        if np.any(width <= 0) or not np.all(np.isfinite(width)):
+            raise ValueError(f"intervals for source axis {name!r} need finite widths and lo < hi")
+        with np.errstate(over="ignore", invalid="ignore"):
+            disagreement = np.abs(samples - (bounds[..., 0] + offset * width))
+        tolerance = np.maximum(
+            INTERVAL_TOLERANCE * width,
+            INTERVAL_ROUNDOFF_FACTOR * np.finfo(np.float64).eps * np.max(np.abs(bounds), axis=-1),
+        )
+        if not np.all(np.isfinite(samples)) or np.any(disagreement > tolerance):
+            raise ValueError(f"intervals for source axis {name!r} disagree with sample_offset")
+        result[name] = bounds
+    return result
+
+
+def singleton_step(sampling: AxisSampling, domain: Domain) -> float | None:
+    """Use a declared singleton width as the fractional-position step in the cells domain."""
+    if domain == "cells" and sampling.values.size == 1 and sampling.intervals is not None:
+        return float(np.diff(sampling.intervals.reshape(1, 2), axis=-1)[0, 0])
+    return sampling.step
 
 
 def uniform_step(values: npt.NDArray[np.float64], tolerance: float) -> float | None:
@@ -108,13 +168,24 @@ def cell_extent(sampling: AxisSampling, offset: float | None) -> tuple[float, fl
     ``offset`` is measured toward higher coordinate values, so it is read backwards along a
     dimension whose coordinates descend.
 
+    Declared intervals supply the outer coordinate bounds, converted to positions using the
+    same coordinate inverse as sampling queries. A singleton interval supplies its width.
+
     An axis declaring point samples (``offset`` None) has no cells, so it reaches no further
     than its samples.
 
     Raises:
-        ValueError: If the axis declares cells but has a single sample, whose cell width no
-            neighbour determines.
+        ValueError: If the axis is empty, or declares cells but has a single sample without
+            an interval, whose cell width no neighbour determines.
     """
+    if sampling.intervals is not None:
+        if sampling.values.size == 0:
+            raise ValueError("an empty coordinate has no cells to locate")
+        bounds = np.array([sampling.intervals[..., 0].min(), sampling.intervals[..., 1].max()])
+        positions = coordinate_to_position(
+            sampling.values, bounds, singleton_step(sampling, "cells"), extrapolate=True
+        )
+        return -float(positions.min()), float(positions.max()) - (sampling.values.size - 1)
     if offset is None:
         return 0.0, 0.0
     if sampling.values.size < 2:
@@ -151,7 +222,7 @@ def coordinate_to_position(
     if size == 0:
         raise ValueError("an empty coordinate has no positions to locate")
     before, after = extent
-    if size == 1:
+    if size == 1 and step is None:
         tolerance = SINGLE_SAMPLE_TOLERANCE * max(1.0, abs(float(values[0])))
         return np.where(np.abs(coordinates - values[0]) <= tolerance, 0.0, np.nan)
     if step is None:
@@ -197,12 +268,16 @@ def coordinate_to_position(
 
 
 def position_to_coordinate(
-    values: npt.NDArray[np.float64], positions: npt.NDArray[np.float64]
+    values: npt.NDArray[np.float64],
+    positions: npt.NDArray[np.float64],
+    step: float | None = None,
 ) -> npt.NDArray[np.float64]:
     """Interpolate positions piecewise linearly, extending by the outer steps."""
     if values.size == 0:
         raise ValueError("an empty coordinate has no positions to locate")
     if values.size == 1:
+        if step is not None:
+            return np.asarray(values[0] + positions * step, dtype=np.float64)
         if np.any(np.abs(positions) > POSITION_SLACK):
             raise ValueError(
                 "a single sample has no step for fractional positions or extrapolation"
@@ -216,6 +291,6 @@ def position_to_coordinate(
     # endpoint, where the weighted form's separate products could overflow.
     with np.errstate(over="ignore", invalid="ignore"):
         inside = (1 - fraction) * low + fraction * high
-    step = high - low
-    beyond = np.where(fraction < 0, low + fraction * step, high + (fraction - 1) * step)
+    local_step = high - low
+    beyond = np.where(fraction < 0, low + fraction * local_step, high + (fraction - 1) * local_step)
     return np.asarray(np.where((fraction >= 0) & (fraction <= 1), inside, beyond))

@@ -10,7 +10,7 @@ this document wins.
 ## Native binding
 
 Import `xarrayrf.native` to register the DataArray `.rf` accessor; importing `xarrayrf` alone
-does not register it. `array.rf.frame(coordinate_transform, *, dims)` validates the pairing
+does not register it. `array.rf.frame(coordinate_transform, *, dims, intervals=None)` validates the pairing
 with `Geometry` and attaches a private index owning the coordinate transform's source
 coordinates. Its `ArrayCoordinates` source maps the array's coordinates into the target
 `ReferenceFrame`. The returned array is **framed**. `array.rf.is_framed` reports the state, and
@@ -37,9 +37,10 @@ empty geometry with either `roll_coords` setting. These fixes are included in th
 
 `array.rf.encode()` returns an unframed copy sharing pixel data, with the reserved
 `attrs["xarrayrf_binding"]` set to canonical schema-1 JSON text containing the encoded
-transform and ordered geometry dimensions. It replaces any earlier value under that key.
+transform, ordered geometry dimensions and an always-present `intervals` object, keyed by source
+axis name (empty when undeclared). It replaces any earlier value under that key.
 `array.rf.decode(*, decoders=None)` removes the attribute and calls `rf.frame` with
-the decoded coordinate transform and geometry dimensions. This validates the binding against
+the decoded coordinate transform, geometry dimensions and intervals. This validates the binding against
 the array's current coordinates. A raw netCDF or Zarr read remains unframed until explicitly
 decoded. A missing attribute,
 malformed payload or already framed input raises; custom transform decoders are caller supplied.
@@ -49,6 +50,24 @@ The stage-2 suite marks known xarray gaps with strict xfails. A test for mixed l
 operands requiring xarray PR #11532 is marked only when xarray is imported from the locked
 2026.7.0 environment; it must pass against upstream main. Other strict xfails remain on both
 lanes until the later xarray hook stage.
+
+Declared intervals live in the binding index, keyed by source axis name. Positional and label
+selection (slices, strides, reversals, integer arrays and boolean masks) take rows with labels;
+scalar selection retains the row. Coordinate rolls roll rows; pixel-only rolls leave them
+unchanged. Rename and `swap_dims` carry support. Matched labels between bindings must have
+exactly equal interval rows; missing or conflicting support refuses and names the source axis.
+Index equality returns `False` for interval mismatches and ignores axes whose dimensions are
+excluded from alignment. Coordinate merging reports conflicting intervals as xarray's
+`MergeError`; joins and binding compatibility checks raise `ValueError` naming the axis.
+Joins introducing labels take their rows from the binding operand that declares them. A plain
+index in mixed alignment or a binding reindex target may select known labels, but cannot
+introduce labels without declared support. Mixed-index alignment and `swap_dims` require the
+existing optional xarray hooks; stock xarray's known refusals remain. Plain `DataArray.reindex` / `reindex_like` can
+be refused by xarray before dispatch, even for subsets on the current patched lane; use label
+selection for such subsets. The public Index `reindex_like` hook refuses non-binding operands.
+Concatenation of framed arrays stays refused. Native resampling results carry the target's
+intervals, never the source's; core `resample` retains
+its ordinary unframed result contract.
 
 ## Glossary
 
@@ -66,7 +85,7 @@ Each term has one meaning. Public names, docstrings, errors and docs use these m
 | **Axis type** | An optional open string naming what kind of axis it is, such as NGFF's `"space"`, `"time"` and `"channel"`, Astropy's `SPECTRAL`, or a UCD. Declarative: nothing in the core depends on it, so no axis names or kinds are blessed. |
 | **Position** | A zero-based index along an array or grid dimension, restarting at 0 after a crop. Sample positions are integers; interpolated positions may be fractional. |
 | **Coordinate** | A value along an axis, as xarray uses the word. At import an adapter usually sets coordinates equal to positions; after a crop xarray keeps the original values. A coordinate is where its sample is. |
-| **Cell** | The region an element stands for, such as a voxel, a pixel or a time bin: its nominal support, not its point-spread function or slice profile. By default cells are dense, tiling each axis from the current samples and the sample offset. Declared cells (designed, not yet implemented) may leave gaps or overlap, as slices of a multislice 2D MRI stack do; a cell width derived from spacing never stands in for slice thickness. |
+| **Cell** | The region an element stands for, such as a voxel, a pixel or a time bin: its nominal support, not its point-spread function or slice profile. By default cells are dense, tiling each axis from the current samples and the sample offset. Declared cells may leave gaps or overlap, as slices of a multislice 2D MRI stack do; a cell width derived from spacing never stands in for slice thickness. |
 | **Sample offset** | Where a sample sits in its cell along one axis, in position units: a fraction in `[0, 1]` measured from the cell's edge at lower coordinate values, `0.5` for a centred voxel; `None` for point samples, which have no cells. The cell of position p spans positions p − s to p + 1 − s, mapped to coordinates as positions are (piecewise linearly for nonuniform values), so on a nonuniform axis the fraction holds in positions, not in coordinate distance. |
 | **Domain** | Where `resample` and `positions_at` define values: `"samples"`, between the outer samples; `"cells"`, the sample hull extended to the outer edges of the outer samples' cells. Gaps between declared cells inside the hull are interpolated across in both. |
 | **Point** | A tuple of coordinates, one per axis of an endpoint. |
@@ -253,14 +272,23 @@ input is stored as int64 (values outside its range refuse), floating input as fl
 math converts to float64; the declaration keeps integer values exact. Units come from the source.
 Integer-only sequences, including mixed signed and unsigned NumPy integers, are checked before
 dtype promotion so values cannot be rounded through float64.
-`intervals` must be `None`; any other value is refused with a message naming stage 3.
+`intervals` is an optional mapping keyed by **source axis name**, with one `[lo, hi]` row per
+sample: shape `(n, 2)` for a varying coordinate, `(2,)` for a retained scalar. Missing axes
+use the sample-offset default. Rows must be finite with finite positive widths (`lo < hi`), in
+the source coordinate's own values and units. They are copied into immutable float64 buffers.
+Each sample must equal `lo + s * (hi - lo)` for its declared `sample_offset=s`, within
+`max(1e-9 * (hi - lo), 8 * eps * max(|lo|, |hi|))`, where `eps` is float64 machine epsilon.
+The magnitude term admits rounding at large origins such as epoch seconds without relaxing
+the width-relative check near zero. Point-sampled axes (`s=None`) refuse intervals. Gaps and
+overlaps are allowed; tiling is not required. `Grid.intervals` returns a read-only mapping (empty when
+undeclared) of fresh read-only views, with the same header-isolation guarantee as coordinates.
 
 `transform`, `frame`, `coordinates`, `dims` and read-only `sizes` expose the declaration. `dims`
 follows the varying coordinates' insertion order. Empty dimensions and fully scalar grids are
 valid. Equality compares the transform (including frame identity), dimension order and coordinate
-values and dtype kind exactly; integer and float coordinates declare different grids even
+values, dtype kind and declared intervals exactly; integer and float coordinates declare different grids even
 when their numeric values match. Equality never uses coincidence tolerance. The representation names source axes,
-target identity, dimensions and sizes.
+target identity, dimensions, sizes and axes with declared intervals.
 Coordinate arrays are fresh read-only views over immutable buffers; editing a returned array's
 dtype or shape cannot change the stored declaration. Copies, deep copies and pickle round trips
 reconstruct through the constructor and retain this guarantee.
@@ -291,7 +319,9 @@ xarray lazily and raise a clear `ImportError` when it is unavailable; Grid const
 NumPy sampling queries still work without xarray.
 `transpose(*dims)` names every varying dimension exactly once; with no arguments it reverses
 their order and remains NumPy-only. All return grids whose points equal the corresponding
-selection or permutation, preserving the coordinate transform and sample offsets.
+selection or permutation, preserving the coordinate transform, sample offsets and intervals.
+Selection takes interval rows with the labels; reversing an axis never swaps `lo` and `hi`.
+Scalar selection retains its `(2,)` interval with the fixed source coordinate.
 
 ### Native grid doors
 
@@ -301,7 +331,8 @@ when its dimensions, values and dtype kind match exactly (including its attrs). 
 and coordinates are untouched. A `dims=` argument with a grid raises `TypeError`, even when
 `None`; the transform form still requires `dims`. Already framed arrays and arrays carrying an
 encoded binding refuse as in the transform form. Geometry coordinate attrs must still agree
-with the source's declared units.
+with the source's declared units. All doors preserve the grid's intervals exactly.
+Passing `intervals=` with a Grid is refused; the grid supplies them.
 
 `xarrayrf.native.grid_coordinates(grid)` returns `xr.Coordinates` carrying the same binding
 index; `array.assign_coords(grid_coordinates(grid))` frames an array with matching dimensions
@@ -319,8 +350,11 @@ Non-geometry coordinates along a grid dimension must have that dimension's grid 
 
 ## Geometry queries
 
-`Geometry(array, transform, dims=...)` pairs an array with its transform from array
-coordinates. Beyond `point_at`:
+`Geometry(array, transform, dims=..., intervals=None)` pairs an array with its transform from array
+coordinates. A plain view has no intervals by default; explicit intervals follow the Grid
+validation rules, and `Geometry.intervals` exposes their read-only views. Declared coordinates
+are read to validate offset agreement; sampling queries recheck agreement against current values.
+`array.rf.geometry` passes its binding's intervals. `grid()` snapshots them. Beyond `point_at`:
 
 - `grid()`: an immutable `Grid` snapshot of the current coordinates, in `Geometry.dims` order.
   Coordinate values are read, pixels are never read. Multidimensional coordinates and multiple
@@ -343,7 +377,8 @@ coordinates. Beyond `point_at`:
   required. Reverse mapping through the actual source coordinates agrees exactly with
   `positions_at`, including its `domain` rule. Admitted outer-cell positions are clipped to
   the edge sample before rounding for nearest selection. Retained scalars support forward
-  mapping only; a single-sample dimension admits only its own coordinate in reverse.
+  mapping only; a single-sample dimension admits only its own coordinate in reverse unless its declared
+  interval supplies a cells-domain width.
 - `positions_at(points, *, outside="raise", domain="samples")`: frame points to fractional
   positions, through the exact inverse and a per-axis coordinate-to-position inversion
   (arithmetic for uniform coordinates, monotonic interpolation for nonuniform ones, extended by
@@ -355,7 +390,9 @@ coordinates. Beyond `point_at`:
   coordinates map linearly; nonuniform coordinates map piecewise linearly, extending by the
   outer steps. Retained scalar axes are read from the array or grid, not supplied in positions.
   Fields and multiple axes along one dimension are refused. A single-sample dimension accepts
-  position zero but has no step for fractional positions or extrapolation. Empty axes cannot
+  position zero but has no step for fractional positions or extrapolation without a declared
+  interval in the cells domain. Only in that domain does an interval supply its width as the
+  position step: `p=0` is the sample and positions `-s` and `1-s` map to `lo` and `hi`. Empty axes cannot
   locate non-empty position batches; empty batches return empty points. Likewise, `positions_at`
   accepts empty point batches on empty axes.
 - `is_coincident(other, *, tolerance=1e-6)`: whether both arrays sample the same points of the
@@ -371,12 +408,16 @@ coordinates. Beyond `point_at`:
 Both fractional queries accept `outside="raise"` (refuse points outside the domain), `"nan"`
 (mark every component of an outside row as NaN) and `"extrapolate"` (extend beyond the domain
 using each axis's outer step). `domain="samples"` bounds positions to `[0, n - 1]`;
-`domain="cells"` extends to the declared sample-offset edges, with the same single-sample
-cell-width refusal as before. Extrapolation still validates the domain declaration. Forward and
+`domain="cells"` extends to the outer declared interval bounds when present, and otherwise to
+the sample-offset edges. Interior gaps remain interpolated; overlaps are allowed. Single-sample
+cell-width refusal applies only without an interval. Extrapolation still validates the domain declaration. Forward and
 inverse queries round-trip on strictly monotonic axes with a determined transform inverse,
 including extrapolated nonuniform positions: offsets `0, 2, 5, 9` map positions
 `-1, 0, 1.5, 4` to coordinates `-2, 0, 3.5, 13`. Retained scalars continue to refuse inverse
 lookup and coincidence because projection is a separate policy.
+In the samples domain, a singleton retains the coordinate matching tolerance
+`1e-9 * max(1, |v|)` and returns position zero for a match, with or without declared intervals.
+Its interval supplies no step for samples-domain fractional extrapolation.
 
 ## Resampling
 
@@ -437,9 +478,11 @@ The domain is explicit. By default values are defined between the outer source s
 value for every method. ITK's domain is the same, and its nearest and linear
 interpolators also hold the edge, while its B-spline mirrors. An axis declaring point samples
 has no cells and reaches no further than its samples, as for echo times or time points alongside
-voxel axes. An axis declaring cells with a single sample, such as one image slice, is refused:
-no neighbour determines its cell width, and declaring it point-sampled would misdescribe a slice
-that has thickness. Interpolation between samples is the same in both domains.
+voxel axes. Declared intervals override sample-offset bounds; gaps inside the sample hull
+remain interpolated. An axis declaring cells with a single sample is refused only when it has
+no interval: no neighbour determines its cell width. A singleton with a declared interval
+maps linearly across that slab and holds its sole sample value. Interpolation between samples
+is the same in both domains.
 The cells domain adds nothing for nearest and linear; cubic re-evaluates the shell samples at
 clamped positions, at a cost proportional to the shell.
 
@@ -536,7 +579,8 @@ when the UID is present and is otherwise local; Patient Position is a result fie
 `xarrayrf.dicom.to_dataarray(geometry, data) -> DataArray` takes a source pixel stack with slice
 axis 0 (`k`). For `from_datasets`, it has one slice per dataset in the supplied order. For
 `from_enhanced`, it is the full pixel array in original frame order, including unselected frames.
-The function applies `order` before binding; `slice_intervals` are not attached pending cells.
+The function applies `order` before binding and attaches `slice_intervals` to the slice source
+axis when present, including single-slice thickness in the cells domain.
 
 Dimensions are `(k, j, i)`. Uniform stacks have an index `k`; nonuniform and single-slice
 stacks carry a `slice_offset` coordinate in mm on dimension `k`. `slice_intervals` contains each

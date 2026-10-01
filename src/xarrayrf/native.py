@@ -15,7 +15,7 @@ from xarray.indexes import PandasIndex
 
 from ._affine import AffineTransform
 from ._binding import BindingIndex, grid_from_binding, grid_variables
-from ._encoding import Decoder, MalformedDataError, encode
+from ._encoding import Decoder, MalformedDataError, decode_intervals, encode
 from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
 from ._geometry import Geometry
@@ -76,7 +76,10 @@ def index_coordinate(dim: str, size: int, *, start: int = 0) -> CoordinateSpec:
 
 
 def _grid_and_coords(
-    transform: SupportsPoints, coords: Mapping[str, CoordinateSpec]
+    transform: SupportsPoints,
+    coords: Mapping[str, CoordinateSpec],
+    *,
+    intervals: Mapping[str, npt.ArrayLike] | None = None,
 ) -> tuple[Grid, dict[str, CoordinateSpec]]:
     """Split adapter coordinate specs without discarding geometry metadata."""
     units = dict(zip(transform.source.axes, transform.source.units, strict=True))
@@ -93,7 +96,7 @@ def _grid_and_coords(
                 "or contain only the declared units"
             )
         geometry[name] = (dim, values) if isinstance(dim, str) else values
-    return Grid(transform, geometry), other
+    return Grid(transform, geometry, intervals=intervals), other
 
 
 def grid_coordinates(grid: Grid) -> xr.Coordinates:
@@ -107,11 +110,14 @@ def grid_coordinates(grid: Grid) -> xr.Coordinates:
     """
     if not isinstance(grid, Grid):
         raise TypeError(f"grid must be a Grid, got {type(grid).__name__}")
-    return _binding_coordinates(grid_variables(grid), grid.transform, grid.dims)
+    return _binding_coordinates(grid_variables(grid), grid.transform, grid.dims, grid.intervals)
 
 
 def _binding_coordinates(
-    variables: Mapping[str, xr.Variable], transform: SupportsPoints, dims: tuple[str, ...]
+    variables: Mapping[str, xr.Variable],
+    transform: SupportsPoints,
+    dims: tuple[str, ...],
+    intervals: Mapping[str, npt.ArrayLike] | None = None,
 ) -> xr.Coordinates:
     axes = {
         name: PandasIndex.from_variables({name: variable}, options={})
@@ -119,7 +125,7 @@ def _binding_coordinates(
         if variable.ndim == 1
     }
     fixed = {name: variable for name, variable in variables.items() if variable.ndim == 0}
-    index = BindingIndex(axes, fixed, transform, dims)
+    index = BindingIndex(axes, fixed, transform, dims, intervals)
     return xr.Coordinates(variables, indexes={name: index for name in variables})
 
 
@@ -254,11 +260,19 @@ class _ReferenceFrameAccessor:
 
     @overload
     def frame(
-        self, coordinate_transform: SupportsPoints, *, dims: Sequence[str]
+        self,
+        coordinate_transform: SupportsPoints,
+        *,
+        dims: Sequence[str],
+        intervals: Mapping[str, npt.ArrayLike] | None = None,
     ) -> xr.DataArray: ...
 
     def frame(
-        self, coordinate_transform: SupportsPoints | Grid, *, dims: object = _DIMS_UNSET
+        self,
+        coordinate_transform: SupportsPoints | Grid,
+        *,
+        dims: object = _DIMS_UNSET,
+        intervals: Mapping[str, npt.ArrayLike] | None = None,
     ) -> xr.DataArray:
         """Frame this array with a Grid or an ArrayCoordinates-to-ReferenceFrame transform.
 
@@ -266,6 +280,7 @@ class _ReferenceFrameAccessor:
             coordinate_transform: Grid, or mapping from the array's coordinates (an
                 ``ArrayCoordinates`` source) to its target ``ReferenceFrame``.
             dims: Required with a transform; forbidden with a Grid.
+            intervals: Optional declared cell bounds for a transform; supplied by a Grid.
 
         Returns:
             A DataArray sharing the original pixel data and carrying a private binding index.
@@ -288,6 +303,8 @@ class _ReferenceFrameAccessor:
         if isinstance(coordinate_transform, Grid):
             if dims is not _DIMS_UNSET:
                 raise TypeError("dims must not be supplied with a Grid")
+            if intervals is not None:
+                raise TypeError("intervals must not be supplied with a Grid")
             grid = coordinate_transform
             for dim, size in grid.sizes.items():
                 if dim not in array.dims or array.sizes[dim] != size:
@@ -296,6 +313,7 @@ class _ReferenceFrameAccessor:
                     )
             coords = grid_coordinates(grid)
             variables = {str(name): variable for name, variable in coords.variables.items()}
+            replaced = []
             for name, variable in variables.items():
                 if name in array.coords:
                     current = array.coords[name].variable
@@ -305,14 +323,23 @@ class _ReferenceFrameAccessor:
                         and np.array_equal(current.data, variable.data)
                     ):
                         variables[name] = current
-            Geometry(array.assign_coords(variables), grid.transform, dims=grid.dims)
-            coords = _binding_coordinates(variables, grid.transform, grid.dims)
+                    else:
+                        replaced.append(name)
+            Geometry(
+                array.assign_coords(variables),
+                grid.transform,
+                dims=grid.dims,
+                intervals=grid.intervals,
+            )
+            coords = _binding_coordinates(variables, grid.transform, grid.dims, grid.intervals)
             names = grid.transform.source.axes
             stripped = array.drop_indexes([name for name in names if name in array.xindexes])
-            return stripped.assign_coords(coords)
+            return stripped.drop_vars(replaced).assign_coords(coords)
         if dims is _DIMS_UNSET:
             raise TypeError("dims is required with a coordinate transform")
-        geometry = Geometry(array, coordinate_transform, dims=cast(Sequence[str], dims))
+        geometry = Geometry(
+            array, coordinate_transform, dims=cast(Sequence[str], dims), intervals=intervals
+        )
         names = coordinate_transform.source.axes
         variables = {name: array.coords[name].variable for name in names}
         for name, variable in variables.items():
@@ -332,7 +359,9 @@ class _ReferenceFrameAccessor:
                 f"source coordinates share dimension(s) {shared}; binding several "
                 "coordinates that vary along one dimension is not supported"
             )
-        coords = _binding_coordinates(variables, coordinate_transform, geometry.dims)
+        coords = _binding_coordinates(
+            variables, coordinate_transform, geometry.dims, geometry.intervals
+        )
         stripped = array.drop_indexes([name for name in names if name in array.xindexes])
         return stripped.assign_coords(coords)
 
@@ -366,8 +395,10 @@ class _ReferenceFrameAccessor:
             payload = json.loads(encoded)
         except ValueError as error:
             raise MalformedDataError(f"{_BINDING_ATTR!r} is not valid JSON: {error}") from error
-        if not isinstance(payload, dict) or set(payload) != {"transform", "dims"}:
-            raise MalformedDataError("encoded binding must have exactly 'transform' and 'dims'")
+        if not isinstance(payload, dict) or set(payload) != {"transform", "dims", "intervals"}:
+            raise MalformedDataError(
+                "encoded binding must have exactly 'transform', 'dims' and 'intervals'"
+            )
         dims = payload["dims"]
         if not isinstance(dims, list) or any(not isinstance(dim, str) for dim in dims):
             raise MalformedDataError("encoded binding 'dims' must be a JSON array of strings")
@@ -376,7 +407,15 @@ class _ReferenceFrameAccessor:
             raise MalformedDataError("encoded binding 'transform' must be a point transform")
         plain = array.copy(deep=False)
         plain.attrs = {key: value for key, value in array.attrs.items() if key != _BINDING_ATTR}
-        return cast(xr.DataArray, plain.rf.frame(coordinate_transform, dims=dims))
+        intervals = decode_intervals(payload["intervals"])
+        try:
+            return cast(
+                xr.DataArray, plain.rf.frame(coordinate_transform, dims=dims, intervals=intervals)
+            )
+        except (TypeError, ValueError, OverflowError) as error:
+            raise MalformedDataError(
+                f"encoded binding is not a valid declaration: {error}"
+            ) from error
 
     @property
     def is_framed(self) -> bool:
@@ -406,7 +445,7 @@ class _ReferenceFrameAccessor:
     def geometry(self) -> Geometry:
         """A fresh, validated view of this array's current geometry."""
         index = self._require_binding()
-        return Geometry(self._array, index.transform, dims=index.dims)
+        return Geometry(self._array, index.transform, dims=index.dims, intervals=index.intervals)
 
     @property
     def grid(self) -> Grid:
@@ -461,7 +500,11 @@ class _ReferenceFrameAccessor:
             return cast(xr.DataArray, result.rf.frame(target_geometry))
         return cast(
             xr.DataArray,
-            result.rf.frame(target_geometry.transform, dims=target_geometry.dims),
+            result.rf.frame(
+                target_geometry.transform,
+                dims=target_geometry.dims,
+                intervals=target_geometry.intervals,
+            ),
         )
 
     def assume_frame(self, other: ReferenceFrame | xr.DataArray) -> xr.DataArray:
@@ -501,7 +544,10 @@ class _ReferenceFrameAccessor:
             )
         )
         replacement = affine.with_endpoints(target=other_frame)
-        return cast(xr.DataArray, self.unframe().rf.frame(replacement, dims=binding.dims))
+        return cast(
+            xr.DataArray,
+            self.unframe().rf.frame(replacement, dims=binding.dims, intervals=binding.intervals),
+        )
 
     def unframe(self) -> xr.DataArray:
         """Remove the binding and restore default indexes on dimension coordinates.
@@ -534,7 +580,11 @@ class _ReferenceFrameAccessor:
         result.attrs = {
             **result.attrs,
             _BINDING_ATTR: json.dumps(
-                {"transform": encode(index.transform), "dims": list(index.dims)},
+                {
+                    "transform": encode(index.transform),
+                    "dims": list(index.dims),
+                    "intervals": {name: rows.tolist() for name, rows in index.intervals.items()},
+                },
                 sort_keys=True,
                 separators=(",", ":"),
                 allow_nan=False,

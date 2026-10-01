@@ -69,7 +69,11 @@ def test_encoded_copy_is_canonical_and_shares_pixels(framed: xr.DataArray) -> No
     assert not encoded.rf.is_framed
     assert encoded.data is framed.data
     assert framed.attrs["xarrayrf_binding"] == "old declaration"
-    payload = {"dims": ["y", "x"], "transform": encode(framed.rf.coordinate_transform)}
+    payload = {
+        "dims": ["y", "x"],
+        "transform": encode(framed.rf.coordinate_transform),
+        "intervals": {},
+    }
     assert encoded.attrs == {
         "note": "retained",
         "xarrayrf_binding": json.dumps(payload, sort_keys=True, separators=(",", ":")),
@@ -154,7 +158,7 @@ def test_malformed_binding_is_reported(framed: xr.DataArray, payload: Any) -> No
 
 
 def test_non_transform_declaration_is_malformed(framed: xr.DataArray) -> None:
-    payload = {"dims": ["y", "x"], "transform": encode(framed.rf.reference_frame)}
+    payload = {"dims": ["y", "x"], "transform": encode(framed.rf.reference_frame), "intervals": {}}
     array = framed.rf.unframe().assign_attrs(xarrayrf_binding=json.dumps(payload))
     with pytest.raises(MalformedDataError, match="point transform"):
         array.rf.decode()

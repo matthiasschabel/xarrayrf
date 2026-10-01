@@ -156,6 +156,7 @@ def _encode(value: object) -> dict[str, Any]:
     if isinstance(value, Grid):
         return {
             "kind": "grid",
+            "intervals": {name: rows.tolist() for name, rows in value.intervals.items()},
             "transform": _encode(value.transform),
             "dims": list(value.dims),
             "coordinates": {
@@ -288,6 +289,26 @@ def _mapping(value: object, where: str) -> Mapping[str, Any]:
     return value
 
 
+def decode_intervals(data: object) -> dict[str, Any]:
+    """Check JSON interval mappings without coercing strings or booleans into numbers."""
+    intervals = _mapping(data, "intervals")
+
+    def check_rows(value: object) -> None:
+        if not isinstance(value, list):
+            raise MalformedDataError("interval rows must be JSON arrays")
+        for item in value:
+            if isinstance(item, list):
+                check_rows(item)
+            elif isinstance(item, bool) or not isinstance(item, int | float):
+                raise MalformedDataError("interval values must be numbers")
+
+    for name, rows in intervals.items():
+        if not isinstance(name, str):
+            raise MalformedDataError("interval axis names must be strings")
+        check_rows(rows)
+    return dict(intervals)
+
+
 _FIELDS: Final = {
     "direction_vocabulary": {"identifier", "directions"},
     "coordinate_system": {
@@ -309,7 +330,7 @@ _FIELDS: Final = {
     "array_coordinates": {"axes", "units", "axis_types", "sample_offset"},
     "affine_transform": {"source", "target", "matrix", "translation"},
     "composite_transform": {"transforms"},
-    "grid": {"transform", "dims", "coordinates"},
+    "grid": {"transform", "dims", "coordinates", "intervals"},
 }
 
 _EXTENSION_FIELDS: Final = {"version", "source", "target", "data"}
@@ -331,7 +352,7 @@ class _Decoder:
                 return getattr(self, kind)(fields)
             except EncodingError:
                 raise
-            except (TypeError, ValueError) as error:
+            except (TypeError, ValueError, OverflowError) as error:
                 raise MalformedDataError(f"{kind} is not a valid declaration: {error}") from error
         if not _is_namespaced(kind):
             raise UnknownKindError(
@@ -467,7 +488,11 @@ class _Decoder:
         # JSON object order is not preserved by every tool, so dims, not key order, fixes the order.
         ordered = {varying[dim]: coordinates[varying[dim]] for dim in dims}
         ordered.update({name: entry for name, entry in coordinates.items() if name not in ordered})
-        return Grid(self.value(fields["transform"]), ordered)
+        return Grid(
+            self.value(fields["transform"]),
+            ordered,
+            intervals=decode_intervals(fields["intervals"]),
+        )
 
     def composite_transform(self, fields: Mapping[str, Any]) -> CompositeTransform:
         members = [self.value(item) for item in self._list(fields["transforms"], "transforms")]

@@ -25,7 +25,7 @@ from ._positions import (
     positions_at,
     transform_points,
 )
-from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling
+from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling, freeze_intervals
 from ._transform import SupportsAffine, SupportsPoints, check_transform, transform_named
 from ._validation import REAL_KINDS, _check_str_sequence, check_names, real_float_array
 
@@ -135,7 +135,7 @@ class Geometry:
     of the selected values, not a promise about the field they came from.
     """
 
-    __slots__ = ("_array", "_dims", "_frame", "_transform")
+    __slots__ = ("_array", "_dims", "_frame", "_intervals", "_transform")
 
     _array: xr.DataArray
     _transform: SupportsPoints
@@ -148,6 +148,7 @@ class Geometry:
         transform: SupportsPoints,
         *,
         dims: Sequence[str],
+        intervals: Mapping[str, npt.ArrayLike] | None = None,
     ) -> None:
         """Validate that ``transform`` describes ``array``'s current geometry coordinates.
 
@@ -156,6 +157,8 @@ class Geometry:
             transform: A point transform from :class:`~xarrayrf.ArrayCoordinates` naming
                 the array's coordinates into a :class:`~xarrayrf.ReferenceFrame`, such as an
                 :class:`~xarrayrf.AffineTransform`.
+            intervals: Optional per-source-axis cell bounds, validated as on Grid.
+                Declared coordinates are read to check agreement with their sample offsets.
             dims: The dimensions the source axes are allowed to depend on. They
                 must exist on ``array``, be unique, and be exactly the dimensions some
                 source axis actually depends on: a declared dimension no source axis uses is refused
@@ -196,6 +199,29 @@ class Geometry:
         self._transform = transform
         self._frame = transform.target
         self._dependencies()
+        if intervals is not None and not isinstance(intervals, Mapping):
+            raise TypeError("intervals must be a mapping from source axis names to rows")
+        self._intervals = freeze_intervals(
+            transform.source,
+            {name: array.coords[name].values for name in intervals or {} if name in array.coords},
+            intervals,
+        )
+
+    @property
+    def intervals(self) -> Mapping[str, npt.NDArray[np.float64]]:
+        """Read-only declared support, keyed by source axis name."""
+        return MappingProxyType({name: rows.view() for name, rows in self._intervals.items()})
+
+    def _sample_axes(self) -> tuple[AxisSampling, ...]:
+        axes = _sample_axes(self._array, self._transform.source.axes)
+        assert isinstance(self._transform.source, ArrayCoordinates)
+        intervals = freeze_intervals(
+            self._transform.source, {axis.axis: axis.values for axis in axes}, self._intervals
+        )
+        return tuple(
+            AxisSampling(axis.axis, axis.dim, axis.values, axis.step, intervals.get(axis.axis))
+            for axis in axes
+        )
 
     def _dependencies(self) -> dict[str, tuple[str, ...]]:
         """Revalidate the current coordinate structure and report source-axis dependencies.
@@ -416,7 +442,7 @@ class Geometry:
             self._transform,
             self._dims,
             self.sizes,
-            lambda: _sample_axes(self._array, self._transform.source.axes),
+            self._sample_axes,
         )
 
     def grid(self) -> Grid:
@@ -434,7 +460,7 @@ class Geometry:
             else self._array.coords[name].data
             for name, dims in dependencies.items()
         }
-        return Grid(self._transform, coordinates).transpose(*self._dims)
+        return Grid(self._transform, coordinates, intervals=self._intervals).transpose(*self._dims)
 
     def points_at(
         self,
@@ -509,7 +535,8 @@ class Geometry:
         align silently. A frame point outside the domain, or not finite, is refused rather than
         rounded to a wrong sample; the domain is the one :meth:`positions_at` uses, so
         ``domain="cells"`` admits points in the outer samples' cells as declared by each source
-        axis's :attr:`~xarrayrf.ArrayCoordinates.sample_offset`, selecting the edge sample there.
+        axis's declared intervals or :attr:`~xarrayrf.ArrayCoordinates.sample_offset`,
+        selecting the edge sample there.
         Reverse mapping agrees exactly with :meth:`positions_at`, with admitted outer-cell
         positions clipped to the edge sample before rounding.
 
@@ -531,7 +558,7 @@ class Geometry:
                 strings.
             ValueError: If a source axis is a multidimensional field, more than one source
                 axis varies along a dimension, coordinates are not strictly monotonic,
-                ``domain`` is unknown, a cells-domain axis has a single sample, ``names`` has
+                ``domain`` is unknown, a cells-domain axis has a single sample without an interval, ``names`` has
                 the wrong length or repeats a name, or a name is already a coordinate or
                 dimension of the array. Retained scalars and single-sample dimensions support
                 forward mapping; retained scalars have no reverse selection.
@@ -549,7 +576,7 @@ class Geometry:
         check_domain(domain)
         source = transform.source
         assert isinstance(source, ArrayCoordinates)
-        samplings = _sample_axes(self._array, transform.source.axes)
+        samplings = self._sample_axes()
         by_dim = {}
         for axis, sampling in enumerate(samplings):
             if sampling.dim is None:
@@ -622,7 +649,7 @@ class Geometry:
                 a source axis is a retained scalar or a multidimensional field, a geometry
                 dimension carries more than one source axis, coordinates are not strictly
                 monotonic, ``domain`` is unknown, ``domain="cells"`` and a source axis declaring
-                cells has a single sample, or ``outside="raise"`` and a point lies outside the
+                cells has a single sample without an interval, or ``outside="raise"`` and a point lies outside the
                 domain.
         """
         return positions_at(self._sampling(), points, domain=domain, outside=outside)

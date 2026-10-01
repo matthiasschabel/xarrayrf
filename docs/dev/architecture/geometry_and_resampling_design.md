@@ -6,7 +6,7 @@
 `ArrayCoordinates.sample_offset` and the
 `"samples" | "cells"` domain, `Geometry.is_coincident`, core `resample` including the same-grid
 gather, and the accessor's `rf.resample_to` and `rf.assume_frame`. Declared intervals are
-designed, not implemented. [The core interface](../../core_interface.md) is normative.
+implemented. [The core interface](../../core_interface.md) is normative.
 
 ## Context
 
@@ -29,7 +29,7 @@ bounds variables; VTK distinguishes point from cell data.
 
 ### Geometry is a view that re-reads the array
 
-`Geometry(array, transform, dims=...)` holds a reference to the array, which stays the authority
+`Geometry(array, transform, dims=..., intervals=None)` holds a reference to the array, which stays the authority
 for its sample domain.
 
 - **Validity is not cached.** Every geometry-dependent property and query re-runs the structural
@@ -53,7 +53,7 @@ view; the binding adds snapshot, association and enforcement, which the view nev
 
 ### Grid is a frozen sampling value
 
-Stages 1 and 2 of [the grid plan](grid_plan.md) are implemented. `Grid(transform, coordinates,
+Stages 1 through 3 of [the grid plan](grid_plan.md) are implemented. `Grid(transform, coordinates,
 intervals=None)` copies finite real 0-D/1-D coordinates into immutable NumPy buffers:
 integer inputs become int64 without passing through float, floating inputs become float64.
 Out-of-range integers refuse. Equality and hashing include the coordinate dtype kind; sampling
@@ -140,32 +140,48 @@ offset, never inference of support from spacing.
 `"cells"` extends the hull to the outer cells' edges, where every method holds the edge value
 (ITK's domain is the same; its nearest and linear hold the edge, its B-spline mirrors). Cubic
 re-evaluates the shell at clamped positions; nearest and linear cost nothing extra. A
-point-sampled axis adds no reach. An axis declaring cells with a single sample is refused: no
+point-sampled axis adds no reach. An axis declaring cells with a single sample and no interval is refused: no
 neighbour fixes its width, and calling it point-sampled would misdescribe a slice with thickness.
 `positions_at(..., domain="cells")` returns true fractional positions such as `-0.5`.
 
-### Declared intervals (designed, not implemented)
+### Declared intervals (implemented)
 
-Cells are declared regions (CF and VTK usage); density is a property of how they are declared.
-Declared intervals override the default: one `[lo, hi]` per index, in coordinate values, for
-cells that do not tile, such as multislice 2D MRI with gaps or overlap, and single slices.
-Spacing never stands in for thickness; a DICOM adapter would declare intervals from
-`SliceThickness`. An offset and intervals declared together must agree in positions.
+Declared intervals override the default cells extent: one `[lo, hi]` per sample, keyed by
+source axis name, in that coordinate's values and units. They allow cells that do not tile,
+such as multislice MRI with gaps or overlap, and single slices. Spacing never stands in for
+thickness; the DICOM adapter attaches intervals from `SliceThickness`, in index units for a
+uniform stack and millimetres for `slice_offset`.
 
-- Rectilinear cells are separable: element `(i_1, ..., i_N)` is the image of the box
-  `∏ [lo_d(i_d), hi_d(i_d)]`, stored as one `(n_d, 2)` array per axis.
-- `Geometry.cell_corners(**positions)` returns the `2^K` corner points; they enclose the cell only
-  under an affine transform.
-- The cells domain reaches the outer declared interval; interior gaps are still interpolated.
-- Carrier: intervals must follow `isel`. A DataArray refuses a CF `(n, 2)` bounds coordinate, and
-  parallel lower/upper coordinates are an invented convention that `coarsen` corrupts. The
-  intended carrier is a custom index on the axis coordinate that slices intervals in `isel`;
-  adapters write CF bounds on a Dataset for persistence.
-- A retained scalar slice cannot carry an interval (xarray drops indexes on scalar selection).
-  Until a carrier is prototyped, a slice that needs thickness stays a one-sample dimension.
+- Varying axes use `(n, 2)` rows; retained scalars use `(2,)`. Storage is frozen float64 and
+  public mappings return read-only views. Bounds and widths must be finite, with `lo < hi`.
+- The sample must agree with `lo + s * (hi - lo)` within
+  `max(1e-9 * (hi - lo), 8 * eps * max(|lo|, |hi|))`, where `s` is the source axis's sample
+  offset and `eps` is float64 machine epsilon. `INTERVAL_ROUNDOFF_FACTOR = 8` allows arithmetic
+  roundoff at large origins such as epoch seconds. Point-sampled axes (`s=None`) refuse intervals.
+- The cells domain reaches the outer declared bounds; interior gaps remain interpolated.
+  Multi-sample positions retain their piecewise-linear mapping and outer-step extrapolation.
+  Only in the cells domain does a single sample use interval width as its step: positions `-s`
+  and `1-s` map to its bounds. In the samples domain its matching tolerance remains
+  `SINGLE_SAMPLE_TOLERANCE * max(1, |v|)`, returning position zero for a match regardless of
+  interval declarations; its interval supplies no fractional extrapolation step.
+- Grid and Geometry use one sampling implementation. A plain Geometry has no intervals unless
+  explicitly supplied; the bound accessor passes its BindingIndex's declaration.
+- BindingIndex carries rows through selection, retained scalar selection, roll, rename and
+  `swap_dims`. Reversal reorders rows without reversing bounds. Matched labels must have exact
+  support agreement; new labels must have support in a binding operand. Plain-index subsets
+  in mixed alignment keep known support; introducing unknown labels refuses. The public
+  `reindex_like` hook refuses non-binding operands. Equality returns `False` for interval
+  mismatches and skips axes on excluded dimensions; coordinate merging raises xarray's
+  `MergeError`. Joins and compatibility checks still raise `ValueError` naming the axis.
+  Concat remains refused.
+- All grid doors and native encoding preserve intervals. Native resampling carries only the
+  target's support; core resampling continues to return an unframed array. Existing xarray
+  hook requirements still apply to mixed-index operations and `swap_dims`.
 
 In a 2-D frame a pixel has in-plane extent only; placing it in 3-D needs a third source axis
 whose offset says where the sample sits along the normal and whose interval gives thickness.
+`cell_corners`, curvilinear cells and a strict domain only inside individual declared cells
+remain deferred.
 
 ### Tolerant comparison
 
@@ -243,9 +259,7 @@ adapter decisions, recorded with the adapters.
 
 ## Deferred Work
 
-- Declared intervals: carrier index, CF encoding, `cell_corners`, offset/interval consistency,
-  adapter use of `SliceThickness`; a strict domain defined only inside declared cells; a carrier
-  for intervals on retained scalars.
+- CF bounds encoding, `cell_corners`, and a strict domain defined only inside declared cells.
 - Curvilinear and irregular cells: dense cells share a vertex grid (VTK structured grids, UGRID);
   sparse cells are per-element shapes (CF 2-D bounds, footprints), possibly not boxes.
 - Conversions for edge-counting conventions (plot extents, GDAL geotransforms), refused when no
@@ -257,6 +271,4 @@ adapter decisions, recorded with the adapters.
 
 ## Next Steps
 
-1. Implement declared intervals with the DICOM and NIfTI adapters, which supply offsets and
-   `SliceThickness`.
-2. Revisit per-access validation cost only if a workload shows it matters.
+1. Revisit per-access validation cost only if a workload shows it matters.

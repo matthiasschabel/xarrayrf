@@ -14,7 +14,14 @@ from typing import Any
 import numpy as np
 from xarray.indexes import CoordinateTransform, CoordinateTransformIndex
 
-from ._sampling import AxisSampling, Domain, coordinate_to_position
+from ._sampling import (
+    AxisSampling,
+    Domain,
+    cell_extent,
+    coordinate_to_position,
+    position_to_coordinate,
+    singleton_step,
+)
 from ._transform import SupportsAffine, SupportsInverse, check_transform
 
 
@@ -60,7 +67,9 @@ class FrameCoordinateTransform(CoordinateTransform):
                 columns.append(sampling.values[positions])
             else:
                 columns.append(
-                    np.interp(positions, np.arange(sampling.values.size), sampling.values)
+                    position_to_coordinate(
+                        sampling.values, positions, singleton_step(sampling, self.domain)
+                    )
                 )
         values = np.stack(np.broadcast_arrays(*columns), axis=-1)
         points = values @ self.transform.matrix.T + self.transform.translation
@@ -99,7 +108,10 @@ class FrameCoordinateTransform(CoordinateTransform):
         ):
             assert dim_index is not None
             positions = coordinate_to_position(
-                sampling.values, coordinates[..., axis], sampling.step, self.reach[dim_index]
+                sampling.values,
+                coordinates[..., axis],
+                singleton_step(sampling, self.domain),
+                self.reach[dim_index],
             )
             if not np.isfinite(positions).all():
                 raise ValueError(outside_message)
@@ -127,6 +139,14 @@ class FrameCoordinateTransform(CoordinateTransform):
             and self._axis_dims == other._axis_dims
             and all(
                 np.array_equal(first.values, second.values)
+                and (
+                    (first.intervals is None and second.intervals is None)
+                    or (
+                        first.intervals is not None
+                        and second.intervals is not None
+                        and np.array_equal(first.intervals, second.intervals)
+                    )
+                )
                 for first, second in zip(self.samplings, other.samplings, strict=True)
             )
         )
@@ -151,9 +171,14 @@ class FrameCoordinateTransform(CoordinateTransform):
                     dim=dim,
                     values=values,
                     step=sampling.step * step if sampling.step is not None else None,
+                    intervals=sampling.intervals[selection]
+                    if sampling.intervals is not None
+                    else None,
                 )
             )
-            if step < 0:
+            if sampling.intervals is not None and self.domain == "cells":
+                reach[dim_index] = cell_extent(samplings[-1], None) if values.size else (0.0, 0.0)
+            elif step < 0:
                 reach[dim_index] = (reach[dim_index][1], reach[dim_index][0])
         return FrameCoordinateTransform(
             self.transform,

@@ -16,6 +16,7 @@ from dask.callbacks import Callback
 from numpy.testing import assert_allclose
 from xarray.indexes import RangeIndex
 
+import xarrayrf.native  # noqa: F401  (registers the .rf accessor)
 from xarrayrf import (
     AffineTransform,
     ArrayCoordinates,
@@ -205,10 +206,8 @@ def test_grid_constructor_refusals(coordinates: Any, error: type[Exception], mat
         Grid(transform(), coordinates)
 
 
-def test_grid_constructor_endpoint_and_interval_refusals() -> None:
+def test_grid_constructor_endpoint_refusals() -> None:
     mapping = transform()
-    with pytest.raises(ValueError, match="stage 3"):
-        Grid(mapping, {"offset": 0}, intervals={})
     with pytest.raises(ValueError, match="ArrayCoordinates"):
         Grid(mapping.inverse(), {"x0": 0})
     with pytest.raises(ValueError, match="ReferenceFrame"):
@@ -486,7 +485,7 @@ def test_grid_decode_wraps_constructor_errors_and_refuses_unknown_fields() -> No
         decode(data)
     assert isinstance(caught.value.__cause__, ValueError)
     data = encode(Grid(transform(), {"offset": 2}))
-    data["value"]["intervals"] = None
+    data["value"]["extra"] = None
     with pytest.raises(MalformedDataError, match="extra"):
         decode(data)
 
@@ -865,7 +864,6 @@ def test_resampling_to_grid_keeps_pixels_lazy_and_context_coords_exact() -> None
 
 
 def test_grid_property_refuses_unframed_array() -> None:
-    import xarrayrf.native  # noqa: F401
 
     with pytest.raises(ValueError, match="array is unframed"):
         _ = xr.DataArray(np.zeros(2), dims="i").rf.grid

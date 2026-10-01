@@ -67,8 +67,8 @@ def to_dataarray(geometry: DicomGeometry, data: DuckArray) -> xr.DataArray:
     The slice axis is axis 0 (``k``). For ``from_datasets``, provide one slice per
     dataset in input order. For ``from_enhanced``, provide the full multiframe pixel
     array in original frame order, including unselected frames. ``geometry.order``
-    selects and sorts slices. Declared ``slice_intervals`` are not attached; cells
-    are future work. A noncontiguous NumPy order requires an indexed gather; dask
+    selects and sorts slices. Declared ``slice_intervals`` supply slice thickness
+    in the cells domain. A noncontiguous NumPy order requires an indexed gather; dask
     gathers remain lazy.
 
     Args:
@@ -99,7 +99,13 @@ def to_dataarray(geometry: DicomGeometry, data: DuckArray) -> xr.DataArray:
         sorted_data = data[first : first + len(geometry.order), :, :]
     else:
         sorted_data = cast(Any, data)[list(geometry.order), :, :]
-    grid, other_coords = _grid_and_coords(geometry.transform, geometry.coords)
+    grid, other_coords = _grid_and_coords(
+        geometry.transform,
+        geometry.coords,
+        intervals={geometry.transform.source.axes[0]: geometry.slice_intervals}
+        if geometry.slice_intervals is not None
+        else None,
+    )
     return frame_array(sorted_data, grid, dims=geometry.dims, coords=other_coords)
 
 

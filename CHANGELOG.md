@@ -4,6 +4,12 @@
 
 ### Added
 
+- Declared per-source-axis intervals on grids, geometry views and native bindings, including
+  retained scalars, selection and roll propagation, exact support checks during alignment,
+  all grid doors, target support on native resampling and provisional schema-1 persistence.
+  Cells-domain queries use declared outer bounds, including singleton slabs. DICOM attaches
+  slice intervals from `SliceThickness` in the slice coordinate's units.
+
 - `Grid`: an immutable sampling value with no pixels, `points_at` for batched fractional
   positions, and `positions_at(outside="extrapolate")` for positions beyond the sample domain.
   `Geometry.grid()` snapshots sampling, and the provisional `grid` encoding kind persists it.
@@ -195,6 +201,14 @@
 
 ### Fixed
 
+- Binding index equality returns a bool for interval mismatches and honours excluded
+  dimensions; coordinate merges report conflicting intervals through xarray's `MergeError`.
+  Direct index reindexing again refuses non-binding operands.
+- Declared singleton intervals supply a step only in the cells domain, preserving the
+  samples-domain coordinate matching tolerance. Interval validation allows float64 roundoff
+  at large origins such as epoch seconds while still rejecting offset disagreements.
+- `rf.frame(grid)` replaces differing existing coordinates on patched xarray by dropping
+  them before binding, while preserving matching coordinates and their attrs.
 - Grid coordinates remain immutable through copies and pickle round trips; editing a returned
   array's dtype or shape leaves its points and hash unchanged.
 - Grid and Geometry sampling queries reject custom transform results with invalid shapes,
@@ -206,7 +220,6 @@
   unsigned integers exactly and refusing values outside int64.
 - Resampling ignores unrelated target context and preserves source non-geometry coordinates;
   collisions with target geometry coordinate names raise a named `ValueError`.
-
 - Core resampling retains attrs and custom indexes on non-geometry coordinates for both
   `Geometry` and `Grid` targets.
 - Cubic resampling at array edges requires SciPy 1.18 or newer, which includes the upstream

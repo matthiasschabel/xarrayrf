@@ -21,13 +21,14 @@ interface requires a bound transform to persist only through such an encoding.
 - `decode(data, *, decoders=None)` validates the whole payload as JSON types first (string keys,
   finite numbers), checks numbers strictly (no strings or booleans coerced), then rebuilds through
   the public constructors. Unknown fields are refused so newer data is never silently truncated;
-  additions bump the version.
+  additions after schema freezing bump the version.
 - Identity survives: the identifier is decoded with `ReferenceFrame.declared`, so a local frame
   decodes equal to the original. Metadata keeps the type distinctions the core compares.
 - Schema 1 gains the `grid` kind before freezing: `transform` uses the existing transform
   encoding, `dims` lists the dimension order (JSON key order is not relied on), and
   `coordinates` maps names to `{"dim": ..., "values": [...], "dtype": ...}` for varying axes or
-  `{"value": ..., "dtype": ...}` for retained scalars. No interval field is emitted in stage 1. Decoding
+  `{"value": ..., "dtype": ...}` for retained scalars. `intervals` is always emitted as an
+  object mapping source axis names to `[lo, hi]` rows (possibly empty). Decoding
   checks exact coordinate fields and numeric types, then rebuilds through `Grid`; constructor
   refusals are chained `MalformedDataError`. Stage 2 requires an explicit `"dtype": "int64"`
   or `"dtype": "float64"` on every coordinate record, including scalars and empty arrays.
@@ -37,6 +38,12 @@ interface requires a bound transform to persist only through such an encoding.
   there is no inferred kind or fallback for older records without dtype. Equality and hashing
   include the kind, and both kinds round-trip exactly. These changes remain within provisional
   schema 1.
+- Native binding JSON has exactly `transform`, `dims` and `intervals`. Interval rows are
+  checked as JSON arrays of numbers, refusing strings, booleans, non-finite values and unknown
+  fields. Grid and binding decoding rebuild through validated constructors; invalid shapes,
+  bounds, axis names, point-sampled declarations and offset disagreement become chained
+  `MalformedDataError`. Selected scalars retain a single `(2,)` row. No version bump: schema 1
+  remains provisional.
 - A vocabulary stores the lexicographically smaller token of each antipodal pair.
 - User transforms implement `SupportsEncoding`: a namespaced `kind` (`"package:name"`), their own
   integer `version`, and `to_data()`. They decode only through caller-supplied `decoders`, which

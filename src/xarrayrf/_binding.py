@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
+from types import MappingProxyType
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
 from xarray.core.indexing import IndexSelResult
 from xarray.indexes import PandasIndex
@@ -15,6 +17,7 @@ from ._array_coordinates import ArrayCoordinates
 from ._frame import ReferenceFrame
 from ._geometry import check_coordinate_unit
 from ._grid import Coordinate, Grid
+from ._sampling import freeze_intervals
 from ._transform import SupportsPoints
 
 
@@ -45,7 +48,7 @@ def grid_from_binding(coordinates: xr.Coordinates) -> Grid:
         entries[name] = (
             (str(coordinate.dims[0]), coordinate.data) if coordinate.ndim else coordinate.data
         )
-    return Grid(index.transform, entries).transpose(*index.dims)
+    return Grid(index.transform, entries, intervals=index.intervals).transpose(*index.dims)
 
 
 class BindingIndex(xr.Index):
@@ -57,12 +60,21 @@ class BindingIndex(xr.Index):
         fixed: Mapping[str, xr.Variable],
         transform: SupportsPoints,
         dims: tuple[str, ...],
+        intervals: Mapping[str, npt.ArrayLike] | None = None,
     ) -> None:
         self.axes = dict(axes)
         self.fixed = dict(fixed)
         self.transform = transform
         self.dims = dims
         self.units = dict(zip(transform.source.axes, transform.source.units, strict=True))
+        assert isinstance(transform.source, ArrayCoordinates)
+        values = {name: index.index.to_numpy() for name, index in self.axes.items()}
+        values.update({name: variable.values for name, variable in self.fixed.items()})
+        self._intervals = freeze_intervals(transform.source, values, intervals)
+
+    @property
+    def intervals(self) -> Mapping[str, npt.NDArray[np.float64]]:
+        return MappingProxyType({name: rows.view() for name, rows in self._intervals.items()})
 
     @classmethod
     def from_variables(
@@ -103,6 +115,7 @@ class BindingIndex(xr.Index):
     def isel(self, indexers: Mapping[Any, Any]) -> BindingIndex:
         axes: dict[str, PandasIndex] = {}
         fixed = dict(self.fixed)
+        intervals = dict(self.intervals)
         dims = list(self.dims)
         for name, index in self.axes.items():
             dim = index.dim
@@ -114,6 +127,10 @@ class BindingIndex(xr.Index):
                 raise ValueError(
                     "vectorized indexing changes geometry dimensions; call rf.unframe()"
                 )
+            if name in intervals:
+                intervals[name] = intervals[name][
+                    indexer.data if isinstance(indexer, xr.Variable) else indexer
+                ]
             reduced = index.isel({dim: indexer})
             if reduced is not None:
                 axes[name] = reduced
@@ -124,7 +141,7 @@ class BindingIndex(xr.Index):
                     dims.remove(str(dim))
             else:
                 raise ValueError("indexer changes geometry dimensions; call rf.unframe()")
-        return type(self)(axes, fixed, self.transform, tuple(dims))
+        return type(self)(axes, fixed, self.transform, tuple(dims), intervals)
 
     def equals(self, other: xr.Index, *, exclude: frozenset[Hashable] | None = None) -> bool:
         if not isinstance(other, BindingIndex):
@@ -132,6 +149,10 @@ class BindingIndex(xr.Index):
         if not self._same_binding(other):
             return False
         return all(
+            self._intervals_equal(name, other)
+            for name in self.transform.source.axes
+            if name not in self.axes or exclude is None or self.axes[name].dim not in exclude
+        ) and all(
             index.equals(other.axes[name], exclude=exclude)
             for name, index in self.axes.items()
             if exclude is None or index.dim not in exclude
@@ -156,7 +177,59 @@ class BindingIndex(xr.Index):
             )
         if not self._same_binding(other):
             raise ValueError(f"incompatible framed coordinate mappings: {self._difference(other)}")
+        self._check_intervals(other)
         return other
+
+    def _check_intervals(self, other: BindingIndex) -> None:
+        for name in self.transform.source.axes:
+            mine, theirs = self.intervals.get(name), other.intervals.get(name)
+            if mine is None and theirs is None:
+                continue
+            if mine is None or theirs is None:
+                raise ValueError(f"source axis {name!r} has incompatible declared intervals")
+            if not self._intervals_equal(name, other):
+                raise ValueError(f"source axis {name!r} has conflicting declared intervals")
+
+    def _intervals_equal(self, name: str, other: BindingIndex) -> bool:
+        mine, theirs = self.intervals.get(name), other.intervals.get(name)
+        if mine is None or theirs is None:
+            return mine is None and theirs is None
+        if name in self.fixed or self.axes[name].index.equals(other.axes[name].index):
+            return bool(np.array_equal(mine, theirs))
+        labels = self.axes[name].index
+        positions = other.axes[name].index.get_indexer(labels)
+        matched = positions >= 0
+        return bool(np.array_equal(mine[matched], theirs[positions[matched]]))
+
+    def _rows_for_axes(
+        self, axes: Mapping[str, PandasIndex], other: BindingIndex | None = None
+    ) -> dict[str, npt.NDArray[np.float64]]:
+        intervals = dict(self.intervals)
+        for name, target in axes.items():
+            if name not in intervals:
+                continue
+            positions = (
+                np.arange(len(target.index))
+                if self.axes[name].index.equals(target.index)
+                else self.axes[name].index.get_indexer(target.index)
+            )
+            missing = positions < 0
+            if missing.any() and other is None:
+                raise ValueError(
+                    f"source axis {name!r} introduces labels without declared intervals"
+                )
+            rows = np.empty((len(target.index), 2), dtype=np.float64)
+            rows[~missing] = intervals[name][positions[~missing]]
+            if missing.any():
+                assert other is not None
+                theirs = other.axes[name].index.get_indexer(target.index[missing])
+                if np.any(theirs < 0):
+                    raise ValueError(
+                        f"source axis {name!r} introduces labels without declared intervals"
+                    )
+                rows[missing] = other.intervals[name][theirs]
+            intervals[name] = rows
+        return intervals
 
     def _difference(self, other: BindingIndex) -> str:
         """Say why two bindings cannot combine, naming the corrective action."""
@@ -183,7 +256,9 @@ class BindingIndex(xr.Index):
         axes = {
             name: index.join(compatible.axes[name], how=how) for name, index in self.axes.items()
         }
-        return type(self)(axes, self.fixed, self.transform, self.dims)
+        return type(self)(
+            axes, self.fixed, self.transform, self.dims, self._rows_for_axes(axes, compatible)
+        )
 
     def join_overlapping(
         self,
@@ -226,7 +301,9 @@ class BindingIndex(xr.Index):
                 target = axis.join(other, how=how)
             axes[name] = target
             targets[name] = target
-        return type(self)(axes, self.fixed, self.transform, self.dims), targets
+        return type(self)(
+            axes, self.fixed, self.transform, self.dims, self._rows_for_axes(axes)
+        ), targets
 
     def check_unindexed_coord_conflicts(self, variables: Mapping[Hashable, xr.Variable]) -> None:
         """Reject discarded plain coordinates that contradict bound source coordinates.
@@ -293,7 +370,13 @@ class BindingIndex(xr.Index):
             name: index.roll({index.dim: shifts[index.dim]}) if index.dim in shifts else index
             for name, index in self.axes.items()
         }
-        return type(self)(axes, self.fixed, self.transform, self.dims)
+        intervals = {
+            name: np.roll(rows, shifts.get(self.axes[name].dim, 0), axis=0)
+            if name in self.axes
+            else rows
+            for name, rows in self.intervals.items()
+        }
+        return type(self)(axes, self.fixed, self.transform, self.dims, intervals)
 
     def rename(self, name_dict: Mapping[Any, Any], dims_dict: Mapping[Any, Any]) -> BindingIndex:
         names = {name: name_dict.get(name, name) for name in self.transform.source.axes}
@@ -320,7 +403,13 @@ class BindingIndex(xr.Index):
             for name, index in self.axes.items()
         }
         fixed = {names[name]: variable for name, variable in self.fixed.items()}
-        return type(self)(axes, fixed, transform, new_dims)
+        return type(self)(
+            axes,
+            fixed,
+            transform,
+            new_dims,
+            {names[name]: rows for name, rows in self.intervals.items()},
+        )
 
     def swap_dims(self, dims_dict: Mapping[Any, Any]) -> BindingIndex:
         # Opt-in xarray hook: keep the binding whole, with the source coordinate of a swapped
@@ -331,5 +420,17 @@ class BindingIndex(xr.Index):
     def concat(cls, indexes: Any, dim: Any, positions: Any = None) -> BindingIndex:
         raise ValueError("concatenation of framed arrays is unsupported; call rf.unframe()")
 
+    def _copy(self, deep: bool = True, memo: dict[int, Any] | None = None) -> BindingIndex:
+        return type(self)(
+            {name: index.copy(deep=deep) for name, index in self.axes.items()},
+            {name: variable.copy(deep=deep) for name, variable in self.fixed.items()},
+            self.transform,
+            self.dims,
+            self.intervals,
+        )
+
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]:
+        return type(self), (self.axes, self.fixed, self.transform, self.dims, dict(self.intervals))
+
     def __repr__(self) -> str:
-        return f"BindingIndex(axes={tuple(self.axes)}, fixed={tuple(self.fixed)}, dims={self.dims})"
+        return f"BindingIndex(axes={tuple(self.axes)}, fixed={tuple(self.fixed)}, dims={self.dims}, intervals={tuple(self.intervals)})"

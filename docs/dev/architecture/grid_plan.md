@@ -18,7 +18,7 @@ invites drift. The viewer plan's "pixel-free target domain" (item 3) is the same
 Constraints: the core stays NumPy-only; identity is explicit (no value-based frame matching);
 the binding stays the only authority on a framed array; no valid-looking incorrect geometry.
 
-## Current Decision (proposed)
+## Current Decision
 
 ### 1. `Grid`: an immutable sampling value, NumPy-only core
 
@@ -78,7 +78,7 @@ scalars, so no second index is needed. `domain="cells"` uses declared intervals 
 the sample-offset default otherwise; an axis declaring both must agree. DICOM import declares
 intervals from `SliceThickness`, which fixes the single-slice case.
 
-Lifecycle, to be approved before stage 3 starts:
+Approved lifecycle (implemented in stage 3):
 
 | Path | Intervals |
 |---|---|
@@ -88,8 +88,8 @@ Lifecycle, to be approved before stage 3 starts:
 | `rename`, `swap_dims` | Carried |
 | Alignment and join, matched labels | Intervals must be equal; conflicting support refuses |
 | Join or reindex introducing labels the binding has no interval for | Refuses (no invented support) |
-| Operand with a plain index and no intervals | Refuses when the binding declares intervals |
-| `concat` | Concatenated when every operand declares them; mixed refuses |
+| Operand with a plain index and no intervals | Known-label subsets retain support; introducing labels without intervals refuses |
+| `concat` | Refused for framed arrays, as before |
 | `rf.grid`, `frame_array`, `rf.frame(grid)`, encoding | Preserved exactly |
 | `resample_to(target)` | The result carries the target's intervals, never the source's |
 
@@ -199,8 +199,11 @@ reviewed separately.
    NIfTI and a multichannel array keep their non-geometry dims and coords; pixels unread.
    Stage 1 amendment: integer snapshots and materialized coordinates stay int64, including
    exact JSON round trips; floating coordinates stay float64. All adapter outputs remain unchanged.
-3. Declared intervals, after the lifecycle table is approved: `Grid`, `BindingIndex`, cells
-   domain, DICOM `SliceThickness`. Accept: one test per lifecycle row.
+3. **Done.** Declared intervals: `Grid`, `BindingIndex`, shared cells domain, all doors,
+   native/grid persistence and DICOM `SliceThickness`. Public lifecycle tests cover selection,
+   scalars, roll, rename, `swap_dims`, support conflicts, joins, missing-label refusals, concat
+   refusal and target support. Existing xarray hook limitations remain on the stock lane;
+   mixed-index subsets and `swap_dims` are exercised against the local patched lane.
 4. Anatomy functions. Accept: an oblique volume, a single thick slice, and a sheared grid whose
    per-dim largest cosines collide.
 5. Anonymous frames: `ReferenceFrame.anonymous` and `is_anonymous`; adapter call sites

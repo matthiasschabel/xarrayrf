@@ -23,7 +23,7 @@ from ._positions import (
     positions_at,
     transform_points,
 )
-from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling
+from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling, freeze_intervals
 from ._transform import SupportsPoints, check_transform
 from ._validation import check_names, check_str, frozen_coordinate_array
 
@@ -42,10 +42,11 @@ class Grid:
 
     Coordinate entries are ``name: (dim, values)`` for varying axes and ``name: value``
     for retained scalars. Integers are stored as int64, floats as float64. Units come
-    from the transform's source.
+    from the transform's source. Optional intervals map source axis names to finite
+    [lo, hi] rows agreeing with each sample's declared offset.
     """
 
-    __slots__ = ("_axes", "_dims", "_transform")
+    __slots__ = ("_axes", "_dims", "_intervals", "_transform")
 
     _transform: SupportsPoints
     _axes: tuple[_AxisCoordinate, ...]
@@ -56,7 +57,7 @@ class Grid:
         transform: SupportsPoints,
         coordinates: Mapping[str, Coordinate],
         *,
-        intervals: object = None,
+        intervals: Mapping[str, npt.ArrayLike] | None = None,
     ) -> None:
         """Validate and copy the coordinates into immutable storage.
 
@@ -65,11 +66,9 @@ class Grid:
                 a dimension is not a string, or transform does not implement SupportsPoints.
             ValueError: If endpoints are not ArrayCoordinates -> ReferenceFrame, coordinates
                 do not name exactly the source axes, values have the wrong rank or are not
-                finite, dimensions repeat, integers exceed int64, or intervals is supplied (reserved
-                for stage 3).
+                finite, dimensions repeat, integers exceed int64, or intervals violate shape,
+                bounds or sample-offset agreement.
         """
-        if intervals is not None:
-            raise ValueError("intervals are reserved for stage 3; intervals must be None for now")
         check_transform(transform)
         if not isinstance(transform.source, ArrayCoordinates):
             raise ValueError("Grid needs a transform from ArrayCoordinates")
@@ -113,6 +112,9 @@ class Grid:
         self._dims = check_names(dims, field="dims", allow_empty=True)
         self._transform = transform
         self._axes = tuple(axes[name] for name in transform.source.axes)
+        self._intervals = freeze_intervals(
+            transform.source, {name: axis.values for name, axis in axes.items()}, intervals
+        )
 
     @property
     def transform(self) -> SupportsPoints:
@@ -152,9 +154,9 @@ class Grid:
         )
 
     @property
-    def intervals(self) -> None:
-        """Declared intervals, reserved for stage 3."""
-        return None
+    def intervals(self) -> Mapping[str, npt.NDArray[np.float64]]:
+        """Read-only declared interval views, keyed by source axis name."""
+        return MappingProxyType({name: rows.view() for name, rows in self._intervals.items()})
 
     def _sampling(self) -> Sampling:
         return Sampling(
@@ -162,7 +164,12 @@ class Grid:
             self._dims,
             self.sizes,
             tuple(
-                AxisSampling(axis.axis, axis.dim, np.asarray(axis.values, dtype=np.float64))
+                AxisSampling(
+                    axis.axis,
+                    axis.dim,
+                    np.asarray(axis.values, dtype=np.float64),
+                    intervals=self._intervals.get(axis.axis),
+                )
                 for axis in self._axes
             ),
         )
@@ -339,15 +346,24 @@ class Grid:
         by_dim = {axis.dim: axis.axis for axis in self._axes if axis.dim is not None}
         names = [by_dim[dim] for dim in order]
         names += [axis.axis for axis in self._axes if axis.dim is None]
-        return Grid(self._transform, {name: self.coordinates[name] for name in names})
+        return Grid(
+            self._transform,
+            {name: self.coordinates[name] for name in names},
+            intervals=self._intervals,
+        )
 
     def __eq__(self, other: object) -> bool:
-        """Compare transforms, dimension order, coordinate kinds and values exactly."""
+        """Compare transforms, dimension order, coordinates and declared support exactly."""
         if not isinstance(other, Grid):
             return NotImplemented
         return (
             self._transform == other._transform
             and self._dims == other._dims
+            and self._intervals.keys() == other._intervals.keys()
+            and all(
+                np.array_equal(rows, other._intervals[name])
+                for name, rows in self._intervals.items()
+            )
             and all(
                 a.dim == b.dim
                 and a.values.dtype.kind == b.values.dtype.kind
@@ -363,18 +379,31 @@ class Grid:
                 self._transform,
                 self._dims,
                 tuple(
+                    (name, self._intervals[name].tobytes())
+                    for name in self._transform.source.axes
+                    if name in self._intervals
+                ),
+                tuple(
                     (axis.dim, axis.values.dtype.kind, axis.values.tobytes()) for axis in self._axes
                 ),
             )
         )
 
-    def __reduce__(self) -> tuple[type[Grid], tuple[SupportsPoints, dict[str, Coordinate]]]:
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]:
         """Reconstruct copies and pickles through the validated immutable constructor."""
-        return Grid, (self._transform, dict(self.coordinates))
+        return _restore_grid, (self._transform, dict(self.coordinates), dict(self.intervals))
 
     def __repr__(self) -> str:
         """Name the source axes, target frame, dimensions and sizes."""
         return (
             f"Grid(source={self._transform.source.axes!r}, target={self.frame.identifier!r}, "
-            f"dims={self._dims!r}, sizes={dict(self.sizes)!r})"
+            f"dims={self._dims!r}, sizes={dict(self.sizes)!r}, intervals={tuple(self._intervals)!r})"
         )
+
+
+def _restore_grid(
+    transform: SupportsPoints,
+    coordinates: Mapping[str, Coordinate],
+    intervals: Mapping[str, npt.ArrayLike],
+) -> Grid:
+    return Grid(transform, coordinates, intervals=intervals)
