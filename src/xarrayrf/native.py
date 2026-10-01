@@ -118,6 +118,9 @@ def _binding_coordinates(
     dims: tuple[str, ...],
     intervals: Mapping[str, npt.ArrayLike] | None = None,
 ) -> xr.Coordinates:
+    ordered = [name for dim in dims for name in variables if variables[name].dims == (dim,)]
+    ordered += [name for name in transform.source.axes if variables[name].ndim == 0]
+    variables = {name: variables[name] for name in ordered}
     axes = {
         name: PandasIndex.from_variables({name: variable}, options={})
         for name, variable in variables.items()
@@ -126,6 +129,20 @@ def _binding_coordinates(
     fixed = {name: variable for name, variable in variables.items() if variable.ndim == 0}
     index = BindingIndex(axes, fixed, transform, dims, intervals)
     return xr.Coordinates(variables, indexes={name: index for name in variables})
+
+
+def _assign_binding(array: xr.DataArray, coords: xr.Coordinates) -> xr.DataArray:
+    """Assign a binding and canonicalize only the bound coordinate slots."""
+    bound = array.assign_coords(coords)
+    names = iter(coords)
+    ordered_names = [next(names) if name in coords else name for name in bound.coords]
+    # xarray's matching-index key uses coordinate order before calling index equality.
+    variables = {name: bound.coords[name].variable for name in ordered_names}
+    indexes = {name: bound.xindexes[name] for name in ordered_names if name in bound.xindexes}
+    ordered = xr.Coordinates(variables, indexes=indexes)
+    result = xr.DataArray(bound.variable, coords=ordered, name=bound.name)
+    result.encoding = dict(bound.encoding)
+    return result
 
 
 def frame_array(
@@ -178,8 +195,7 @@ def frame_array(
     shape = tuple(sizes[dim] for dim in names)
     if duck.shape != shape:
         raise ValueError(f"data shape {duck.shape} does not match geometry shape {shape}")
-    # Coordinates follow the array's dimension order, grid coordinates first along each
-    # dimension, then the rest (retained scalars, then other coordinates) in declared order.
+    # Place coordinates along array dimensions first, preserving the declared order of extras.
     declared: dict[str, xr.Variable | CoordinateSpec] = {**grid_variables(grid), **extra}
 
     def dims_of(name: str) -> tuple[str, ...]:
@@ -191,6 +207,8 @@ def frame_array(
 
     ordered = [name for dim in names for name in declared if dims_of(name) == (dim,)]
     ordered += [name for name in declared if name not in ordered]
+    extra_names = iter(extra)
+    ordered = [next(extra_names) if name in extra else name for name in ordered]
     array = xr.DataArray(
         duck, dims=names, coords={name: declared[name] for name in ordered}, attrs=attrs
     )
@@ -333,7 +351,7 @@ class _ReferenceFrameAccessor:
             coords = _binding_coordinates(variables, grid.transform, grid.dims, grid.intervals)
             names = grid.transform.source.axes
             stripped = array.drop_indexes([name for name in names if name in array.xindexes])
-            return stripped.drop_vars(replaced).assign_coords(coords)
+            return _assign_binding(stripped.drop_vars(replaced), coords)
         if dims is _DIMS_UNSET:
             raise TypeError("dims is required with a coordinate transform")
         geometry = Geometry(
@@ -362,7 +380,7 @@ class _ReferenceFrameAccessor:
             variables, coordinate_transform, geometry.dims, geometry.intervals
         )
         stripped = array.drop_indexes([name for name in names if name in array.xindexes])
-        return stripped.assign_coords(coords)
+        return _assign_binding(stripped, coords)
 
     def decode(self, *, decoders: Mapping[str, Decoder] | None = None) -> xr.DataArray:
         """Restore a binding from this array's reserved JSON attribute.
@@ -462,6 +480,9 @@ class _ReferenceFrameAccessor:
         domain: Domain = "samples",
     ) -> xr.DataArray:
         """Resample values onto a target geometry and bind them to its frame.
+
+        Empty targets return empty framed values. Empty sources with non-empty targets raise
+        ValueError because there is nothing to sample from.
 
         Args:
             target: Grid, framed array or geometry whose samples define the result.

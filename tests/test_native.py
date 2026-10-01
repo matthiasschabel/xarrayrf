@@ -1119,6 +1119,61 @@ def test_anonymous_refusal_identifies_one_operand(
         left.rf.resample_to(right)
 
 
+def test_empty_anonymous_bindings_recommend_adoption_alone(framed: xr.DataArray) -> None:
+    first = framed.isel(x=slice(0, 0)).rf.assume_frame(
+        ReferenceFrame.anonymous(framed.rf.reference_frame.coordinate_system)
+    )
+    second = first.rf.assume_frame(
+        ReferenceFrame.anonymous(first.rf.reference_frame.coordinate_system)
+    )
+    operations: tuple[Callable[[], xr.DataArray], ...] = (
+        lambda: first + second,
+        lambda: second.rf.resample_to(first),
+    )
+    for operation in operations:
+        with pytest.raises(ValueError, match=r"rf.assume_frame alone suffices") as error:
+            operation()
+        assert "then use rf.resample_to" not in str(error.value)
+    adopted = second.rf.assume_frame(first)
+    assert adopted.rf.grid == first.rf.grid
+    assert (first + adopted).rf.grid == first.rf.grid
+
+
+@pytest.mark.parametrize("domain", ["samples", "cells"])
+@pytest.mark.parametrize("method", ["nearest", "linear", "cubic"])
+@pytest.mark.parametrize("empty_source", [True, False])
+@pytest.mark.parametrize("lazy", [True, False])
+def test_resample_to_empty_target(
+    framed: xr.DataArray, domain: str, method: str, empty_source: bool, lazy: bool
+) -> None:
+    source = framed.expand_dims(echo=[10, 20]).rename("signal").assign_attrs(note="retained")
+    target = framed.isel(x=slice(0, 0))
+    if empty_source:
+        source = source.isel(x=slice(0, 0))
+    if lazy:
+        source = source.chunk({"echo": 1, "y": 2, "x": 2})
+    with pixel_tasks() as tasks:
+        result = source.rf.resample_to(target, method=method, domain=domain)
+        assert not tasks
+    if lazy:
+        assert isinstance(result.data, da.Array)
+        result = result.compute()
+    assert result.rf.grid == target.rf.grid
+    assert result.shape == (2, 3, 0)
+    assert result.name == source.name
+    assert result.attrs == source.attrs
+    xr.testing.assert_identical(result.echo, source.echo)
+
+
+@pytest.mark.parametrize("domain", ["samples", "cells"])
+def test_resample_to_empty_source_refuses_nonempty_target(
+    framed: xr.DataArray, domain: str
+) -> None:
+    source = framed.isel(x=slice(0, 0))
+    with pytest.raises(ValueError, match=r"empty source.*nothing to sample from"):
+        source.rf.resample_to(framed, domain=domain, fill_value=-9)
+
+
 def test_anonymous_underivable_change_names_reason_without_assumption_remedy(
     framed: xr.DataArray,
 ) -> None:

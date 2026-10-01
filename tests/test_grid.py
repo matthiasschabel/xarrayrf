@@ -661,6 +661,62 @@ def test_every_grid_door_has_the_same_sampling(selection: str) -> None:
         assert array.rf.geometry_dims == grid.dims
 
 
+@pytest.mark.parametrize("door", ["transform", "grid", "frame_array", "grid_coordinates"])
+def test_framing_doors_order_bound_coordinates_canonically(door: str) -> None:
+    from xarrayrf.native import CoordinateSpec, frame_array, grid_coordinates
+
+    grid = Grid(
+        transform(("v", "u", "fixed_b", "fixed_a")),
+        {"fixed_a": 5, "v": ("j", [1, 3]), "u": ("i", [0, 2, 5]), "fixed_b": 7},
+    ).transpose("i", "j")
+    extras: dict[str, CoordinateSpec] = {
+        "context_b": ((), 7, {"description": "first context"}),
+        "context_a": ((), 9, {"description": "second context"}),
+        "labels": ("j", np.array([10, 20]), {"description": "sample labels"}),
+    }
+    plain = xr.DataArray(
+        np.zeros((3, 2)),
+        dims=grid.dims,
+        coords={
+            "context_b": extras["context_b"],
+            "v": grid.coordinates["v"],
+            "context_a": extras["context_a"],
+            "fixed_a": grid.coordinates["fixed_a"],
+            "u": grid.coordinates["u"],
+            "fixed_b": grid.coordinates["fixed_b"],
+            "labels": extras["labels"],
+        },
+        attrs={"note": "pixels"},
+        name="signal",
+    )
+    plain.encoding["dtype"] = "float32"
+    if door == "transform":
+        result = plain.rf.frame(grid.transform, dims=grid.dims)
+    elif door == "grid":
+        result = plain.rf.frame(grid)
+    elif door == "frame_array":
+        result = frame_array(plain.data, grid, coords=extras)
+    else:
+        coordinates = grid_coordinates(grid)
+        assert list(coordinates) == ["u", "v", "fixed_b", "fixed_a"]
+        result = plain.drop_vars(list(grid.coordinates)).assign_coords(coordinates)
+    assert [name for name in result.coords if name in grid.coordinates] == [
+        "u",
+        "v",
+        "fixed_b",
+        "fixed_a",
+    ]
+    assert [name for name in result.coords if name not in grid.coordinates] == list(extras)
+    for name in extras:
+        assert result.coords[name].variable.identical(plain.coords[name].variable)
+    assert result.data is plain.data
+    assert result.rf.grid == grid
+    if door in ("transform", "grid"):
+        assert result.name == plain.name
+        assert result.attrs == plain.attrs
+        assert result.encoding == plain.encoding
+
+
 def test_integer_binding_snapshot_materializes_dtype_units_and_existing_attrs() -> None:
     from xarrayrf.native import frame_array, index_coordinate
 

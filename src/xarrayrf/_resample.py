@@ -20,7 +20,7 @@ from ._frame_compatibility import anonymous_frame_difference
 from ._geometry import Geometry, adopt_frame
 from ._grid import Grid
 from ._orientation import coordinate_system_change
-from ._positions import extents, lattice_parts, locator, sample_columns
+from ._positions import check_domain, extents, lattice_parts, locator, sample_columns
 from ._sampling import LATTICE_TOLERANCE, POSITION_SLACK, Domain
 from ._transform import SupportsAffine, SupportsPoints, check_transform
 
@@ -360,15 +360,18 @@ def _plan(
         raise ValueError(
             f"target geometry dimensions {clashes} are non-geometry dimensions of the source",
         )
-    reach = extents(source._sampling(), domain)
-    lattice_map = _lattice_map(source, target, target_dims, frame_map, reach)
-    position_map = (
-        _general_map(source, target, target_dims, frame_map, domain)
-        if lattice_map is None
-        else None
-    )
     target_shape = tuple(target.sizes[dim] for dim in target_dims)
     total = int(np.prod(target_shape, dtype=np.int64))
+    check_domain(domain)
+    lattice_map = None
+    position_map = None
+    if total:
+        if any(source.sizes[dim] == 0 for dim in source_dims):
+            raise ValueError("cannot resample an empty source: nothing to sample from")
+        reach = extents(source._sampling(), domain)
+        lattice_map = _lattice_map(source, target, target_dims, frame_map, reach)
+        if lattice_map is None:
+            position_map = _general_map(source, target, target_dims, frame_map, domain)
     output_dtype = _output_dtype(source.array.dtype, method, fill_value)
     source_values = source.array
     if lattice_map is not None:
@@ -548,6 +551,8 @@ def _general_block(
 def _resample_block(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.generic]:
     """Split non-geometry axes into slices and dispatch the planned sampling path."""
     leading = values.shape[: values.ndim - len(plan.source_dims)]
+    if plan.total == 0:
+        return np.empty((*leading, *plan.target_shape), dtype=plan.output_dtype)
     slices = [values[index] for index in np.ndindex(*leading)]
     if plan.lattice_map is None:
         return _general_block(plan, slices, leading)
@@ -583,6 +588,9 @@ def resample(
     lie; a point-sampled axis has none and reaches no further than its samples. Interpolation
     between samples is the same in both domains.
 
+    Empty targets return empty values without locating or interpolating samples. Empty sources
+    with non-empty targets raise ValueError, regardless of the domain or ``fill_value``.
+
     Performance: when both arrays form regular lattices and every transform is affine, target
     positions map to source positions through one composed affine, and each non-geometry slice
     is interpolated in a single compiled ``scipy.ndimage.affine_transform`` pass with a
@@ -614,7 +622,8 @@ def resample(
     Raises:
         TypeError: If an argument has the wrong type, or ``transform`` is not a point transform.
         ValueError: If the frames are different and no transform is given, ``transform`` has the
-            wrong endpoints, ``method`` or ``domain`` is unknown, a source axis declaring cells
+            wrong endpoints, the source is empty and the target is not, ``method`` or ``domain``
+            is unknown, a source axis declaring cells
             has a single sample in the cells domain, the
             source's samples cannot be located (no
             exact inverse, a retained scalar or multidimensional source coordinate, or
@@ -646,6 +655,9 @@ def resample(
         )
     renamed = {dim: f"__xarrayrf_target_{dim}" for dim in plan.target_dims}
     ordered = source_values.transpose(*other_dims, *plan.source_dims)
+    if plan.total == 0 and ordered.chunks is not None:
+        # Dask's automatic gufunc rechunking divides by zero on empty core dimensions.
+        ordered = ordered.chunk({dim: -1 for dim in plan.source_dims})
     result: xr.DataArray = xr.apply_ufunc(
         partial(_resample_block, plan),
         ordered,
@@ -659,7 +671,7 @@ def resample(
                 renamed[dim]: size
                 for dim, size in zip(plan.target_dims, plan.target_shape, strict=True)
             },
-            "allow_rechunk": True,
+            "allow_rechunk": plan.total != 0,
         },
         keep_attrs=False,
     )

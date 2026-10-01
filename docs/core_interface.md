@@ -466,6 +466,13 @@ encoded binding refuse as in the transform form. Geometry coordinate attrs must 
 with the source's declared units. All doors preserve the grid's intervals exactly.
 Passing `intervals=` with a Grid is refused; the grid supplies them.
 
+All framing doors (`rf.frame` with a transform or Grid, `frame_array`, `grid_coordinates`,
+and `rf.decode`) order bound coordinates canonically: varying coordinates in geometry dimension
+order, then retained scalars in transform source-axis order. Coordinate and index mappings use
+the same order, so equal bindings align on stock xarray after a serialization round trip.
+Non-bound coordinates retain their relative order and metadata. The adapter orders remain
+NIfTI `i, j, k[, t]` and DICOM `k, j, i` or `slice_offset, j, i`.
+
 `xarrayrf.native.grid_coordinates(grid)` returns `xr.Coordinates` carrying the same binding
 index; `array.assign_coords(grid_coordinates(grid))` frames an array with matching dimensions
 and sizes. Coordinates carry `attrs={"units": unit}` when the transform's source unit is declared,
@@ -592,11 +599,20 @@ explicit transform, and either is anonymous, the refusal identifies the left/rig
 A separate private comparison, independent of `is_coincident`, reports numerically matching
 sample points after the derivable system change. It allows only accumulated float64 roundoff,
 uses affine extrema in time linear in axis lengths, and never establishes identity. When the
-adopted bindings also agree, the message says `rf.assume_frame alone suffices`. Numerically
+adopted bindings also agree, the message says `rf.assume_frame alone suffices`, even for empty
+grids whose numerical point comparison is undefined. Numerically
 matching points with different bindings or support still require resampling. Underivable
 systems and non-affine mappings name the reason and request an explicit transform, without
 suggesting an assumption that would fail. Existing refusals for two complete frames remain
 unchanged.
+
+An empty target returns an empty result with the target geometry and the source's non-geometry
+dimensions and coordinates; `rf.resample_to` binds it as usual. This also works with an empty
+source and remains lazy for Dask pixels. An empty source with a non-empty target raises
+`ValueError` because there is nothing to sample from, regardless of `fill_value` or domain.
+`fill_value` applies to points outside an existing source domain. Empty targets require no
+point location or interpolation, but frame identity, transform endpoints, method, domain and
+coordinate-name compatibility are still validated.
 
 Performance is part of the contract:
 

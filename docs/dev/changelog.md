@@ -2,6 +2,26 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-01] — QA fixes for anonymous frames (grid plan stage 5)
+
+- **Problem**: A QA pass over stage 5 found that a framed array written to NetCDF and read back
+  could no longer combine with its original on stock xarray: the reload reordered the bound
+  coordinates, and stock xarray keys alignment by coordinate order, so two equal bindings
+  conflicted (this affected complete frames as well and predated stage 5; patched xarray was
+  unaffected). It also found that two identically framed anonymous arrays sliced to zero length
+  were told to resample although `assume_frame` alone sufficed, and following that advice
+  raised `IndexError` inside resampling.
+- **Resolution**: Every framing door and `rf.decode` produce bound coordinates and indexes in one
+  canonical order, keeping the adapter orders already pinned by tests and leaving other
+  coordinates and metadata untouched. Equal adopted bindings recommend `assume_frame` alone
+  regardless of the numerical point check. Resampling onto an empty target returns an empty
+  framed result, and an empty source with a non-empty target raises a documented `ValueError`.
+- **Files affected**: `src/xarrayrf/native.py`, `_frame_compatibility.py`, `_resample.py`;
+  `tests/test_grid.py`, `tests/test_native.py`, `tests/test_native_encoding.py`;
+  `docs/core_interface.md`, `CHANGELOG.md`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high), with fixes implemented by Codex
+  gpt-6.1-sol and verified by Claude Opus 5.5 (claude-opus-5-5)
+
 ## [2026-10-01] — QA fixes for anatomy on grids (grid plan stage 4)
 
 - **Problem**: A QA pass over `xarrayrf.anatomy` found that `cardinal_grid` always assigned

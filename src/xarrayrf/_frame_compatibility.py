@@ -71,15 +71,15 @@ def anonymous_frame_difference(
             prefix
             + "adopting a frame requires an affine coordinate transform; supply an explicit transform between the frames"
         )
-    matching = _numerically_matching(mine, theirs, change)
     remedy = "assert the shared world with frame= or rf.assume_frame"
-    if matching and adoption_suffices:
-        return (
-            prefix
-            + "the grids' points match numerically; "
-            + remedy
-            + "; rf.assume_frame alone suffices"
+    if adoption_suffices:
+        detail = (
+            "the grids' points match numerically"
+            if _numerically_matching(mine, theirs, change)
+            else "adopting the frame makes the bindings equal"
         )
+        return prefix + detail + "; " + remedy + "; rf.assume_frame alone suffices"
+    matching = _numerically_matching(mine, theirs, change)
     detail = (
         "the grids' points match numerically but their bindings differ"
         if matching

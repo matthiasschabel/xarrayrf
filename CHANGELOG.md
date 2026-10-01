@@ -216,6 +216,12 @@
 
 ### Fixed
 
+- Canonical bound-coordinate and index order across native framing and decoding lets framed
+  arrays combine with their scipy NetCDF round trips on stock xarray, including anonymous frames.
+- Equal adopted anonymous bindings recommend `rf.assume_frame` alone even on empty grids.
+- Resampling onto empty targets returns empty framed values; empty sources with non-empty
+  targets raise a clear `ValueError` instead of failing during position calculation.
+
 - `anatomy.cardinal_grid` accepts ambiguous source orientations when both `spacing` and `dims`
   are explicit; ambiguous defaults now request both arguments. Frame and rank validation,
   output directions and coverage do not require a source-axis assignment.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -197,6 +198,29 @@ def test_netcdf_round_trip(tmp_path: Path, framed: xr.DataArray) -> None:
     with xr.open_dataarray(path, engine="scipy") as raw:
         assert not raw.rf.is_framed
         check_restored(raw.rf.decode(), framed)
+
+
+@pytest.mark.parametrize("anonymous", [True, False])
+def test_netcdf_round_trip_combines_with_original(anonymous: bool) -> None:
+    from xarrayrf import nifti
+
+    nib = pytest.importorskip("nibabel")
+    header = nib.Nifti1Header()
+    header.set_data_shape((2, 3, 4))
+    header.set_sform(np.eye(4), code=1)
+    header.set_xyzt_units("mm")
+    grid = nifti.from_header(header)
+    if not anonymous:
+        grid = nifti.from_header(header, frame=ReferenceFrame.local(grid.frame.coordinate_system))
+    original = nifti.to_dataarray(grid, np.ones((2, 3, 4)))
+    encoded = original.rf.encode().to_netcdf(engine="scipy")
+    with xr.open_dataarray(io.BytesIO(encoded), engine="scipy") as raw:
+        restored = raw.rf.decode()
+        assert list(restored.coords) == ["i", "j", "k"]
+        assert restored.rf.grid == original.rf.grid
+        result = original + restored
+        assert result.rf.grid == original.rf.grid
+        assert_allclose(result.values, 2 * original.values, rtol=0, atol=1e-12)
 
 
 def test_zarr_round_trip(tmp_path: Path, framed: xr.DataArray) -> None:
