@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pickle
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, Literal, cast
 
@@ -177,7 +177,7 @@ def test_assume_frame_adopts_declaration_and_checks_mapping(framed: xr.DataArray
     other = framed.rf.unframe().rf.frame(scaled, dims=("y", "x")).rf.assume_frame(rebound)
     with pytest.raises(ValueError, match=r"conflicting indexes|incompatible"):
         _ = rebound + other
-    with pytest.raises(ValueError, match="equal coordinate systems"):
+    with pytest.raises(ValueError, match="cannot adopt frame: unoriented axis"):
         framed.rf.assume_frame(ReferenceFrame.local(CoordinateSystem(("q", "r"), ("mm", "mm"))))
     with pytest.raises(TypeError, match="other must be"):
         framed.rf.assume_frame("bad")
@@ -1065,3 +1065,185 @@ assert not hasattr(result, "rf")
         [sys.executable, "-c", script], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_anonymous_adoption_keeps_different_grids_and_names_resampling(
+    framed: xr.DataArray,
+) -> None:
+    system = framed.rf.reference_frame.coordinate_system
+    first = framed.rf.assume_frame(ReferenceFrame.anonymous(system))
+    original = first.rf.coordinate_transform
+    assert isinstance(original, AffineTransform)
+    shifted = original.with_endpoints(target=ReferenceFrame.anonymous(system))
+    shifted = AffineTransform(
+        source=shifted.source,
+        target=shifted.target,
+        matrix=shifted.matrix,
+        translation=shifted.translation + shifted.matrix @ [2, 0],
+    )
+    second = framed.rf.unframe().rf.frame(shifted, dims=framed.rf.geometry_dims)
+    with pytest.raises(
+        ValueError,
+        match=r"are anonymous.*grids differ.*frame=.*rf.assume_frame.*then use rf.resample_to",
+    ):
+        _ = first + second
+    with pytest.raises(ValueError, match=r"are anonymous.*grids differ.*then use rf.resample_to"):
+        first.rf.resample_to(second)
+    adopted = second.rf.assume_frame(first)
+    with pytest.raises(ValueError, match=r"same frame on different grids.*rf.resample_to"):
+        _ = first + adopted
+    onto_first = adopted.rf.resample_to(first)
+    onto_second = first.rf.resample_to(adopted)
+    assert onto_first.rf.grid == first.rf.grid
+    assert onto_second.rf.grid == adopted.rf.grid
+    assert_allclose(onto_first.values[1:, :], framed.values[:-1, :], rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("anonymous_left", [True, False])
+def test_anonymous_refusal_identifies_one_operand(
+    framed: xr.DataArray, anonymous_left: bool
+) -> None:
+    anonymous = framed.rf.assume_frame(
+        ReferenceFrame.anonymous(framed.rf.reference_frame.coordinate_system)
+    )
+    left, right = (anonymous, framed) if anonymous_left else (framed, anonymous)
+    label = "left" if anonymous_left else "right"
+    with pytest.raises(
+        ValueError, match=rf"{label} operand is anonymous.*points match numerically.*alone suffices"
+    ):
+        _ = left + right
+    with pytest.raises(
+        ValueError,
+        match=rf"{'source' if anonymous_left else 'target'} operand is anonymous.*alone suffices",
+    ):
+        left.rf.resample_to(right)
+
+
+def test_anonymous_underivable_change_names_reason_without_assumption_remedy(
+    framed: xr.DataArray,
+) -> None:
+    frame = ReferenceFrame.anonymous(CoordinateSystem(("q", "r"), ("mm", "mm")))
+    other = framed.rf.unframe().rf.frame(
+        cast(AffineTransform, framed.rf.coordinate_transform).with_endpoints(target=frame),
+        dims=framed.rf.geometry_dims,
+    )
+    operations: tuple[Callable[[], xr.DataArray], ...] = (
+        lambda: framed + other,
+        lambda: framed.rf.resample_to(other),
+    )
+    for operation in operations:
+        with pytest.raises(ValueError, match=r"not derivable.*unoriented axis") as error:
+            operation()
+        assert "rf.assume_frame" not in str(error.value)
+        assert "frame=" not in str(error.value)
+    with pytest.raises(ValueError, match="cannot adopt frame: unoriented axis"):
+        framed.rf.assume_frame(other)
+
+
+def test_numerically_matching_points_do_not_bypass_binding_checks(framed: xr.DataArray) -> None:
+    first = framed.rf.assume_frame(
+        ReferenceFrame.anonymous(framed.rf.reference_frame.coordinate_system)
+    )
+    original = cast(AffineTransform, first.rf.coordinate_transform)
+    second = (
+        first.rf.unframe()
+        .assign_coords(y=first.y / 2, x=first.x / 2)
+        .rf.frame(
+            AffineTransform(
+                source=original.source,
+                target=ReferenceFrame.anonymous(first.rf.reference_frame.coordinate_system),
+                matrix=2 * original.matrix,
+                translation=original.translation,
+            ),
+            dims=first.rf.geometry_dims,
+        )
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"points match numerically but their bindings differ.*then use rf.resample_to",
+    ):
+        _ = first + second
+    assumed = second.rf.assume_frame(first)
+    with pytest.raises(ValueError, match="different grids"):
+        _ = first + assumed
+    assert_allclose(assumed.rf.resample_to(first), first, rtol=0, atol=1e-12)
+
+
+def test_complete_frame_refusal_wording_is_unchanged(framed: xr.DataArray) -> None:
+    other = framed.rf.assume_frame(
+        ReferenceFrame.local(framed.rf.reference_frame.coordinate_system)
+    )
+    mine, theirs = framed.rf.reference_frame.identifier, other.rf.reference_frame.identifier
+    expected = (
+        f"incompatible framed coordinate mappings: the operands are in different reference frames "
+        f"({mine[0]}:{mine[1]} and {theirs[0]}:{theirs[1]}); resample one onto the other "
+        "with a transform between the frames, or use rf.assume_frame if they are the same space"
+    )
+    with pytest.raises(ValueError) as error:
+        _ = framed + other
+    assert str(error.value) == expected
+    with pytest.raises(ValueError) as error:
+        framed.rf.resample_to(other)
+    assert str(error.value) == (
+        f"the target frame {theirs} and the source frame {mine} are "
+        "different frames; supply the transform between them, such as a registration result"
+    )
+
+
+def test_anonymous_non_affine_refusal_names_the_mapping_limit(
+    image: xr.DataArray, transform: AffineTransform
+) -> None:
+    class PointOnly:
+        def __init__(self, affine: AffineTransform) -> None:
+            self.source, self.target = affine.source, affine.target
+            self._affine = affine
+
+        def transform_point(self, points: npt.ArrayLike) -> npt.NDArray[np.float64]:
+            return self._affine.transform_point(points)
+
+    original = image.rf.frame(transform, dims=("y", "x"))
+    frame = ReferenceFrame.anonymous(original.rf.reference_frame.coordinate_system)
+    other = image.rf.frame(PointOnly(transform.with_endpoints(target=frame)), dims=("y", "x"))
+    with pytest.raises(
+        ValueError, match=r"right operand is anonymous.*requires an affine"
+    ) as error:
+        _ = original + other
+    assert "rf.assume_frame" not in str(error.value)
+    with pytest.raises(ValueError, match=r"target operand is anonymous.*requires an affine"):
+        original.rf.resample_to(other)
+
+
+def test_anonymous_adoption_retains_declared_support_checks(framed: xr.DataArray) -> None:
+    original = framed.rf.coordinate_transform
+    assert isinstance(original, AffineTransform)
+    original = original.with_endpoints(
+        source=ArrayCoordinates(
+            original.source.axes,
+            original.source.units,
+            sample_offset=(0.5, 0.5),
+        )
+    )
+    first = (
+        framed.rf.unframe()
+        .rf.frame(original, dims=framed.rf.geometry_dims)
+        .rf.assume_frame(ReferenceFrame.anonymous(framed.rf.reference_frame.coordinate_system))
+    )
+    original = cast(AffineTransform, first.rf.coordinate_transform)
+    second = framed.rf.unframe().rf.frame(
+        original.with_endpoints(
+            target=ReferenceFrame.anonymous(first.rf.reference_frame.coordinate_system)
+        ),
+        dims=first.rf.geometry_dims,
+        intervals={"y": [[-1, 1], [1, 3], [3, 5]]},
+    )
+    with pytest.raises(
+        ValueError, match=r"points match numerically but their bindings differ.*rf.resample_to"
+    ):
+        _ = first + second
+    adopted = second.rf.assume_frame(first)
+    assert "y" in adopted.rf.grid.intervals
+    with pytest.raises(ValueError, match="incompatible declared intervals"):
+        _ = first + adopted
+    onto_first = adopted.rf.resample_to(first)
+    assert onto_first.rf.grid == first.rf.grid
+    assert_allclose(onto_first, first, rtol=0, atol=1e-12)

@@ -190,3 +190,34 @@ def test_dicom_empty_and_argument_errors(tmp_path: Path) -> None:
         open(path, modality_lut="yes")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="frames"):
         open(path, frames=3)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("enhanced_input", [False, True])
+@pytest.mark.parametrize("declared_uid", [False, True])
+def test_dicom_open_classifies_identity_and_accepts_frame_override(
+    tmp_path: Path,
+    enhanced_input: bool,
+    declared_uid: bool,
+) -> None:
+    from xarrayrf.dicom import patient_frame
+
+    path = tmp_path / "image.dcm"
+    if enhanced_input:
+        write_enhanced(path)
+    else:
+        write_slice(path, 0, "1.2.3.5")
+    if not declared_uid:
+        dataset = pydicom.dcmread(path)
+        del dataset.FrameOfReferenceUID
+        pydicom.dcmwrite(path, dataset, enforce_file_format=True)
+    first, second = open(path), open(path)
+    assert first.rf.reference_frame.is_anonymous == (not declared_uid)
+    if declared_uid:
+        assert first.rf.reference_frame == second.rf.reference_frame
+    else:
+        assert first.rf.reference_frame != second.rf.reference_frame
+    shared = open(path, frame=first)
+    assert shared.rf.grid == first.rf.grid
+    assert_allclose((first + shared).compute(), 2 * first.compute(), rtol=0, atol=1e-12)
+    override = patient_frame("1.2.3.99")
+    assert open(path, frame=override).rf.reference_frame == override

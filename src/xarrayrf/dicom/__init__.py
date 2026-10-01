@@ -20,6 +20,7 @@ from xarrayrf import (
     ReferenceFrame,
     affine_class,
 )
+from xarrayrf._geometry import adopt_frame
 from xarrayrf._sampling import uniform_step
 from xarrayrf.anatomy import LPS, patient_coordinate_system
 from xarrayrf.native import (
@@ -159,13 +160,13 @@ def _optional_text(dataset: Dataset, name: str) -> str | None:
 def patient_frame(frame_of_reference_uid: str | None) -> ReferenceFrame:
     """Return the LPS patient frame declared by a DICOM Frame of Reference UID.
 
-    An absent UID gives a fresh local frame, since no shared identity was declared.
+    An absent UID gives a fresh anonymous frame, since no shared identity was declared.
 
     Args:
         frame_of_reference_uid: DICOM Frame of Reference UID, or None.
 
     Returns:
-        The declared patient frame, or a new local frame.
+        The declared patient frame, or a new anonymous frame.
 
     Raises:
         TypeError: If the UID is neither a string nor None.
@@ -179,7 +180,7 @@ def patient_frame(frame_of_reference_uid: str | None) -> ReferenceFrame:
     return (
         ReferenceFrame.declared((FRAME_OF_REFERENCE_NAMESPACE, frame_of_reference_uid), system)
         if frame_of_reference_uid is not None
-        else ReferenceFrame.local(system)
+        else ReferenceFrame.anonymous(system)
     )
 
 
@@ -217,7 +218,10 @@ def _read_slice(dataset: Dataset, index: int, metadata: Dataset) -> _Slice:
 
 
 def _assemble(
-    slices: Sequence[_Slice], orientation_tolerance: float, slice_tolerance: float
+    slices: Sequence[_Slice],
+    orientation_tolerance: float,
+    slice_tolerance: float,
+    supplied_frame: ReferenceFrame | xr.DataArray | None = None,
 ) -> DicomGeometry:
     if not slices:
         raise ValueError("datasets must contain at least one image")
@@ -301,8 +305,6 @@ def _assemble(
         report.append(("slice-axis", f"k index; uniform step {step:g} mm"))
     uid = first.uid
     frame = patient_frame(uid)
-    if uid is None:
-        report.append(("local-frame", "FrameOfReferenceUID absent; created a local frame"))
     patient_positions = {item.patient_position for item in slices}
     patient_position = first.patient_position if len(patient_positions) == 1 else None
     if len(patient_positions) > 1:
@@ -338,6 +340,14 @@ def _assemble(
         ),
         translation=origin,
     )
+    if supplied_frame is not None:
+        transform = adopt_frame(transform, supplied_frame, name="frame")
+        assert isinstance(transform.target, ReferenceFrame)
+        frame = transform.target
+        replaced = f"FrameOfReferenceUID {uid}" if uid is not None else "the anonymous frame"
+        report.append(("frame-override", f"supplied frame replaces {replaced}"))
+    elif uid is None:
+        report.append(("anonymous-frame", "FrameOfReferenceUID absent; created an anonymous frame"))
     coords: dict[str, CoordinateSpec] = {
         axis: ("k", values, MappingProxyType({"units": unit})),
         "j": index_coordinate("j", first.rows),
@@ -358,6 +368,7 @@ def _assemble(
 def from_datasets(
     datasets: Sequence[Dataset],
     *,
+    frame: ReferenceFrame | xr.DataArray | None = None,
     orientation_tolerance: float = 1e-4,
     slice_tolerance: float = 0.01,
 ) -> DicomGeometry:
@@ -365,6 +376,7 @@ def from_datasets(
 
     Args:
         datasets: One dataset per slice; input order may be arbitrary.
+        frame: Frame or framed array to adopt, explicitly overriding even a declared UID.
         orientation_tolerance: Maximum cosine error or disagreement.
         slice_tolerance: Slice residual in steps and in-plane shift in pixel spacings.
 
@@ -383,6 +395,7 @@ def from_datasets(
         [_read_slice(dataset, index, dataset) for index, dataset in enumerate(datasets)],
         orientation_tolerance,
         slice_tolerance,
+        frame,
     )
 
 
@@ -401,6 +414,7 @@ def from_enhanced(
     dataset: Dataset,
     *,
     frames: Sequence[int] | None = None,
+    frame: ReferenceFrame | xr.DataArray | None = None,
     orientation_tolerance: float = 1e-4,
     slice_tolerance: float = 0.01,
 ) -> DicomGeometry:
@@ -409,6 +423,7 @@ def from_enhanced(
     Args:
         dataset: Enhanced object; pixels are never accessed.
         frames: Optional frame indices selecting one spatial stack.
+        frame: Frame or framed array to adopt, explicitly overriding even a declared UID.
         orientation_tolerance: Maximum cosine error or disagreement.
         slice_tolerance: Slice residual in steps and in-plane shift in pixel spacings.
 
@@ -434,9 +449,12 @@ def from_enhanced(
         shared = shared_items[0]
     if frame_items is None or len(frame_items) != count:
         raise ValueError("PerFrameFunctionalGroupsSequence length must equal NumberOfFrames")
-    for index, frame in enumerate(frame_items):
+    for index, frame_item in enumerate(frame_items):
         for name in ("PlanePositionSequence", "PlaneOrientationSequence", "PixelMeasuresSequence"):
-            if getattr(shared, name, None) is not None and getattr(frame, name, None) is not None:
+            if (
+                getattr(shared, name, None) is not None
+                and getattr(frame_item, name, None) is not None
+            ):
                 raise ValueError(f"frame {index} has {name} in both shared and per-frame groups")
     if frames is None:
         selected = tuple(range(count))
@@ -455,10 +473,10 @@ def from_enhanced(
             raise ValueError("frames must contain unique indices within NumberOfFrames")
     slices: list[_Slice] = []
     for index in selected:
-        frame = frame_items[index]
-        plane = _group(shared, frame, "PlanePositionSequence", index)
-        orientation = _group(shared, frame, "PlaneOrientationSequence", index)
-        measures = _group(shared, frame, "PixelMeasuresSequence", index)
+        frame_item = frame_items[index]
+        plane = _group(shared, frame_item, "PlanePositionSequence", index)
+        orientation = _group(shared, frame_item, "PlaneOrientationSequence", index)
+        measures = _group(shared, frame_item, "PixelMeasuresSequence", index)
         synthetic = Dataset()
         if hasattr(plane, "ImagePositionPatient"):
             synthetic.ImagePositionPatient = plane.ImagePositionPatient
@@ -469,7 +487,7 @@ def from_enhanced(
         if hasattr(measures, "SliceThickness"):
             synthetic.SliceThickness = measures.SliceThickness
         slices.append(_read_slice(synthetic, index, dataset))
-    return _assemble(slices, orientation_tolerance, slice_tolerance)
+    return _assemble(slices, orientation_tolerance, slice_tolerance, frame)
 
 
 def _homogeneous_matrix(
@@ -516,7 +534,7 @@ def equipment_transform(
 ) -> AffineTransform | None:
     """Import an Image to Equipment Mapping Matrix as a patient-to-equipment transform.
 
-    The equipment frame is local to this dataset even when another dataset names the same
+    The equipment frame is anonymous even when another dataset names the same
     equipment. Only the defined ``ISOCENTER`` equipment identifier is accepted.
 
     Args:
@@ -524,7 +542,7 @@ def equipment_transform(
         orientation_tolerance: Maximum rigid-matrix and homogeneous-row error.
 
     Returns:
-        A transform to a local equipment frame, or ``None`` when the matrix is absent.
+        A transform to an anonymous equipment frame, or ``None`` when the matrix is absent.
 
     Raises:
         TypeError: If the dataset or tolerance has the wrong type.
@@ -548,7 +566,7 @@ def equipment_transform(
         text = _optional_text(dataset, name)
         if text is not None:
             definition[name] = text
-    equipment = ReferenceFrame.local(
+    equipment = ReferenceFrame.anonymous(
         CoordinateSystem(("x", "y", "z"), ("mm",) * 3, axis_types=("space",) * 3),
         definition=definition,
     )

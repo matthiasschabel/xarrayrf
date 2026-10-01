@@ -21,9 +21,9 @@ from xarrayrf import (
     Lattice,
     ReferenceFrame,
     affine_class,
-    compose,
     coordinate_system_change,
 )
+from xarrayrf._geometry import adopt_frame
 from xarrayrf.anatomy import RAS, patient_coordinate_system
 from xarrayrf.native import (
     CoordinateSpec,
@@ -221,7 +221,7 @@ def from_header(
 
     ras_system = _ras_system(unit, temporal_unit if time else None)
     if frame is None:
-        local_definition: dict[str, str | int | float] = {
+        anonymous_definition: dict[str, str | int | float] = {
             "xform": selected,
             "xform_code": code,
             "xform_code_name": code_name,
@@ -241,7 +241,7 @@ def from_header(
                 definition={"space": space, "variant": "unspecified"},
             )
         else:
-            frame = ReferenceFrame.local(ras_system, definition=local_definition)
+            frame = ReferenceFrame.anonymous(ras_system, definition=anonymous_definition)
     ras_view = (
         frame if frame.coordinate_system == ras_system else frame.with_coordinate_system(ras_system)
     )
@@ -267,16 +267,11 @@ def from_header(
     ras_affine = AffineTransform(
         source=source, target=ras_view, matrix=matrix, translation=translation
     )
-    transform: AffineTransform
-    if frame == ras_view:
-        transform = ras_affine
-    else:
-        try:
-            composed = compose(ras_affine, coordinate_system_change(ras_view, frame))
-        except ValueError as error:
-            raise ValueError(f"supplied frame cannot be derived from NIfTI RAS: {error}") from error
-        assert isinstance(composed, AffineTransform)
-        transform = composed
+    try:
+        transform = adopt_frame(ras_affine, frame)
+    except ValueError as error:
+        reason = str(error).removeprefix("cannot adopt frame: ")
+        raise ValueError(f"supplied frame cannot be derived from NIfTI RAS: {reason}") from error
 
     coords: dict[str, CoordinateSpec] = {}
     for index, dim in enumerate(dims):

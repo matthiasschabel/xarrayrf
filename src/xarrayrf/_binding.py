@@ -15,7 +15,8 @@ from xarray.indexes import PandasIndex
 from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
 from ._frame import ReferenceFrame
-from ._geometry import check_coordinate_unit
+from ._frame_compatibility import anonymous_frame_difference
+from ._geometry import adopt_frame, check_coordinate_unit
 from ._grid import Coordinate, Grid
 from ._sampling import freeze_intervals
 from ._transform import SupportsPoints
@@ -34,11 +35,15 @@ def grid_variables(grid: Grid) -> dict[str, xr.Variable]:
     }
 
 
-def grid_from_binding(coordinates: xr.Coordinates) -> Grid:
-    """Snapshot source coordinates in the dimension order carried by their binding."""
-    index = next(
-        index for index in coordinates.xindexes.values() if isinstance(index, BindingIndex)
-    )
+def grid_from_binding(coordinates: xr.Coordinates, *, index: BindingIndex | None = None) -> Grid:
+    """Snapshot source coordinates in the dimension order carried by their binding.
+
+    ``index`` supplies the binding directly when the coordinates do not carry it as an index.
+    """
+    if index is None:
+        index = next(
+            found for found in coordinates.xindexes.values() if isinstance(found, BindingIndex)
+        )
     entries: dict[str, Coordinate] = {}
     for name in index.transform.source.axes:
         coordinate = coordinates[name]
@@ -240,6 +245,20 @@ class BindingIndex(xr.Index):
             and isinstance(theirs, ReferenceFrame)
             and not mine.is_equivalent_frame(theirs)
         ):
+            if mine.is_anonymous or theirs.is_anonymous:
+                try:
+                    adopted = adopt_frame(self.transform, theirs)
+                except ValueError:
+                    suffices = False
+                else:
+                    rebound = type(self)(self.axes, self.fixed, adopted, self.dims, self.intervals)
+                    suffices = rebound.equals(other)
+                return anonymous_frame_difference(
+                    self._grid()._sampling(),
+                    other._grid()._sampling(),
+                    labels=("left operand", "right operand"),
+                    adoption_suffices=suffices,
+                )
             return (
                 f"the operands are in different reference frames ({mine.identifier[0]}:"
                 f"{mine.identifier[1]} and {theirs.identifier[0]}:{theirs.identifier[1]}); "
@@ -250,6 +269,9 @@ class BindingIndex(xr.Index):
             "the operands sample the same frame on different grids; resample one onto the "
             "other with rf.resample_to"
         )
+
+    def _grid(self) -> Grid:
+        return grid_from_binding(xr.Coordinates(self.create_variables(), indexes={}), index=self)
 
     def join(self, other: xr.Index, how: str = "inner") -> BindingIndex:
         compatible = self._require_compatible(other)
@@ -433,4 +455,10 @@ class BindingIndex(xr.Index):
         return type(self), (self.axes, self.fixed, self.transform, self.dims, dict(self.intervals))
 
     def __repr__(self) -> str:
-        return f"BindingIndex(axes={tuple(self.axes)}, fixed={tuple(self.fixed)}, dims={self.dims}, intervals={tuple(self.intervals)})"
+        state = (
+            ", anonymous=True"
+            if isinstance(self.transform.target, ReferenceFrame)
+            and self.transform.target.is_anonymous
+            else ""
+        )
+        return f"BindingIndex(axes={tuple(self.axes)}, fixed={tuple(self.fixed)}, dims={self.dims}, intervals={tuple(self.intervals)}{state})"

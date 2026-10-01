@@ -1,7 +1,7 @@
 # Format adapters
 
 **Status:** Implemented
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-01
 **Scope:** `xarrayrf.nifti`, `xarrayrf.dicom`, `xarrayrf.ngff`, `xarrayrf.geotiff` and
 `xarrayrf.anatomy`. The normative contract is the Adapters section of
 [core_interface.md](../../core_interface.md); this note records why the adapters look as they do.
@@ -56,16 +56,42 @@ coordinate systems and transform graphs), and GeoTIFF (projected rasters with a 
 - **Declared** frames (`ReferenceFrame.declared((namespace, value), system)`) are shared, external
   identities: `("dicom-frame-of-reference", uid)`, `("nifti-template", ...)`,
   `("templateflow", name)`, `("ome-zarr", "store/group#name")`, `("epsg", code)`.
-- **Local** frames (`ReferenceFrame.local`) are minted fresh per import when the format declares no
-  identity. Two separately opened NIfTI scanner-space files get distinct frames even with
-  identical sforms, because identical headers from different subjects are common.
-- **`frame=`** on `nifti.open`/`from_header` (a `ReferenceFrame` or a framed `DataArray`) and
-  `frames=` on NGFF functions let callers declare sharing, for example an image and its label map.
-- **`array.rf.assume_frame(other)`** re-targets an array's mapping to `other`'s complete
-  declaration (identifier, definition, context). It refuses differing coordinate systems, since
-  that is a conversion. It is the explicit escape hatch for cross-study, cross-modality or atlas
-  comparison; genuinely different spaces keep distinct frames and are related by a registration
-  transform plus `resample_to`.
+- **Anonymous** frames (`ReferenceFrame.anonymous`) are minted fresh per import when the source
+  supplies geometry without a shared world identity. Matching headers or paths never relate
+  them. **Local** frames remain deliberate caller-created worlds.
+- **`frame=`** on NIfTI `from_header`/`open`, DICOM `from_datasets`/`from_enhanced`/`open`,
+  and GeoTIFF `from_profile`/`open` accepts a frame or a framed DataArray. The supplied declaration
+  explicitly overrides the imported identity, including a DICOM UID or CRS authority.
+  NGFF retains `frames=` for reusing named systems.
+- **`array.rf.assume_frame(other)`** and these `frame=` parameters call the same private core
+  adoption function. It adopts identity, definition and context and composes a derivable exact
+  coordinate-system change, such as RAS to LPS. Underivable changes name their reason; non-affine
+  mappings refuse. No samples are resampled by adoption, and binding grid checks remain active.
+  Different spaces still require a registration transform and resampling.
+
+Every adapter frame-construction site is classified as follows:
+
+| Site | Classification | Reason |
+|---|---|---|
+| NIfTI `from_header`, codes 1, 2 or unnamed 5 | Anonymous | Scanner/aligned geometry names no shared world. |
+| NIfTI `from_header`, `time=True` without `frame=` | Anonymous | A spatial template does not identify an acquisition clock. |
+| NIfTI spatial codes 3/4 or `template=` | Declared | Selected template identity; definitions remain unchanged. |
+| NIfTI `to_header` throwaway lattice | Local | Internal deliberate construction, never exposed. |
+| DICOM `patient_frame(None)` | Anonymous | No Frame of Reference UID; no series-UID fallback. |
+| DICOM `patient_frame(uid)` (including registration endpoints) | Declared | Frame of Reference UID names a world. |
+| DICOM `equipment_transform` target | Anonymous | `EquipmentCoordinateSystemIdentification` names a type, not an instance. |
+| NGFF `_metadata` without `store` | Anonymous | System name alone supplies no store identity. |
+| NGFF `_metadata` with `store` | Declared | Store/group/system identifier. |
+| GeoTIFF `crs_frame` without exact authority | Anonymous | WKT describes geometry without an exact declared authority. |
+| GeoTIFF `crs_frame` with exact authority | Declared | Exact authority code; definition remains unchanged. |
+
+Frame, binding and grid representations mark anonymous identities. Persistence keeps the
+namespace and minted value, so a decoded array still shares its original partners' world.
+Different-frame refusals identify anonymous operands and name only applicable remedies.
+Numerically matching points do not establish binding compatibility: different coordinate
+parameterizations or declared support still require resampling after adoption. The diagnostic
+only says assumption alone suffices when the adopted binding also matches.
+
 - Template frames and `template=` are described under NIfTI below.
 
 ### NIfTI (`xarrayrf[nifti]`, nibabel)
@@ -94,14 +120,14 @@ Reads NIfTI-1 and NIfTI-2 headers; writes NIfTI-1 headers (or a copy of a suppli
   `{"space": ..., "variant": "unspecified"}` and empty context. `template=name` (codes 2-5,
   nonempty alphanumeric BIDS space label, not checked against a registry) declares
   `("templateflow", name)` with `{"space": name}`. `template=` excludes `frame=` and `time=True`.
-  Codes 1, 2 and unnamed 5 mint local frames whose definition records the xform, codes and qfac.
+  Codes 1, 2 and unnamed 5 mint anonymous frames whose definition records the xform, codes and qfac.
   Header values never enter a declared definition; they go to the report, so files differing
   only in unused qform metadata share one frame.
 - **Trust policy for templates: share.** Unnamed code-4 files share `MNI152`, matching FSL, ANTs
   and nilearn practice: they are meant to be in one world, if not to high precision. The
   imprecision is documented in the definition, not enforced. Named and unnamed variants are
   distinct identities; relate them with `assume_frame` or the same `template=`.
-- **Time frames stay local.** `time=True` mints a local frame unless `frame=` is given: spatial
+- **Time frames stay anonymous.** `time=True` mints an anonymous frame unless `frame=` is given: spatial
   normalization asserts a shared space, not a shared acquisition clock.
 - **Export** (`to_header`) uses `Geometry.lattice(dims=...)` with `dims` in NIfTI voxel order,
   converts the frame to RAS (LPS is converted), writes a coded sform and a qform only when the
@@ -140,7 +166,7 @@ export.
 - **Thickness is not spacing.** `slice_intervals` holds each slice's own `SliceThickness` as an
   interval in the slice coordinate's values, or `None` when any slice lacks a positive thickness.
   It is returned as data and not attached until declared cells exist.
-- **Frame** is declared `(FRAME_OF_REFERENCE_NAMESPACE, uid)` in LPS mm, or local without a UID.
+- **Frame** is declared `(FRAME_OF_REFERENCE_NAMESPACE, uid)` in LPS mm, or anonymous without a UID.
   `patient_frame(uid)` returns the same frame so application readers can frame their own stacks
   in the same patient world.
 - **Patient Position is not frame context.** Context is part of identity, and DICOM patient
@@ -152,7 +178,7 @@ export.
   the shared or per-frame functional groups; a group in both is refused (C.7.6.16), as is a
   per-frame count differing from `NumberOfFrames`. Frames go through the same assembly; duplicate
   positions are refused unless `frames=` selects one stack.
-- **Equipment mapping** (`equipment_transform`): patient frame to a fresh local equipment frame
+- **Equipment mapping** (`equipment_transform`): patient frame to a fresh anonymous equipment frame
   (unoriented `x, y, z` mm). Only `ISOCENTER` and a finite rigid matrix with homogeneous last row
   are accepted (C.7.6.21). Equipment frames never share identity across datasets.
 - **Spatial registration** (`registrations`): one transform per `RegistrationSequence` item, from
@@ -183,7 +209,7 @@ equivalent JSON attributes, validated through the same models.
   of element 0 is coordinate 0 (so `sample_offset=0.5`, unit `"1"`).
 - **Identity.** With `store`, a named system is declared
   `("ome-zarr", f"{store}/{group}#{quote(name)}")` (no trailing slash, normalized group, the slash
-  dropped at the root). Without `store`, frames are local and reused across calls via `frames`,
+  dropped at the root). Without `store`, frames are anonymous and reused across calls via `frames`,
   since a name alone is not an identity across stores.
 - **Transforms.** `identity`, `scale`, `translation`, inline (rectangular) `affine`, `rotation`,
   `mapAxis`, `projectAxis`, `sequence`, `byDimension` and `bijection` collapse into one
@@ -235,7 +261,7 @@ Reads projected GeoTIFF/COG. No export.
   centred cells (`sample_offset=0.5`); `Point` declares point samples (`None`). Rotated and
   sheared affines are kept exactly.
 - **Identity.** A CRS with an exact authority code (`to_authority(min_confidence=100)`) is
-  declared `("epsg", code)` (other authorities lowercased); otherwise a local frame holding the
+  declared `("epsg", code)` (other authorities lowercased); otherwise an anonymous frame holding the
   WKT. Axis names, order and units come from `pyproj.CRS.axis_info`; rasterio's `(x, y)` rows are
   permuted by direction into the authority's order (EPSG:3035 lists northing first). Units:
   `metre`, `foot`, `US survey foot` only.

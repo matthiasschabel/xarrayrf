@@ -16,7 +16,8 @@ import xarray as xr
 from ._affine import equilibrated_inverse
 from ._binding import grid_variables
 from ._frame import ReferenceFrame
-from ._geometry import Geometry
+from ._frame_compatibility import anonymous_frame_difference
+from ._geometry import Geometry, adopt_frame
 from ._grid import Grid
 from ._orientation import coordinate_system_change
 from ._positions import extents, lattice_parts, locator, sample_columns
@@ -322,6 +323,30 @@ def _plan(
     if isinstance(block_points, bool) or not isinstance(block_points, int) or block_points < 1:
         raise ValueError(f"block_points must be a positive integer, got {block_points!r}")
     order = _SPLINE_ORDER[method]
+    if (
+        transform is None
+        and not target.frame.is_equivalent_frame(source.frame)
+        and (source.frame.is_anonymous or target.frame.is_anonymous)
+    ):
+        try:
+            adopted = adopt_frame(source.transform, target.frame)
+        except ValueError:
+            suffices = False
+        else:
+            source_grid = source.grid()
+            target_grid = target if isinstance(target, Grid) else target.grid()
+            suffices = (
+                Grid(adopted, source_grid.coordinates, intervals=source_grid.intervals)
+                == target_grid
+            )
+        raise ValueError(
+            anonymous_frame_difference(
+                source._sampling(),
+                target._sampling(),
+                labels=("source operand", "target operand"),
+                adoption_suffices=suffices,
+            )
+        )
     frame_map = _frame_map(target.frame, source.frame, transform)
     target_dims = (
         target.dims

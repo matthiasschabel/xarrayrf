@@ -164,7 +164,7 @@ def test_transformation_examples(path: Path) -> None:
         )
 
 
-def test_coordinate_system_identity_and_local_frames() -> None:
+def test_coordinate_system_identity_and_anonymous_frames() -> None:
     declaration = {"name": "physical / x", "axes": [{"name": "x", "unit": "mm", "type": "space"}]}
     first, first_report = coordinate_system(declaration, store="file:///data", group="image")
     second, second_report = coordinate_system(
@@ -174,7 +174,10 @@ def test_coordinate_system_identity_and_local_frames() -> None:
     assert first_report == second_report == ()
     assert first.identifier == (NAMESPACE, "file:///data/image#physical%20%2F%20x")
     assert first.coordinate_system.axis_types == ("space",)
-    assert coordinate_system(declaration)[0] != coordinate_system(declaration)[0]
+    assert not first.is_anonymous
+    anonymous, _ = coordinate_system(declaration)
+    assert anonymous.is_anonymous
+    assert anonymous != coordinate_system(declaration)[0]
 
 
 def test_coordinate_system_reports_unrepresented_axis_metadata() -> None:
@@ -403,7 +406,7 @@ def test_multiscale_examples(name: str) -> None:
         )
 
 
-def test_multiscale_levels_share_one_local_intrinsic_frame() -> None:
+def test_multiscale_levels_share_one_anonymous_intrinsic_frame() -> None:
     data = read_json(FIXTURES / "multiscales_strict" / "multiscales_example.json")
     ms = data["attributes"]["ome"]["multiscales"][0]
     count = len(ms["coordinateSystems"][0]["axes"])

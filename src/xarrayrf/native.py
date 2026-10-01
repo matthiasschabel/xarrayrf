@@ -13,16 +13,15 @@ import numpy.typing as npt
 import xarray as xr
 from xarray.indexes import PandasIndex
 
-from ._affine import AffineTransform
 from ._binding import BindingIndex, grid_from_binding, grid_variables
 from ._encoding import Decoder, MalformedDataError, decode_intervals, encode
 from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
-from ._geometry import Geometry
+from ._geometry import Geometry, adopt_frame
 from ._grid import Coordinate, Grid
 from ._resample import Method, resample
 from ._sampling import Domain
-from ._transform import SupportsAffine, SupportsPoints
+from ._transform import SupportsPoints
 from ._validation import check_names
 
 _BINDING_ATTR = "xarrayrf_binding"
@@ -508,42 +507,20 @@ class _ReferenceFrameAccessor:
         )
 
     def assume_frame(self, other: ReferenceFrame | xr.DataArray) -> xr.DataArray:
-        """Adopt another frame's complete declaration without changing sample positions.
+        """Adopt another frame's declaration and derivable coordinate-system change.
 
         Args:
             other: Reference frame or framed array that declares the intended identity.
 
         Returns:
-            This array rebound to the other frame with its affine mapping unchanged.
+            This array rebound to the other frame, preserving samples and grid checks.
 
         Raises:
             TypeError: If other is neither a frame nor a DataArray.
-            ValueError: If an array is unframed, the systems differ, or this mapping is non-affine.
+            ValueError: If an array is unframed, the system change is underivable, or this mapping is non-affine.
         """
         binding = self._require_binding()
-        if isinstance(other, xr.DataArray):
-            other_frame = other.rf.reference_frame
-        elif isinstance(other, ReferenceFrame):
-            other_frame = other
-        else:
-            raise TypeError("other must be a ReferenceFrame or framed DataArray")
-        current = self.reference_frame
-        if current.coordinate_system != other_frame.coordinate_system:
-            raise ValueError("frames must have equal coordinate systems")
-        transform = binding.transform
-        if not isinstance(transform, SupportsAffine):
-            raise ValueError("assume_frame requires an affine coordinate transform")
-        affine = (
-            transform
-            if isinstance(transform, AffineTransform)
-            else AffineTransform(
-                source=transform.source,
-                target=transform.target,
-                matrix=transform.matrix,
-                translation=transform.translation,
-            )
-        )
-        replacement = affine.with_endpoints(target=other_frame)
+        replacement = adopt_frame(binding.transform, other)
         return cast(
             xr.DataArray,
             self.unframe().rf.frame(replacement, dims=binding.dims, intervals=binding.intervals),

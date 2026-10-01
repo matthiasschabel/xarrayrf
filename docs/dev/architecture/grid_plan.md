@@ -149,12 +149,12 @@ letters, otherwise tokens. Named DICOM display planes in `(slice, row, column)` 
   coefficient to its own covered span makes the bound invariant under source-coordinate
   rescaling. It is independent of units and translation.
 
-### 5. Complete and anonymous frames
+### 5. Complete and anonymous frames (implemented)
 
 A **complete** frame has geometry and an identity: a declared name (a DICOM Frame of Reference
 UID, a NIfTI template space) or a local frame someone created deliberately and shares by
 passing the object around. Consistency between complete frames is enforced, and nothing is
-ambiguous. An **anonymous** frame has geometry but no identity, because its source did not say
+ambiguous. An **anonymous** frame has geometry but no declared world identity, because its source did not say
 which world it belongs to: a scanner-space NIfTI affine, a DICOM series without a Frame of
 Reference UID, an NGFF coordinate system read without a store. An unframed array has neither and
 is index space.
@@ -186,7 +186,8 @@ explicit act, made at the point where it matters.
   arithmetic, `resample_to` without a transform) and either frame is anonymous, the error says
   which array is anonymous and gives the applicable steps: `frame=`/`assume_frame` to assert the
   shared world, followed by `resample_to` when the grids differ; when the coordinates also match
-  numerically, it says so and `assume_frame` alone suffices. An underivable coordinate-system
+  numerically, it says so and `assume_frame` alone suffices when the adopted bindings also
+  agree; different parameterizations or support still require resampling. An underivable coordinate-system
   difference is named instead of offering a remedy that would fail. This is a separate private
   check, not `is_coincident`, which requires the same frame.
 - **Visible state.** `repr` of a frame, a binding and a grid marks an anonymous frame, so the
@@ -246,7 +247,7 @@ reviewed separately.
    tests cover LPS/RAS and DICOM grids, oblique volumes, all 48 signed permutations (including
    singleton reflection), exact projected coverage, thick slices in their own and perpendicular
    planes, nonuniform spacing, assignment collisions/ambiguity, and exact same-grid resampling.
-5. Anonymous frames: `ReferenceFrame.anonymous` and `is_anonymous`; adapter call sites
+5. **Done.** Anonymous frames: `ReferenceFrame.anonymous` and `is_anonymous`; adapter call sites
    classified (anonymous versus deliberate local); `frame=` accepting a framed array where it
    does not yet; `assume_frame` applying derivable coordinate-system changes through the same
    implementation as `frame=`; refusal messages naming the applicable remedy; `repr` marking;

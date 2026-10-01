@@ -81,7 +81,9 @@ Each term has one meaning. Public names, docstrings, errors and docs use these m
 | **Reference frame** | An identity: what coordinates are relative to, such as one patient's DICOM Frame of Reference or one microscope stage. `ReferenceFrame`. |
 | **Coordinate system** | Ordered axes with units, optional axis types, a representation and optional orientation, in which a frame's coordinates are expressed. Carries no identity. `CoordinateSystem`. |
 | **Array coordinates** | An array's own coordinate values along named dimensions, with units and no identity: the NGFF array coordinate system, napari's data coordinates. `ArrayCoordinates`. |
-| **Local frame** | A frame whose identity xarrayrf created (`ReferenceFrame.local()`), with no external identifier. It says nothing about how the frame relates to other frames; relations are always explicit transforms. |
+| **Anonymous frame** | Geometry whose source names no shared world. `ReferenceFrame.anonymous()` mints a distinct identity; `is_anonymous` reports it. |
+| **Complete frame** | A declared external identity or a local identity deliberately created and shared by the caller. |
+| **Local frame** | A frame whose identity the caller deliberately created (`ReferenceFrame.local()`), with no external identifier. It says nothing about how the frame relates to other frames; relations are always explicit transforms. |
 | **Endpoint** | The source or target of a transform: a reference frame or array coordinates. |
 | **Axis** | One named, ordered entry of a coordinate system or of array coordinates, with a unit and an optional type. ("Component" is not used.) |
 | **Unit** | An open CF/UDUNITS string compared exactly, or `None` where no unit is declared. `None` is not `"1"` (dimensionless) and implies nothing else about the axis. |
@@ -130,11 +132,21 @@ declare a unit, since a direction needs the axis's quantity. Axis types join str
 as NGFF RFC-4's orientation only on spatial axes, are checked by adapters.
 
 **`ReferenceFrame`**: identifier, `coordinate_system`, optional `role`, `definition`, `context`,
-`display`; constructed by `ReferenceFrame.local(coordinate_system, ...)` or
-`ReferenceFrame.declared(identifier, coordinate_system, ...)`. Comparisons:
+`display`; constructed by `ReferenceFrame.local(coordinate_system, ...)`,
+`ReferenceFrame.anonymous(coordinate_system, *, role=None, definition=None, context=None,
+display=None)` or `ReferenceFrame.declared(identifier, coordinate_system, ...)`. Comparisons:
 `is_equivalent_frame`, `conflicts_with`, strict `==`; role and display never count.
 `with_coordinate_system(coordinate_system)` re-expresses the same frame (same identity) in
 another coordinate system, which adapters use to present a stored frame in their own axes.
+
+Anonymous frames mint in `"xarrayrf.anonymous"`, separately from `"xarrayrf.local"`.
+Every mint is distinct; identical metadata, files or paths never establish sharing. Local
+frames remain deliberate caller-created worlds. `frame.is_anonymous` follows the identifier
+namespace, including after `with_coordinate_system` and encoding/decoding. Equality, hashing,
+definition and context follow the same rules as local frames. Frame, binding-index and grid
+representations mark this state with `anonymous=True`. An anonymous array works alone and
+with its derived arrays or any array explicitly sharing its identity. Unframed arrays remain
+index space; no world is inferred.
 
 **`ArrayCoordinates(axes, units, *, axis_types=None, sample_offset=None)`**: axis names equal to
 the array coordinate names a transform reads, one unit (or `None`) and optional type per axis,
@@ -563,8 +575,28 @@ reserved `xarrayrf_binding` attribute is not carried, and `rf.frame` refuses an 
 has one (decode it or drop it first). `rf.unframe()` drops it as stale. The core
 `resample` continues to return an unframed array. `array.rf.assume_frame(other)` accepts a
 `ReferenceFrame` or framed DataArray and adopts its complete identity, definition and context
-without moving samples. It requires equal coordinate systems and an affine array transform;
-subsequent combination still checks mapping compatibility.
+through the same private adoption implementation as adapter `frame=`. Both accept a frame or a
+framed DataArray and retarget an affine to that full declaration, including its coordinate
+system, role and display. If systems differ, adoption composes the exact
+`coordinate_system_change` (for example RAS to LPS); sample values and source coordinates stay
+unchanged. Underivable changes refuse with the reason, including differing units, direction
+vocabularies or unoriented axes, and non-affine mappings refuse explicitly. No unit conversion
+or registration is guessed. Passing an anonymous partner retains its anonymous namespace while
+explicitly sharing that partner's identity. Subsequent combination still checks transform,
+dimensions, retained coordinates and declared intervals; adopting a world never matches a grid.
+
+When different frames meet in alignment, arithmetic, binding joins or resampling without an
+explicit transform, and either is anonymous, the refusal identifies the left/right operand
+(or source/target for resampling). For derivable affine systems it names `frame=` or
+`rf.assume_frame` to assert the shared world, followed by `rf.resample_to` for different grids.
+A separate private comparison, independent of `is_coincident`, reports numerically matching
+sample points after the derivable system change. It allows only accumulated float64 roundoff,
+uses affine extrema in time linear in axis lengths, and never establishes identity. When the
+adopted bindings also agree, the message says `rf.assume_frame alone suffices`. Numerically
+matching points with different bindings or support still require resampling. Underivable
+systems and non-affine mappings name the reason and request an explicit transform, without
+suggesting an assumption that would fail. Existing refusals for two complete frames remain
+unchanged.
 
 Performance is part of the contract:
 
@@ -667,9 +699,18 @@ imports xarray lazily.
   coordinates, and refuses what the format cannot represent. It never resamples.
 - After import, xarrayrf never calls back into the format.
 
+NIfTI `from_header`/`open`, DICOM `from_datasets`/`from_enhanced`/`open`, and GeoTIFF
+`from_profile`/`open` accept `frame=None` or a frame/framed DataArray. A supplied frame
+explicitly overrides the imported identity through the shared adoption contract above,
+even a declared DICOM Frame of Reference UID or CRS authority. Metadata consistency checks
+within a source still apply; DICOM reports the override as `frame-override`, naming any
+discarded Frame of Reference UID. Note the two similar names: `frame=` (singular) is always the
+identity to adopt, while `frames=` is DICOM's multiframe selection and NGFF's mapping for reusing
+named systems.
+
 **File readers:** `xarrayrf.nifti.open(path, *, frame=None, template=None, xform="best",
 spatial_unit="mm", time=False, chunks="auto")`, `xarrayrf.dicom.open(paths, *,
-series_uid=None, frames=None, modality_lut=True, orientation_tolerance=1e-4,
+frame=None, series_uid=None, frames=None, modality_lut=True, orientation_tolerance=1e-4,
 slice_tolerance=0.01, chunks="auto")`, and `xarrayrf.ngff.open(store, *, group="",
 multiscale=None, level=None, chunks="auto")` each return one framed `DataArray`. Default
 pixels are lazy dask arrays. NIfTI uses nibabel's scaled proxy dtype and values. DICOM accepts
@@ -686,16 +727,16 @@ translation into each level's single intrinsic transform. This preserves time ca
 omits channel axes from geometry. Path-based transforms are unsupported. For 0.6, `open` binds
 the intrinsic system; additional transforms remain available through `from_multiscale`.
 
-**DICOM import:** `xarrayrf.dicom.from_datasets(datasets, *, orientation_tolerance=1e-4,
+**DICOM import:** `xarrayrf.dicom.from_datasets(datasets, *, frame=None, orientation_tolerance=1e-4,
 slice_tolerance=0.01) -> DicomGeometry` imports a classic single-frame stack, and
-`xarrayrf.dicom.from_enhanced(dataset, *, frames=None, orientation_tolerance=1e-4,
+`xarrayrf.dicom.from_enhanced(dataset, *, frames=None, frame=None, orientation_tolerance=1e-4,
 slice_tolerance=0.01) -> DicomGeometry` imports one enhanced multiframe object. `frames`
 selects frame indices forming one stack. Both consume metadata-only pydicom datasets and refuse
 duplicate positions. `DicomGeometry` is a frozen declaration with `dims`, `coords`, `transform`,
 `frame`, `order`, `patient_position`, `slice_intervals` and `report`. `order` maps sorted slices to
 input dataset or frame indices. The frame is declared as
 `("dicom-frame-of-reference", FrameOfReferenceUID)` (`xarrayrf.dicom.FRAME_OF_REFERENCE_NAMESPACE`)
-when the UID is present and is otherwise local; Patient Position is a result field, not defining frame context.
+when the UID is present and is otherwise anonymous; Patient Position is a result field, not defining frame context.
 
 `xarrayrf.dicom.to_dataarray(geometry, data) -> DataArray` takes a source pixel stack with slice
 axis 0 (`k`). For `from_datasets`, it has one slice per dataset in the supplied order. For
@@ -711,7 +752,7 @@ order. The report records orientation correction, slice-axis choice and missing 
 metadata. Quadruped orientation is unsupported.
 
 `xarrayrf.dicom.patient_frame(frame_of_reference_uid)` returns the shared LPS patient frame for
-a UID, or a fresh local frame when the UID is absent. Application readers can use it to frame
+a UID, or a fresh anonymous frame when the UID is absent. Application readers can use it to frame
 their own spatial stacks in the same patient world. `dicom.open` remains a single-stack reader;
 when several images occupy one slice position, an application-level reader must assemble the
 extra echo, diffusion or time dimension and frame each spatial stack.
@@ -719,11 +760,11 @@ extra echo, diffusion or time dimension and frame each spatial stack.
 `xarrayrf.dicom.equipment_transform(dataset, *, orientation_tolerance=1e-4) ->
 AffineTransform | None` imports an Image to Equipment Mapping Matrix, or returns `None` when it is
 absent. Its source is the dataset's LPS mm patient frame, declared by Frame of Reference UID when
-present and otherwise local. Its target is a fresh local equipment frame with unoriented `x`, `y`,
+present and otherwise anonymous. Its target is a fresh anonymous equipment frame with unoriented `x`, `y`,
 `z` axes in mm; its definition records `EquipmentCoordinateSystemIdentification` and available
 `Manufacturer` and `DeviceSerialNumber`. Only `ISOCENTER` and a finite rigid matrix with proper
 rotation and homogeneous last row are accepted. Equipment frames from separate datasets do not
-share an identity.
+share an identity: the equipment identifier names a type, not a unique instance.
 
 `xarrayrf.dicom.registrations(dataset, *, orientation_tolerance=1e-4) ->
 tuple[AffineTransform, ...]` imports one transform per Spatial Registration
@@ -754,9 +795,9 @@ definition `{"space": "MNI152", "variant": "unspecified"}`; code 3 similarly dec
 `("nifti-template", "Talairach")`. `template=name` declares `("templateflow", name)` with
 definition `{"space": name}` for a nonempty alphanumeric BIDS space label and selected code 2–5.
 Named and unnamed variants have distinct identities. `template=` cannot be combined with
-`frame=` or `time=True`; `frame=` also accepts a framed DataArray. Other codes mint local frames. `time=True`
-always mints a local frame unless `frame=` is supplied, since a spatial template does not declare
-a shared clock. The selected xform, codes and qfac appear in the report and in local frame
+`frame=` or `time=True`; `frame=` also accepts a framed DataArray. Other codes mint anonymous frames. `time=True`
+always mints an anonymous frame unless `frame=` is supplied, since a spatial template does not declare
+a shared clock. The selected xform, codes and qfac appear in the report and in anonymous frame
 definitions only. A supplied frame must be reachable through `coordinate_system_change` from a
 RAS view of that same identity. With `time=False`, a time dimension is a non-geometry coordinate derived from
 `toffset` and `pixdim[4]` (an integer index, reported, when `pixdim[4]` is not positive);
@@ -794,7 +835,7 @@ an unnamed axis or non-string unit is refused.
 
 With `store`, a named system's identity is `("ome-zarr", "store/group#quoted-name")`, omitting
 the group slash at the root. `store` has no trailing slash; `group` is relative and has no
-empty, `.` or `..` segments. Without `store`, frames are local; pass a mapping from
+empty, `.` or `..` segments. Without `store`, frames are anonymous; pass a mapping from
 `(group path, name)` to `ReferenceFrame` as `frames` to reuse them across imports. A path-only
 array endpoint
 uses centred cells (`sample_offset=0.5`) and unit `"1"`. All affine members, including rectangular
@@ -825,16 +866,16 @@ orientation outside the anatomical vocabulary, non-centred sample offsets, array
 other than `"1"`, and array-coordinate axis types. The v06 path-only array endpoint cannot retain
 those declarations.
 
-**GeoTIFF import:** `xarrayrf.geotiff.from_profile(profile, *, area_or_point="Area") ->
+**GeoTIFF import:** `xarrayrf.geotiff.from_profile(profile, *, frame=None, area_or_point="Area") ->
 GeoTiffGeometry` imports rasterio metadata without reading pixels. `GeoTiffGeometry` holds
 `dims`, `coords`, `transform`, `frame`, `report` and `nodata`. `to_dataarray(geometry, data)`
 binds pixels in `(band, row, column)` order; band is a non-geometry dimension with 1-based
-coordinates. `geotiff.open(path, *, bands=None, chunks="auto")` reads projected GeoTIFFs,
+coordinates. `geotiff.open(path, *, frame=None, bands=None, chunks="auto")` reads projected GeoTIFFs,
 with one independent windowed read per dask chunk, or eagerly with `chunks=None`.
 `bands` selects 1-based band indices. `nodata` is recorded in attrs but masks and scale/offset
 are not applied. `crs_frame(crs)` returns the frame for a pyproj or rasterio CRS. Exact
 authority codes share identity (`("epsg", code)` for EPSG); CRSs without an exact authority
-mint local frames containing WKT. Axis names and linear units come from pyproj. The affine
+mint anonymous frames containing WKT. Axis names and linear units come from pyproj. The affine
 locates rasterio pixel centres for both `AREA_OR_POINT=Area` and `Point`; Area declares centred
 cells, while Point declares point samples. Angular, compound and vertical CRSs are refused.
 

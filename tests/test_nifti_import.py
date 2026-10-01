@@ -158,12 +158,12 @@ def test_template_names_and_frame_override() -> None:
         from_header(source, template="not-valid")
 
 
-def test_template_coded_time_series_remain_acquisition_local() -> None:
+def test_template_coded_time_series_remain_acquisition_anonymous() -> None:
     source = header(shape=(4, 5, 6, 2), sform_code=4, unit_code=2 | 8)
     first = from_header(source, time=True)
     second = from_header(source, time=True)
     assert first.frame != second.frame
-    assert first.frame.identifier[0] == "xarrayrf.local"
+    assert first.frame.identifier[0] == "xarrayrf.anonymous"
     first_array = to_dataarray(first, np.zeros((4, 5, 6, 2)))
     second_array = to_dataarray(second, np.zeros((4, 5, 6, 2)))
     with pytest.raises(ValueError, match=r"conflicting indexes|incompatible"):
@@ -427,3 +427,14 @@ def test_to_dataarray_orders_coordinates_by_dimension() -> None:
     assert list(array.coords) == ["i", "j", "k", "t"]
     plane = to_dataarray(from_header(header(shape=(4, 5))), np.zeros((4, 5)))
     assert list(plane.coords) == ["i", "j", "k"]
+
+
+@pytest.mark.parametrize("code", [1, 2, 3, 4, 5])
+def test_import_classifies_unnamed_spatial_identity(code: int) -> None:
+    first = from_header(header(sform_code=code))
+    second = from_header(header(sform_code=code))
+    assert first.frame.is_anonymous == (code in (1, 2, 5))
+    if first.frame.is_anonymous:
+        assert first.frame != second.frame
+    else:
+        assert first.frame == second.frame

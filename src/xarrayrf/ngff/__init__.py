@@ -84,11 +84,11 @@ def to_dataarray(level: NgffLevel, data: DuckArray) -> xr.DataArray:
 def coordinate_system(
     cs: ct.CoordinateSystem | JsonObject, *, store: str | None = None, group: str = ""
 ) -> tuple[ReferenceFrame, Report]:
-    """Import a named v06 coordinate system as a local or store-resolved frame.
+    """Import a named v06 coordinate system as an anonymous or store-resolved frame.
 
     Args:
         cs: v06 model or equivalent JSON attributes.
-        store: Resolved URI without a trailing slash; omitted identities are local.
+        store: Resolved URI without a trailing slash; omitted identities are anonymous.
         group: Relative group path containing the system.
 
     Returns:
@@ -121,7 +121,7 @@ def transform(
         store: Optional resolved store URI.
         group: Relative group path.
         dims: Dimension names indexed by array path for path-only endpoints.
-        frames: Previously resolved local frames indexed by ``(group path, name)``.
+        frames: Previously resolved frames indexed by ``(group path, name)``.
 
     Returns:
         An affine transform and an import report; discrete identity axes are omitted.
@@ -163,7 +163,7 @@ def from_multiscale(
         dims: Optional dimension names keyed by dataset path.
         store: Optional resolved store URI.
         group: Relative group path.
-        frames: Previously resolved local frames.
+        frames: Previously resolved frames.
 
     Returns:
         The intrinsic frame, levels, other transforms and an import report.
@@ -275,7 +275,7 @@ def from_scene(
         systems: Coordinate systems of referenced images, keyed by image path.
         store: Optional resolved store URI.
         group: Relative scene group path.
-        frames: Previously resolved local image frames.
+        frames: Previously resolved image frames.
 
     Returns:
         Scene transforms in metadata order and an import report.

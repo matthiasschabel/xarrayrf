@@ -11,11 +11,14 @@ import numpy.typing as npt
 import xarray as xr
 from xarray.indexes import RangeIndex
 
+from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
 from ._coincidence import is_coincident
+from ._composite import compose
 from ._frame import ReferenceFrame
 from ._grid import Grid
 from ._lattice import Lattice
+from ._orientation import coordinate_system_change
 from ._positions import (
     Outside,
     check_position,
@@ -33,6 +36,44 @@ AXIS_DIM: Final = "axis"
 """Dimension that labels a point's axes in results returned by :class:`Geometry`."""
 
 _SOURCE_AXIS: Final = "__xarrayrf_source_axis__"
+
+
+def adopt_frame(
+    transform: SupportsPoints, other: ReferenceFrame | xr.DataArray, *, name: str = "other"
+) -> AffineTransform:
+    """Assert a shared world, composing its exact coordinate-system change when derivable.
+
+    ``name`` is the caller's parameter name, used in the type error.
+    """
+    if isinstance(other, xr.DataArray):
+        other = other.rf.reference_frame
+    if not isinstance(other, ReferenceFrame):
+        raise TypeError(f"{name} must be a ReferenceFrame or framed DataArray")
+    if not isinstance(transform, SupportsAffine):
+        raise ValueError("adopting a frame requires an affine coordinate transform")
+    if not isinstance(transform.target, ReferenceFrame):
+        raise ValueError("adopting a frame requires a ReferenceFrame target")
+    affine = (
+        transform
+        if isinstance(transform, AffineTransform)
+        else AffineTransform(
+            source=transform.source,
+            target=transform.target,
+            matrix=transform.matrix,
+            translation=transform.translation,
+        )
+    )
+    view = other.with_coordinate_system(transform.target.coordinate_system)
+    retargeted = affine.with_endpoints(target=view)
+    if view.coordinate_system == other.coordinate_system:
+        return retargeted.with_endpoints(target=other)
+    try:
+        change = coordinate_system_change(view, other)
+    except ValueError as error:
+        raise ValueError(f"cannot adopt frame: {error}") from error
+    result = compose(retargeted, change)
+    assert isinstance(result, AffineTransform)
+    return result
 
 
 def _sample_axes(array: xr.DataArray, axes: tuple[str, ...]) -> tuple[AxisSampling, ...]:

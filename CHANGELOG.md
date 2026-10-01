@@ -4,6 +4,15 @@
 
 ### Added
 
+- Anonymous reference frames with distinct persisted identities and visible repr markers.
+  Sources without a declared world now import as anonymous; deliberate local frames and
+  declared template, DICOM UID, NGFF store and CRS identities keep their existing meaning.
+- Shared frame adoption for `rf.assume_frame` and adapter `frame=`, including exact derivable
+  coordinate-system changes such as RAS to LPS. DICOM metadata/readers and GeoTIFF metadata/readers
+  now accept a frame or framed array override. Different-frame refusals identify anonymous
+  operands and name the applicable assumption/resampling remedy; adopting a world preserves
+  grid and declared-support checks. DICOM reports missing UIDs as `anonymous-frame`.
+
 - Anatomical grid operations: `anatomy.orientation_codes`, `reoriented` and `cardinal_grid`,
   with patient letters, RFC-4 tokens and DICOM display planes. Reorientation preserves samples
   and cells, including singleton reflections; cardinal targets cover exact source cell or

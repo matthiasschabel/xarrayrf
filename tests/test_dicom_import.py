@@ -316,17 +316,17 @@ def test_in_plane_shift_and_orientation_errors() -> None:
     assert_allclose(point(corrected), ORIGIN, rtol=0, atol=ATOL)
 
 
-def test_local_frame_patient_position_and_missing_thickness() -> None:
+def test_anonymous_frame_patient_position_and_missing_thickness() -> None:
     first, second = image(0), image(2, thickness=None)
     del first.FrameOfReferenceUID
     del second.FrameOfReferenceUID
     second.PatientPosition = "FFS"
     result = from_datasets([first, second])
-    assert result.frame.identifier[0] == "xarrayrf.local"
+    assert result.frame.identifier[0] == "xarrayrf.anonymous"
     assert result.patient_position is None
     assert result.slice_intervals is None
     assert {code for code, _ in result.report} >= {
-        "local-frame",
+        "anonymous-frame",
         "patient-position-disagree",
         "slice-thickness-missing",
     }
@@ -536,3 +536,96 @@ def test_imported_grid_anatomical_orientation(axis_aligned: bool) -> None:
     geometry = from_datasets(datasets)
     array = to_dataarray(geometry, np.zeros((3, 4, 5)))
     assert orientation_codes(array.rf.grid) == ("SPL" if axis_aligned else "ASL")
+
+
+@pytest.mark.parametrize("enhanced_input", [False, True])
+@pytest.mark.parametrize("uid", [None, "1.2.3.4"])
+@pytest.mark.parametrize("array_target", [False, True])
+def test_dicom_import_frame_override_adopts_complete_ras_declaration(
+    enhanced_input: bool,
+    uid: str | None,
+    array_target: bool,
+) -> None:
+    from xarrayrf import ReferenceFrame
+    from xarrayrf.anatomy import RAS, patient_coordinate_system
+
+    target = ReferenceFrame.declared(
+        ("synthetic", "shared"),
+        patient_coordinate_system(RAS, "mm"),
+        definition={"space": "asserted"},
+        context={"epoch": 1},
+    )
+    partner = to_dataarray(from_datasets([image(0), image(2)], frame=target), np.ones((2, 4, 5)))
+    other = partner if array_target else target
+    if enhanced_input:
+        source = enhanced([0.0, 2.0])
+        if uid is None:
+            del source.FrameOfReferenceUID
+        else:
+            source.FrameOfReferenceUID = uid
+        original = from_enhanced(source)
+        imported = from_enhanced(source, frame=other)
+    else:
+        datasets = [image(0), image(2)]
+        for dataset in datasets:
+            if uid is None:
+                del dataset.FrameOfReferenceUID
+            else:
+                dataset.FrameOfReferenceUID = uid
+        original = from_datasets(datasets)
+        imported = from_datasets(datasets, frame=other)
+    assert original.frame.is_anonymous == (uid is None)
+    assert imported.frame == target
+    assert imported.frame.definition == target.definition
+    assert imported.frame.context == target.context
+    assert_allclose(
+        imported.transform.matrix,
+        np.diag([-1.0, -1.0, 1.0]) @ original.transform.matrix,
+        rtol=0,
+        atol=ATOL,
+    )
+    assert_allclose(
+        imported.transform.translation,
+        original.transform.translation * [-1, -1, 1],
+        rtol=0,
+        atol=ATOL,
+    )
+    pixels = np.ones((2, 4, 5))
+    assumed = to_dataarray(original, pixels).rf.assume_frame(other)
+    assert imported.transform == assumed.rf.coordinate_transform
+
+
+@pytest.mark.parametrize("enhanced_input", [False, True])
+def test_dicom_import_rejects_underivable_override_and_unframed_array(enhanced_input: bool) -> None:
+    from xarrayrf import CoordinateSystem, ReferenceFrame
+
+    target = ReferenceFrame.local(CoordinateSystem(("x", "y", "z"), ("mm",) * 3))
+    error: type[Exception]
+    for other in (target, xr.DataArray([1]), "bad"):
+        if isinstance(other, ReferenceFrame):
+            error, message = ValueError, "cannot adopt frame.*oriented"
+        elif isinstance(other, xr.DataArray):
+            error, message = ValueError, "unframed"
+        else:
+            error, message = TypeError, "frame must be"
+        with pytest.raises(error, match=message):
+            if enhanced_input:
+                from_enhanced(enhanced([0.0, 2.0]), frame=other)  # type: ignore[arg-type]
+            else:
+                from_datasets([image(0), image(2)], frame=other)  # type: ignore[arg-type]
+
+
+def test_supplied_frame_is_reported_and_replaces_any_uid() -> None:
+    target = patient_frame("1.2")
+    anonymous = [image(0), image(2)]
+    for dataset in anonymous:
+        del dataset.FrameOfReferenceUID
+    for datasets, replaced in (
+        (anonymous, "the anonymous frame"),
+        ([image(0), image(2)], "FrameOfReferenceUID 1.2.3.4"),
+    ):
+        result = from_datasets(datasets, frame=target)
+        codes = dict(result.report)
+        assert result.frame == target
+        assert "anonymous-frame" not in codes
+        assert codes["frame-override"] == f"supplied frame replaces {replaced}"

@@ -12,6 +12,7 @@ import rasterio  # type: ignore[import-untyped]
 import xarray as xr
 
 from xarrayrf import AffineTransform, ArrayCoordinates, CoordinateSystem, ReferenceFrame
+from xarrayrf._geometry import adopt_frame
 from xarrayrf.native import (
     CoordinateSpec,
     DuckArray,
@@ -54,7 +55,7 @@ def crs_frame(crs: pyproj.CRS | rasterio.crs.CRS) -> ReferenceFrame:
         crs: Projected CRS with two linear axes.
 
     Returns:
-        Shared declared frame for an exact authority code, otherwise a new local frame.
+        Shared declared frame for an exact authority code, otherwise a new anonymous frame.
 
     Raises:
         TypeError: If crs is neither a pyproj nor rasterio CRS.
@@ -85,7 +86,7 @@ def crs_frame(crs: pyproj.CRS | rasterio.crs.CRS) -> ReferenceFrame:
     system = CoordinateSystem(axes, units, axis_types=("space", "space"))
     authority = parsed.to_authority(min_confidence=100)
     if authority is None:
-        return ReferenceFrame.local(system, definition={"crs": parsed.to_wkt()})
+        return ReferenceFrame.anonymous(system, definition={"crs": parsed.to_wkt()})
     name, code = authority
     return ReferenceFrame.declared(
         (name.lower(), code), system, definition={"crs": f"{name}:{code}"}
@@ -115,11 +116,17 @@ def _easting_northing_rows(crs: pyproj.CRS) -> tuple[int, int]:
     return rows[0], rows[1]
 
 
-def from_profile(profile: Mapping[str, Any], *, area_or_point: str = "Area") -> GeoTiffGeometry:
+def from_profile(
+    profile: Mapping[str, Any],
+    *,
+    frame: ReferenceFrame | xr.DataArray | None = None,
+    area_or_point: str = "Area",
+) -> GeoTiffGeometry:
     """Import projected GeoTIFF metadata without reading pixels.
 
     Args:
         profile: Rasterio profile with CRS, affine, width, height and band count.
+        frame: Frame or framed array to adopt, overriding the imported CRS identity.
         area_or_point: GDAL AREA_OR_POINT tag, ``Area`` or ``Point``.
 
     Returns:
@@ -146,7 +153,7 @@ def from_profile(profile: Mapping[str, Any], *, area_or_point: str = "Area") -> 
         raise TypeError("profile count, height and width must be integers")
     if any(size <= 0 for size in shape):
         raise ValueError(f"profile count, height and width must be positive, got {shape}")
-    frame = crs_frame(profile["crs"])
+    imported_frame = crs_frame(profile["crs"])
     x00, y00 = rasterio.transform.xy(affine, 0, 0, offset="center")
     source = ArrayCoordinates(
         ("row", "column"),
@@ -160,10 +167,14 @@ def from_profile(profile: Mapping[str, Any], *, area_or_point: str = "Area") -> 
     order = _easting_northing_rows(pyproj.CRS.from_user_input(profile["crs"]))
     transform = AffineTransform(
         source=source,
-        target=frame,
+        target=imported_frame,
         matrix=tuple(xy_rows[i] for i in order),
         translation=tuple(xy_translation[i] for i in order),
     )
+    if frame is not None:
+        transform = adopt_frame(transform, frame, name="frame")
+    assert isinstance(transform.target, ReferenceFrame)
+    frame = transform.target
     coords = {
         dim: index_coordinate(dim, size, start=1 if dim == "band" else 0)
         for dim, size in zip(("band", "row", "column"), shape, strict=True)

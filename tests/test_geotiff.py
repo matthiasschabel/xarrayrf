@@ -15,7 +15,7 @@ from numpy.testing import assert_allclose, assert_array_equal
 from rasterio.io import MemoryFile  # type: ignore[import-untyped]
 from rasterio.transform import Affine  # type: ignore[import-untyped]
 
-from xarrayrf import ArrayCoordinates, geotiff
+from xarrayrf import ArrayCoordinates, CoordinateSystem, geotiff
 
 
 @pytest.mark.parametrize("area_or_point", ["Area", "Point"])
@@ -72,7 +72,7 @@ def test_shared_epsg_identity_and_conflicting_crs_refusal() -> None:
         _ = arrays[0] + arrays[2]
 
 
-def test_local_wkt_and_axis_units() -> None:
+def test_anonymous_wkt_and_axis_units() -> None:
     crs = pyproj.CRS.from_proj4(
         "+proj=tmerc +lat_0=0 +lon_0=17 +k=0.9996 +x_0=500000 +y_0=0 "
         "+datum=WGS84 +units=us-ft +type=crs"
@@ -81,6 +81,7 @@ def test_local_wkt_and_axis_units() -> None:
     first = geotiff.crs_frame(crs)
     second = geotiff.crs_frame(crs)
     assert first != second
+    assert first.is_anonymous and second.is_anonymous
     assert first.definition["crs"] == crs.to_wkt()
     assert first.coordinate_system.units == ("US_survey_foot", "US_survey_foot")
     foot = pyproj.CRS.from_proj4("+proj=utm +zone=33 +datum=WGS84 +units=ft +type=crs")
@@ -304,3 +305,61 @@ def test_join_keeps_the_frame_and_concatenation_is_refused() -> None:
 def test_override_alignment_across_crs_is_refused() -> None:
     with pytest.raises(ValueError, match=r"frame|reference|conflict"):
         xr.align(_open_in_memory("EPSG:32633"), _open_in_memory("EPSG:32634"), join="override")
+
+
+@pytest.mark.parametrize("authority", [False, True])
+def test_geotiff_open_classifies_identity_and_accepts_shared_frame(
+    tmp_path: Path, authority: bool
+) -> None:
+    from xarrayrf import ReferenceFrame
+
+    crs = (
+        pyproj.CRS.from_epsg(32633)
+        if authority
+        else pyproj.CRS.from_proj4(
+            "+proj=tmerc +lat_0=0 +lon_0=17 +k=0.9996 +x_0=500000 +y_0=0 "
+            "+datum=WGS84 +units=m +type=crs"
+        )
+    )
+    path = tmp_path / "image.tif"
+    pixels = np.ones((1, 2, 3), dtype=np.uint8)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=3,
+        height=2,
+        count=1,
+        dtype="uint8",
+        crs=crs,
+        transform=Affine(2, 0, 100, 0, -3, 200),
+    ) as dataset:
+        dataset.write(pixels)
+    first, second = geotiff.open(path), geotiff.open(path)
+    assert first.rf.reference_frame.is_anonymous == (not authority)
+    if authority:
+        assert first.rf.reference_frame == second.rf.reference_frame
+    else:
+        assert first.rf.reference_frame != second.rf.reference_frame
+        with pytest.raises(ValueError, match=r"points match numerically.*alone suffices"):
+            _ = first + second
+    shared = geotiff.open(path, frame=first)
+    assert shared.rf.grid == first.rf.grid
+    assert_allclose((first + shared).compute(), 2 * pixels, rtol=0, atol=1e-12)
+    with rasterio.open(path) as dataset:
+        override = ReferenceFrame.local(
+            first.rf.reference_frame.coordinate_system, context={"epoch": 1}
+        )
+        geometry = geotiff.from_profile(dataset.profile, frame=override)
+        assert geometry.frame == override
+        assert geometry.frame.context == override.context
+        assert geometry.transform == first.rf.assume_frame(override).rf.coordinate_transform
+        with pytest.raises(TypeError, match="frame must be"):
+            geotiff.from_profile(dataset.profile, frame="bad")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="unframed"):
+            geotiff.from_profile(dataset.profile, frame=xr.DataArray([1]))
+        with pytest.raises(ValueError, match=r"cannot adopt frame.*unoriented axis"):
+            geotiff.from_profile(
+                dataset.profile,
+                frame=override.with_coordinate_system(CoordinateSystem(("a", "b"), ("m", "m"))),
+            )

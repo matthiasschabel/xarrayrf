@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from collections.abc import Mapping
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -303,3 +303,52 @@ def test_metadata_must_be_flat_finite_data() -> None:
         ReferenceFrame.local(PLANE, context={"epoch": float("nan")})
     with pytest.raises(TypeError, match="mapping"):
         ReferenceFrame.local(PLANE, definition=cast(Mapping[str, str], [("schema", "v1")]))
+
+
+def test_anonymous_identity_metadata_views_and_persistence() -> None:
+    from xarrayrf import decode, encode
+
+    frame = ReferenceFrame.anonymous(
+        PLANE,
+        role="world",
+        definition={"space": "unknown"},
+        context={"epoch": 1},
+        display={"label": "synthetic"},
+    )
+    assert frame.is_anonymous
+    assert frame.identifier[0] == "xarrayrf.anonymous"
+    assert frame != ReferenceFrame.anonymous(
+        PLANE, definition=frame.definition, context=frame.context
+    )
+    assert not ReferenceFrame.local(PLANE).is_anonymous
+    assert not patient_frame().is_anonymous
+    assert "anonymous=True" in repr(frame)
+    restored = decode(encode(frame))
+    assert restored == frame
+    assert hash(restored) == hash(frame)
+    assert restored.is_anonymous
+    view = frame.with_coordinate_system(PATIENT_AXES)
+    assert view.is_anonymous
+    assert view.is_equivalent_frame(frame)
+    assert view.definition == frame.definition
+    assert view.context == frame.context
+    assert view.display == frame.display
+    assert view.role == frame.role
+    assert (
+        ReferenceFrame.declared(
+            frame.identifier, PLANE, definition=frame.definition, context=frame.context
+        )
+        == frame
+    )
+
+
+@pytest.mark.parametrize("constructor", [ReferenceFrame.anonymous, ReferenceFrame.local])
+def test_minted_frames_validate_declarations(constructor: Any) -> None:
+    with pytest.raises(TypeError, match="coordinate_system must be"):
+        constructor("bad")
+    with pytest.raises(ValueError, match="role must be"):
+        constructor(PLANE, role="bad")
+    with pytest.raises(TypeError, match="definition"):
+        constructor(PLANE, definition={"nested": []})
+    with pytest.raises(ValueError, match="finite"):
+        constructor(PLANE, context={"epoch": float("nan")})

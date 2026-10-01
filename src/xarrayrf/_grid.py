@@ -395,9 +395,10 @@ class Grid:
 
     def __repr__(self) -> str:
         """Name the source axes, target frame, dimensions and sizes."""
+        state = ", anonymous=True" if self.frame.is_anonymous else ""
         return (
             f"Grid(source={self._transform.source.axes!r}, target={self.frame.identifier!r}, "
-            f"dims={self._dims!r}, sizes={dict(self.sizes)!r}, intervals={tuple(self._intervals)!r})"
+            f"dims={self._dims!r}, sizes={dict(self.sizes)!r}, intervals={tuple(self._intervals)!r}{state})"
         )
 
 

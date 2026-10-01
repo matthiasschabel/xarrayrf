@@ -137,7 +137,7 @@ def _frame(
         cache[key] = existing
         return existing
     if store is None:
-        result = ReferenceFrame.local(coordinate_system)
+        result = ReferenceFrame.anonymous(coordinate_system)
     else:
         location = "/".join(part for part in (store, group) if part)
         result = ReferenceFrame.declared(

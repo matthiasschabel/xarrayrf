@@ -18,6 +18,8 @@ from pydicom.dataset import Dataset
 from pydicom.errors import InvalidDicomError
 from pydicom.pixels import apply_modality_lut  # type: ignore[attr-defined]
 
+from xarrayrf import ReferenceFrame
+
 
 def _stored_dtype(ds: Dataset) -> np.dtype[Any]:
     bits = int(ds.BitsAllocated)
@@ -73,6 +75,7 @@ def _read_pixels(
 def open(
     paths: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
     *,
+    frame: ReferenceFrame | xr.DataArray | None = None,
     series_uid: str | None = None,
     frames: Sequence[int] | None = None,
     modality_lut: bool = True,
@@ -89,6 +92,7 @@ def open(
 
     Args:
         paths: Directory, file, or explicit sequence of files.
+        frame: Frame or framed array to adopt, overriding the imported identity.
         series_uid: SeriesInstanceUID to select when more than one exists.
         frames: Enhanced multiframe indices forming one stack.
         modality_lut: Apply rescale or modality LUT to pixels.
@@ -164,6 +168,7 @@ def open(
         geometry: DicomGeometry = from_enhanced(
             selected[0][1],
             frames=frames,
+            frame=frame,
             orientation_tolerance=orientation_tolerance,
             slice_tolerance=slice_tolerance,
         )
@@ -172,6 +177,7 @@ def open(
             raise ValueError("frames requires one enhanced multiframe file")
         geometry = from_datasets(
             [ds for _, ds in selected],
+            frame=frame,
             orientation_tolerance=orientation_tolerance,
             slice_tolerance=slice_tolerance,
         )

@@ -78,6 +78,8 @@ def test_equipment_present_and_absent() -> None:
         "anterior-to-posterior",
         "inferior-to-superior",
     )
+    assert transform.target.is_anonymous
+    assert not transform.source.is_anonymous
     assert transform.target.coordinate_system.axes == ("x", "y", "z")
     assert transform.target.coordinate_system.units == ("mm", "mm", "mm")
     assert transform.target.coordinate_system.orientation == (None, None, None)
@@ -90,16 +92,20 @@ def test_equipment_present_and_absent() -> None:
     second = equipment_transform(source)
     assert second is not None
     assert isinstance(second.target, ReferenceFrame)
+    assert second.target.is_anonymous
     assert not transform.target.is_equivalent_frame(second.target)
 
 
-def test_equipment_without_frame_uid_mints_local_patient_frame() -> None:
+def test_equipment_without_frame_uid_mints_anonymous_patient_frame() -> None:
     source = equipment(np.eye(4))
     del source.FrameOfReferenceUID
     transform = equipment_transform(source)
     assert transform is not None
     assert isinstance(transform.source, ReferenceFrame)
-    assert transform.source.identifier[0] == "xarrayrf.local"
+    assert transform.source.identifier[0] == "xarrayrf.anonymous"
+    assert transform.source.is_anonymous
+    assert isinstance(transform.target, ReferenceFrame)
+    assert transform.target.is_anonymous
 
 
 @pytest.mark.parametrize(

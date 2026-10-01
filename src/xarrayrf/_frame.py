@@ -16,12 +16,15 @@ from ._validation import (
 )
 
 LOCAL_NAMESPACE: Final = "xarrayrf.local"
-"""Identifier namespace stamped on minted reference-frame identities.
+"""Identifier namespace for deliberately created local reference frames.
 
 Only :meth:`ReferenceFrame.local` mints a value in it, and every call mints a new one.
 The namespace is not fenced off from :meth:`ReferenceFrame.declared`: re-adopting a
 persisted local identity is how a stored frame comes back as the same frame.
 """
+
+ANONYMOUS_NAMESPACE: Final = "xarrayrf.anonymous"
+"""Namespace for sources that supply geometry without a shared world identity."""
 
 type Role = Literal["world", "object"]
 
@@ -83,8 +86,8 @@ class ReferenceFrame:
     ) -> None:
         """Validate and freeze a reference-frame declaration.
 
-        Prefer :meth:`local` or :meth:`declared`, which make the identity decision
-        explicit. This constructor applies the same validation.
+        Prefer :meth:`local`, :meth:`anonymous` or :meth:`declared`, which make the
+        identity decision explicit. This constructor applies the same validation.
 
         Args:
             identifier: ``(namespace, value)`` naming a particular frame.
@@ -160,6 +163,36 @@ class ReferenceFrame:
         )
 
     @classmethod
+    def anonymous(
+        cls,
+        coordinate_system: CoordinateSystem,
+        *,
+        role: Role | None = None,
+        definition: Mapping[str, MetadataValue] | None = None,
+        context: Mapping[str, MetadataValue] | None = None,
+        display: Mapping[str, MetadataValue] | None = None,
+    ) -> ReferenceFrame:
+        """Mint a distinct identity for geometry whose source names no shared world.
+
+        Sharing the returned frame explicitly relates arrays. Persisted anonymous identities
+        can be restored with :meth:`declared`, just like local identities. Metadata arguments
+        and validation are the same as :meth:`local`.
+        """
+        return cls(
+            identifier=(ANONYMOUS_NAMESPACE, uuid.uuid4().hex),
+            coordinate_system=coordinate_system,
+            role=role,
+            definition=definition,
+            context=context,
+            display=display,
+        )
+
+    @property
+    def is_anonymous(self) -> bool:
+        """Whether this identity represents a source that names no shared world."""
+        return self._identifier[0] == ANONYMOUS_NAMESPACE
+
+    @classmethod
     def declared(
         cls,
         identifier: tuple[str, str],
@@ -178,10 +211,9 @@ class ReferenceFrame:
 
         Args:
             identifier: ``(namespace, value)`` naming a particular frame. Any namespace may
-                be adopted, including :data:`LOCAL_NAMESPACE`: re-adopting an identity that
-                :meth:`local` minted earlier states that a persisted frame is this same
-                frame. Only :meth:`local` mints new values, so adoption cannot collide with
-                a mint.
+                be adopted, including the local and anonymous namespaces: re-adopting an
+                identity that :meth:`local` or :meth:`anonymous` minted earlier states that
+                a persisted frame is this same frame. Minting always generates distinct values.
             coordinate_system: The axes this frame's coordinates are expressed in.
             role: Optional descriptive role.
             definition: Optional flat, data-only system declaration an adapter validated.
@@ -314,8 +346,9 @@ class ReferenceFrame:
 
     def __repr__(self) -> str:
         """Return an unambiguous representation naming identity and coordinate system."""
+        state = ", anonymous=True" if self.is_anonymous else ""
         role = f", role={self._role!r}" if self._role is not None else ""
         return (
             f"ReferenceFrame(identifier={self._identifier!r}, "
-            f"coordinate_system={self._coordinate_system!r}{role})"
+            f"coordinate_system={self._coordinate_system!r}{role}{state})"
         )

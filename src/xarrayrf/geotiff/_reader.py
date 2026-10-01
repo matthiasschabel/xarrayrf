@@ -13,6 +13,8 @@ import xarray as xr
 from dask import delayed  # type: ignore[attr-defined]
 from rasterio.windows import Window  # type: ignore[import-untyped]
 
+from xarrayrf import ReferenceFrame
+
 
 def _read_window(path: str, bands: tuple[int, ...], window: Window) -> np.ndarray[Any, Any]:
     with rasterio.open(path) as dataset:
@@ -32,7 +34,11 @@ def _tile_aligned_chunks(dataset: Any, bands: int) -> tuple[int, int, int]:
 
 
 def open(
-    path: str | os.PathLike[str], *, bands: Sequence[int] | None = None, chunks: Any = "auto"
+    path: str | os.PathLike[str],
+    *,
+    frame: ReferenceFrame | xr.DataArray | None = None,
+    bands: Sequence[int] | None = None,
+    chunks: Any = "auto",
 ) -> xr.DataArray:
     """Open a projected GeoTIFF as a framed DataArray.
 
@@ -41,6 +47,7 @@ def open(
 
     Args:
         path: Local or rasterio virtual filesystem path.
+        frame: Frame or framed array to adopt, overriding the imported CRS identity.
         bands: Optional sequence of 1-based band indices.
         chunks: Dask chunk specification; ``None`` reads eagerly. ``"auto"`` uses whole internal
             tiles (or strips), about 2048 pixels on a side, so a crop of a remote COG fetches
@@ -82,7 +89,9 @@ def open(
                 raise ValueError(f"bands must be distinct indices from 1 to {dataset.count}")
         profile = dataset.profile.copy()
         profile["count"] = len(selected)
-        geometry = from_profile(profile, area_or_point=dataset.tags().get("AREA_OR_POINT", "Area"))
+        geometry = from_profile(
+            profile, frame=frame, area_or_point=dataset.tags().get("AREA_OR_POINT", "Area")
+        )
         if chunks is None:
             pixels = dataset.read(selected)
         else:
