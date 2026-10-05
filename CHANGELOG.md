@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Local `ngff.open` paths now derive frame identity from the resolved absolute path,
+  including symlinks. Relative and absolute openings of one store agree, and identical
+  basenames in different directories no longer share a frame. Metadata-only `store=`
+  remains caller-resolved. Existing persisted raw-path identities are unchanged; an
+  explicit reader `frame=` can retain them when reopening.
+- Singleton sample matching now uses float64 roundoff rather than a `1e-9` relative
+  support window, preventing second-scale false matches at large coordinate origins.
+  Affine and built-in composite inverse allowances account for cancellation; lookup,
+  coincidence, and resampling share the tightened contract.
+- DICOM imports retain the original pixel-stack length in a defaulted `source_count`
+  field and reject missing or surplus source slices before selection or sorting.
+  Enhanced selections still consume the full original stack. Manually constructed
+  geometries with the default `None` retain selected-index validation; an explicit
+  positive integer count must contain every selected source index and participates in
+  dataclass equality.
+
 ### Changed
 
 - `AffineTransform` now takes `basis_vectors` keyed by source axis and a required

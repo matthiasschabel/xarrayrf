@@ -599,7 +599,7 @@ are read to validate offset agreement; sampling queries recheck agreement agains
   steps (local spacing), as ITK's coordinate tolerance is a fraction of spacing, so it is
   unit-independent. With affine transforms the check is exact and linear in the samples per
   dimension; otherwise every sample is checked in blocks. A single-sample dimension must agree
-  to rounding until declared cells give it a width. Cells, offsets and values are not compared.
+  to rounding; declared cells do not widen sample coincidence. Cells, offsets and values are not compared.
 
 Both fractional queries accept `outside="raise"` (refuse points outside the domain), `"nan"`
 (mark every component of an outside row as NaN) and `"extrapolate"` (extend beyond the domain
@@ -607,13 +607,22 @@ using each axis's outer step). `domain="samples"` bounds positions to `[0, n - 1
 `domain="cells"` extends to the outer declared interval bounds when present, and otherwise to
 the sample-offset edges. Interior gaps remain interpolated; overlaps are allowed. Single-sample
 cell-width refusal applies only without an interval. Extrapolation still validates the domain declaration. Forward and
-inverse queries round-trip on strictly monotonic axes with a determined transform inverse,
+inverse queries round-trip on strictly monotonic axes with a numerically accurate transform inverse,
 including extrapolated nonuniform positions: offsets `0, 2, 5, 9` map positions
 `-1, 0, 1.5, 4` to coordinates `-2, 0, 3.5, 13`. Retained scalars continue to refuse inverse
 lookup and coincidence because projection is a separate policy.
-In the samples domain, a singleton retains the coordinate matching tolerance
-`1e-9 * max(1, |v|)` and returns position zero for a match, with or without declared intervals.
-Its interval supplies no step for samples-domain fractional extrapolation.
+In the samples domain, a singleton returns position zero only for a match within float64
+roundoff, with or without declared intervals. The coordinate allowance is
+`8 * eps * max(1, |sample|, |query|)`. Affine inverses also account for the absolute terms before
+cancellation: `8 * eps * (K + 1) * (|M| @ |point| + |translation|)`, where `K` is the number of
+input axes and the coefficients are those of the inverse. For built-in composite inverses,
+these allowances propagate through affine members. A non-affine inverse member resets any
+accumulated allowance because its error-propagation scale is not declared. Such a mixed chain
+with large translations may fail to locate its own singleton sample; no scale preservation
+is guessed. Non-affine providers use the coordinate allowance and are responsible for their
+inverse's numerical accuracy; affine providers should expose `SupportsAffine`. This is a rounding
+allowance, not an origin-relative physical support window. An interval supplies no step for
+samples-domain fractional extrapolation.
 
 ## Resampling
 
@@ -806,7 +815,7 @@ orientation_tolerance=1e-4, slice_tolerance=0.01) -> DicomGeometry` imports one 
 multiframe object. `frame_indices` selects the zero-based indices of the frames forming one
 stack. Both consume metadata-only pydicom datasets and refuse
 duplicate positions. `DicomGeometry` is a frozen declaration with `dims`, `coords`, `transform`,
-`frame`, `order`, `patient_position`, `slice_intervals` and `report`. `order` maps sorted slices to
+`frame`, `order`, `patient_position`, `slice_intervals`, `report` and `source_count`. `order` maps sorted slices to
 input dataset or frame indices. The frame is declared as
 `("dicom-frame-of-reference", FrameOfReferenceUID)` (`xarrayrf.dicom.FRAME_OF_REFERENCE_NAMESPACE`)
 when the UID is present and is otherwise anonymous; Patient Position is a result field, not defining frame context.
@@ -815,7 +824,13 @@ when the UID is present and is otherwise anonymous; Patient Position is a result
 axis 0 (`k`). For `from_datasets`, it has one slice per dataset in the supplied order. For
 `from_enhanced`, it is the full pixel array in original frame order, including unselected frames.
 The function applies `order` before binding and attaches `slice_intervals` to the slice source
-axis when present, including single-slice thickness in the cells domain.
+axis when present, including single-slice thickness in the cells domain. Imported geometry
+retains the exact original stack length as `source_count` and rejects both missing and surplus
+source slices before applying `order`. Enhanced selections still require the full original
+stack, not just the selected frames. The new field defaults to `None` for compatibility with
+manually constructed `DicomGeometry` objects; those retain minimum selected-index validation.
+An explicit count must be a positive integer, contain every selected source index, and
+participates in dataclass equality.
 
 Dimensions are `(k, j, i)`. Uniform stacks have an index `k`; nonuniform and single-slice
 stacks carry a `slice_offset` coordinate in mm on dimension `k`. `slice_intervals` contains each
@@ -908,7 +923,15 @@ an unnamed axis or non-string unit is refused.
 `NgffLevel` in its declared dimension order.
 
 With `store`, a named system's identity is `("ome-zarr", "store/group#quoted-name")`, omitting
-the group slash at the root. `store` has no trailing slash; `group` is relative and has no
+the group slash at the root. Metadata-only `store=` is a caller-resolved URI or canonical
+absolute filesystem path; it is used verbatim, without filesystem access or working-directory
+resolution. `ngff.open` resolves local paths and symlinks to a bare absolute filesystem path
+before deriving identity. Different spellings of one local store therefore share a frame;
+the same relative basename in different directories does not. URLs retain their supplied
+identity spelling apart from the trailing slash. To reuse a reader frame through
+`resolved_frames`, supply that same resolved absolute path as `store`. Previously persisted
+raw-path identities are not rewritten: reopen with an explicit `frame=` if their identity must
+be retained. `store` has no trailing slash; `group` is relative and has no
 empty, `.` or `..` segments. Without `store`, frames are anonymous; pass a mapping from
 `(group path, name)` to `ReferenceFrame` as `resolved_frames` to reuse them across imports. A path-only
 array endpoint

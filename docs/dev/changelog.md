@@ -2,6 +2,35 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-05] — QA of audit stage 1 identity, singleton support and DICOM cardinality
+
+- **Problem**: Local NGFF reader identities depended on path spelling, allowing different
+  stores to share a frame. Singleton matching admitted a one-second mismatch at epoch-scale
+  coordinates. DICOM binding silently discarded surplus source slices and could accept an
+  incomplete original enhanced stack when all selected indices were present.
+- **Resolution**: Readers use resolved absolute local paths, including symlinks; metadata-only
+  identities remain caller-resolved. Singleton matching uses float64 rounding allowances,
+  with affine cancellation and built-in composite propagation accounted for. DICOM importers
+  preserve the original source count and validate pixel-stack shape before gathering slices.
+  Manual geometries with unknown count retain their existing index-based contract. QA found
+  no additional functional defect. The non-affine inverse allowance limitation is documented;
+  audit stages 2–5 remain pending.
+- **Verification**: The original source snapshot fails eight selected regression cases
+  (including the tightened DICOM shape-error contract), while six protective cases pass.
+  The current focused suite has 178 passing tests and five expected stock-xarray failures.
+  Four independent mixed-axis probes cover affine/composite singleton round trips, sign
+  changes, empty lookup, coincidence, resampling and outside fill. Full suites: stock xarray
+  1,638 passed and 47 expected failures; patched xarray 1,685 passed. Both retain three existing
+  dependency warnings. Ruff lint/format, mypy (81 source files) and whitespace checks pass.
+- **Files affected**: `src/xarrayrf/ngff/_reader.py`, `src/xarrayrf/ngff/__init__.py`,
+  `src/xarrayrf/_sampling.py`, `src/xarrayrf/_positions.py`, `src/xarrayrf/_coincidence.py`,
+  `src/xarrayrf/dicom/__init__.py`; `tests/test_ngff_open.py`, `tests/test_intervals.py`,
+  `tests/test_dicom_import.py`; `CHANGELOG.md`, `docs/core_interface.md`, and the
+  [audit plan](codebase_audit_plan.md), [plan refinement](codebase_audit_refinement.md) and
+  [implementation review](stage1_implementation_review.md) records.
+- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); prior implementation
+  reviews by Claude Opus 5.5 (`claude-opus-5-5`).
+
 ## [2026-10-04] — QA of named-basis affine construction
 
 - **Problem**: Matrix-only construction left source-column and target-component ordering
