@@ -88,7 +88,8 @@ def coordinate_system(
 
     Args:
         cs: v06 model or equivalent JSON attributes.
-        store: Resolved URI without a trailing slash; omitted identities are anonymous.
+        store: Caller-resolved URI or absolute filesystem path without a trailing slash;
+            omitted identities are anonymous. No path resolution is performed here.
         group: Relative group path containing the system.
 
     Returns:
@@ -118,7 +119,8 @@ def transform(
     Args:
         t: v06 transform model or equivalent JSON attributes.
         systems: Named coordinate systems in the current group.
-        store: Optional resolved store URI.
+        store: Optional caller-resolved URI or absolute filesystem path, without a trailing
+            slash. No path resolution is performed here.
         group: Relative group path.
         dims: Dimension names indexed by array path for path-only endpoints.
         resolved_frames: Frames resolved by an earlier import, keyed by ``(group path, name)``,
@@ -164,7 +166,8 @@ def from_multiscale(
         ms: v06 multiscale model or equivalent JSON attributes.
         shapes: Array shapes keyed by dataset path; no array is read.
         dims: Optional dimension names keyed by dataset path.
-        store: Optional resolved store URI.
+        store: Optional caller-resolved URI or absolute filesystem path, without a trailing
+            slash. No path resolution is performed here.
         group: Relative group path.
         resolved_frames: Frames resolved by an earlier import, keyed by ``(group path, name)``.
 
@@ -276,7 +279,8 @@ def from_scene(
     Args:
         scene: v06 scene attributes or equivalent JSON attributes.
         systems: Coordinate systems of referenced images, keyed by image path.
-        store: Optional resolved store URI.
+        store: Optional caller-resolved URI or absolute filesystem path, without a trailing
+            slash. No path resolution is performed here.
         group: Relative scene group path.
         resolved_frames: Image frames resolved by an earlier import, keyed by ``(group path, name)``.
 

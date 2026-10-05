@@ -14,7 +14,7 @@ from dask.callbacks import Callback
 from numpy.testing import assert_allclose
 
 from xarrayrf import CoordinateSystem, ReferenceFrame, anatomy, coordinate_system_change
-from xarrayrf.ngff import open
+from xarrayrf.ngff import from_multiscale, open
 
 AXES = [
     {"name": "t", "type": "time", "unit": "second"},
@@ -157,6 +157,53 @@ def make_store(tmp_path: Path, version: str) -> str:
         }
         group.attrs["ome"] = {"version": "0.6", "multiscales": [scale]}
     return path
+
+
+def test_relative_store_names_do_not_share_frame_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_path = Path(make_store(tmp_path / "first", "0.6"))
+    second_path = Path(make_store(tmp_path / "second", "0.6"))
+    monkeypatch.chdir(first_path.parent)
+    first = open(first_path.name)
+    monkeypatch.chdir(second_path.parent)
+    second = open(second_path.name)
+    assert first.rf.reference_frame != second.rf.reference_frame
+    with pytest.raises(ValueError, match="different reference frames"):
+        _ = first + second
+
+
+def test_local_path_spellings_share_identity_and_allow_frame_adoption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = Path(make_store(tmp_path, "0.6"))
+    link = tmp_path / "alias.zarr"
+    link.symlink_to(path, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+    relative = open(path.name)
+    absolute = open(path)
+    aliased = open(link)
+    assert relative.rf.reference_frame == absolute.rf.reference_frame
+    assert aliased.rf.reference_frame == absolute.rf.reference_frame
+    assert absolute.rf.reference_frame.identifier == ("ome-zarr", f"{path.resolve()}#intrinsic")
+    assert open(path, frame=relative).rf.reference_frame == relative.rf.reference_frame
+
+
+def test_metadata_import_reuses_canonical_reader_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = Path(make_store(tmp_path, "0.6"))
+    monkeypatch.chdir(tmp_path)
+    image = open(path.name)
+    root = zarr.open_group(path, mode="r")
+    metadata = cast(dict[str, Any], root.attrs["ome"])["multiscales"][0]
+    imported = from_multiscale(
+        metadata,
+        shapes={name: cast(zarr.Array[Any], root[name]).shape for name in ("0", "1")},
+        store=str(path.resolve()),
+        resolved_frames={("", "intrinsic"): image.rf.reference_frame},
+    )
+    assert imported.frame == image.rf.reference_frame
 
 
 @pytest.mark.parametrize("version", ["0.4", "0.5", "0.6"])

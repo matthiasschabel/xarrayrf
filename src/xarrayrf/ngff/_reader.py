@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import dask.array as da
@@ -72,6 +73,7 @@ def open(
     For v06, the array is bound to its intrinsic system. Additional transforms
     remain available through ``from_multiscale(...).transforms``. v04/v05 are
     translated into that same intrinsic system; path-based transforms are refused.
+    Local paths identify the store by its resolved absolute path, including symlinks.
 
     Args:
         store: Local path or store accepted by ``zarr.open_group``.
@@ -118,8 +120,8 @@ def open(
         path = os.fspath(store)
         if not os.path.exists(path):
             raise FileNotFoundError(path)
-        store_arg = path
-        identity = path.rstrip("/")
+        store_arg = str(Path(path).resolve())
+        identity = store_arg
     else:
         store_arg = store
         identity = None
