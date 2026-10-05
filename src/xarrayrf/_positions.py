@@ -13,6 +13,7 @@ import numpy as np
 import numpy.typing as npt
 
 from ._array_coordinates import ArrayCoordinates
+from ._composite import CompositeTransform
 from ._lattice import Lattice
 from ._sampling import (
     DOMAINS,
@@ -20,6 +21,7 @@ from ._sampling import (
     AxisSampling,
     Domain,
     Sampling,
+    affine_roundoff,
     cell_extent,
     coordinate_to_position,
     position_to_coordinate,
@@ -119,9 +121,19 @@ def locator(
         )
     ]
     inverse = check_transform(transform.inverse())
+    needs_roundoff = any(
+        sampling.values.size == 1 and singleton_step(sampling, domain) is None
+        for sampling, _, _ in order
+    )
 
     def locate(points: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        coordinates = transform_points(inverse, real_float_array(points, field="points"))
+        values = real_float_array(points, field="points")
+        roundoff: npt.NDArray[np.float64] | None
+        if needs_roundoff:
+            coordinates, roundoff = _transform_with_roundoff(inverse, values, np.zeros_like(values))
+        else:
+            coordinates = transform_points(inverse, values)
+            roundoff = None
         positions = np.stack(
             [
                 coordinate_to_position(
@@ -130,6 +142,7 @@ def locator(
                     singleton_step(sampling, domain),
                     extent,
                     extrapolate=extrapolate,
+                    roundoff=0.0 if roundoff is None else roundoff[..., axis],
                 )
                 for sampling, axis, extent in order
             ],
@@ -140,6 +153,30 @@ def locator(
         return positions
 
     return locate
+
+
+def _transform_with_roundoff(
+    transform: SupportsPoints,
+    points: npt.NDArray[np.float64],
+    incoming: npt.NDArray[np.float64],
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Propagate affine rounding allowances through an inverse chain.
+
+    A non-affine provider resets incoming allowances because it declares no error-propagation
+    scale; its singleton matches use the returned coordinate's magnitude instead.
+    """
+    if type(transform) is CompositeTransform:
+        for member in transform.transforms:
+            points, incoming = _transform_with_roundoff(member, points, incoming)
+        return points, incoming
+    coordinates = transform_points(transform, points)
+    if isinstance(transform, SupportsAffine):
+        roundoff = incoming @ np.abs(transform.matrix).T + affine_roundoff(
+            transform.matrix, transform.translation, points
+        )
+    else:
+        roundoff = np.zeros_like(coordinates)
+    return coordinates, roundoff
 
 
 def sample_columns(

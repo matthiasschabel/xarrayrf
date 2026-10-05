@@ -9,7 +9,7 @@ import numpy.typing as npt
 
 from ._orientation import coordinate_system_change
 from ._positions import located_axes, locator, sample_columns
-from ._sampling import POSITION_SLACK, Sampling, coordinate_to_position
+from ._sampling import POSITION_SLACK, Sampling, affine_roundoff, coordinate_to_position
 from ._transform import SupportsAffine, SupportsInverse, SupportsPoints
 
 COINCIDENCE_BLOCK_POINTS: Final = 1 << 20
@@ -95,6 +95,9 @@ def _affine_within(
     weights = inverse.matrix @ matrix
     base = inverse.matrix @ translation + inverse.translation
     samplings = other.axes
+    source_scale = np.array([np.abs(axis.values).max(initial=0.0) for axis in samplings])
+    frame_scale = np.abs(matrix) @ source_scale + np.abs(translation)
+    roundoff = affine_roundoff(inverse.matrix, inverse.translation, frame_scale)
     for sampling, row, _ in located_axes(geometry):
         dim = sampling.dim
         assert dim is not None
@@ -117,7 +120,11 @@ def _affine_within(
         expected = np.arange(size, dtype=np.float64)
         for extreme in others:
             positions = coordinate_to_position(
-                sampling.values, constant + extreme + along, sampling.step, (tolerance, tolerance)
+                sampling.values,
+                constant + extreme + along,
+                sampling.step,
+                (tolerance, tolerance),
+                roundoff=float(roundoff[row]),
             )
             if np.isnan(positions).any():
                 return False

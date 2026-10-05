@@ -9,6 +9,7 @@ import warnings
 from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 import xarray as xr
 from numpy.testing import assert_allclose, assert_array_equal
@@ -16,6 +17,7 @@ from numpy.testing import assert_allclose, assert_array_equal
 from xarrayrf import (
     AffineTransform,
     ArrayCoordinates,
+    CompositeTransform,
     CoordinateSystem,
     Geometry,
     Grid,
@@ -23,6 +25,7 @@ from xarrayrf import (
     ReferenceFrame,
     decode,
     encode,
+    resample,
 )
 from xarrayrf.native import frame_array, grid_coordinates
 
@@ -152,9 +155,11 @@ def test_singleton_samples_domain_keeps_coordinate_matching_tolerance(declared: 
     slab = grid([1000], width=1)
     value = slab if declared else Grid(slab.transform, slab.coordinates)
     array = frame_array(np.array([7]), value)
-    point = [[1000 + 5e-7]]  # Within 1e-9 of the sample's magnitude, beyond 1e-9 of its width.
+    point = [[np.nextafter(1000.0, np.inf)]]
     for query in (value, array.rf.geometry):
         assert_allclose(query.positions_at(point), [[0]], rtol=0, atol=ATOL)
+        with pytest.raises(ValueError, match="outside"):
+            query.positions_at([[1000 + 5e-7]])
         with pytest.raises(ValueError, match="single sample"):
             query.points_at([[0.25]], outside="extrapolate")
     coordinates = array.rf.unframe().assign_coords(array.rf.geometry.frame_coordinates())
@@ -162,6 +167,99 @@ def test_singleton_samples_domain_keeps_coordinate_matching_tolerance(declared: 
         Z=xr.DataArray(np.asarray(point)[:, 0], dims="point"), method="nearest"
     )
     assert_array_equal(result.values, [7])
+
+
+def test_singleton_at_epoch_scale_rejects_a_one_second_mismatch() -> None:
+    frame = ReferenceFrame.local(CoordinateSystem(("T",), ("s",)))
+    transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("t",), ("s",)), target=frame, matrix=[[1]], translation=[0]
+    )
+    original = Grid(transform, {"t": ("t", [1_800_000_000.0])})
+    later = Grid(transform, {"t": ("t", [1_800_000_001.0])})
+    array = frame_array(np.array([42.0]), original)
+    for query in (original, array.rf.geometry):
+        assert np.isnan(query.positions_at(later.points(), outside="nan")).all()
+        with pytest.raises(ValueError, match="outside"):
+            query.positions_at(later.points())
+    assert not original.is_coincident(later)
+    assert not array.rf.geometry.is_coincident(frame_array(np.array([0.0]), later).rf.geometry)
+    assert np.isnan(resample(array.rf.geometry, later).values).all()
+
+
+@pytest.mark.parametrize("composite", [False, True])
+@pytest.mark.parametrize("sample", [0.1, 1000.0])
+def test_singleton_round_trip_survives_large_translation(composite: bool, sample: float) -> None:
+    frame = ReferenceFrame.local(CoordinateSystem(("Z",), ("mm",)))
+    affine = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("z",), ("mm",)),
+        target=frame,
+        matrix=[[0.1234567]],
+        translation=[0 if composite else 1e9],
+    )
+    transform = (
+        CompositeTransform(
+            affine,
+            AffineTransform.from_matrix(
+                source=frame, target=frame, matrix=[[1]], translation=[1e9]
+            ),
+        )
+        if composite
+        else affine
+    )
+    value = Grid(transform, {"z": ("slice", [sample])})
+    array = frame_array(np.array([7.0]), value)
+    for query in (value, array.rf.geometry):
+        assert_allclose(query.positions_at(value.points()), [[0]], rtol=0, atol=ATOL)
+    assert value.is_coincident(value)
+    assert_allclose(resample(array.rf.geometry, value), [7.0], rtol=0, atol=ATOL)
+
+
+class _PointIdentity:
+    def __init__(
+        self,
+        source: ArrayCoordinates | ReferenceFrame,
+        target: ArrayCoordinates | ReferenceFrame,
+    ) -> None:
+        self.source = source
+        self.target = target
+
+    def transform_point(self, points: npt.ArrayLike) -> npt.NDArray[np.float64]:
+        return np.asarray(points, dtype=np.float64)
+
+    def inverse(self) -> _PointIdentity:
+        return _PointIdentity(self.target, self.source)
+
+
+def test_singleton_non_affine_provider_uses_coordinate_roundoff() -> None:
+    frame = ReferenceFrame.local(CoordinateSystem(("T",), ("s",)))
+    transform = _PointIdentity(ArrayCoordinates(("t",), ("s",)), frame)
+    sample = 1_800_000_000.0
+    value = Grid(transform, {"t": ("t", [sample])})
+    array = frame_array(np.array([42.0]), value)
+    for query in (value, array.rf.geometry):
+        assert_allclose(
+            query.positions_at([[np.nextafter(sample, np.inf)]]), [[0]], rtol=0, atol=ATOL
+        )
+        assert np.isnan(query.positions_at([[sample + 1]], outside="nan")).all()
+    assert value.is_coincident(value)
+    assert_allclose(resample(array.rf.geometry, value), [42.0], rtol=0, atol=ATOL)
+
+
+def test_singleton_lookup_respects_composite_subclass_point_mapping() -> None:
+    class ShiftedComposite(CompositeTransform):
+        def __init__(self, affine: AffineTransform, offset: float) -> None:
+            super().__init__(affine)
+            self.affine = affine
+            self.offset = offset
+
+        def transform_point(self, points: npt.ArrayLike) -> npt.NDArray[np.float64]:
+            return super().transform_point(points) + self.offset
+
+        def inverse(self) -> ShiftedComposite:
+            return ShiftedComposite(self.affine.inverse(), -self.offset)
+
+    value = Grid(ShiftedComposite(mapping(), 1000.0), {"z": ("slice", [5.0])})
+    assert_allclose(value.positions_at(value.points()), [[0]], rtol=0, atol=ATOL)
 
 
 @pytest.mark.parametrize(

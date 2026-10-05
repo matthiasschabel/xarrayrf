@@ -34,11 +34,12 @@ Round-trip arithmetic through a frame puts an edge sample a few ulps beyond its 
 this absorbs that without accepting any genuinely outside point.
 """
 
-SINGLE_SAMPLE_TOLERANCE = 1e-9
-"""Relative tolerance for matching a coordinate to a dimension's single sample.
+SINGLE_SAMPLE_TOLERANCE = 8 * float(np.finfo(np.float64).eps)
+"""Rounding allowance for singleton matching, in multiples of coordinate magnitude.
 
-With one sample there is no step to measure a position slack against, so the match is on the
-coordinate value itself, relative to its magnitude (and absolute below 1).
+Eight epsilons cover the observed few-ulp affine round trips. Inverse evaluation also supplies
+an allowance based on its intermediate terms, so cancellation does not require a broad
+relative support window.
 """
 
 EXACT_STEP_TOLERANCE = 1e-12
@@ -201,6 +202,17 @@ def cell_extent(sampling: AxisSampling, offset: float | None) -> tuple[float, fl
     return 1.0 - offset, offset
 
 
+def affine_roundoff(
+    matrix: npt.NDArray[np.float64],
+    translation: npt.NDArray[np.float64],
+    points: npt.NDArray[np.float64],
+) -> npt.NDArray[np.float64]:
+    """Estimate affine evaluation roundoff from absolute terms before cancellation."""
+    scale = np.abs(points) @ np.abs(matrix).T + np.abs(translation)
+    roundoff: npt.NDArray[np.float64] = SINGLE_SAMPLE_TOLERANCE * (matrix.shape[1] + 1) * scale
+    return roundoff
+
+
 def coordinate_to_position(
     values: npt.NDArray[np.float64],
     coordinates: npt.NDArray[np.float64],
@@ -208,6 +220,7 @@ def coordinate_to_position(
     extent: tuple[float, float] = (0.0, 0.0),
     *,
     extrapolate: bool = False,
+    roundoff: npt.NDArray[np.float64] | float = 0.0,
 ) -> npt.NDArray[np.float64]:
     """Invert one dimension's coordinate values: fractional positions, NaN outside.
 
@@ -225,7 +238,8 @@ def coordinate_to_position(
         raise ValueError("an empty coordinate has no positions to locate")
     before, after = extent
     if size == 1 and step is None:
-        tolerance = SINGLE_SAMPLE_TOLERANCE * max(1.0, abs(float(values[0])))
+        scale = np.maximum(1.0, np.maximum(abs(float(values[0])), np.abs(coordinates)))
+        tolerance = np.maximum(SINGLE_SAMPLE_TOLERANCE * scale, roundoff)
         return np.where(np.abs(coordinates - values[0]) <= tolerance, 0.0, np.nan)
     if step is None:
         step = uniform_step(values, tolerance=EXACT_STEP_TOLERANCE)
