@@ -36,25 +36,32 @@ import xarray as xr
 import xarrayrf as xrf
 import xarrayrf.native  # registers the .rf accessor
 
-# A 2-D frame in millimetres, and the affine placing each (row, column) sample in it.
+# A 2-D frame in millimetres, and the affine placing each (j, i) sample in it.
 stage = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("mm", "mm")))
 pixel_to_stage = xrf.AffineTransform(
-    source=xrf.ArrayCoordinates(("row", "column"), ("1", "1")),
+    source=xrf.ArrayCoordinates(("j", "i"), ("1", "1")),
     target=stage,
-    matrix=((0.0, 0.5), (0.5, 0.0)),  # 0.5 mm pixels; rows run along y
+    target_axes=("x", "y"),
+    basis_vectors={"j": (0.0, 0.5), "i": (0.5, 0.0)},  # 0.5 mm pixels
     translation=(10.0, 20.0),
 )
 image = xr.DataArray(
     np.arange(12.0).reshape(3, 4),
-    dims=("row", "column"),
-    coords={"row": np.arange(3), "column": np.arange(4)},
+    dims=("j", "i"),
+    coords={"j": np.arange(3), "i": np.arange(4)},
 )
-framed = image.rf.frame(pixel_to_stage, dims=("row", "column"))
+framed = image.rf.frame(pixel_to_stage, dims=("j", "i"))
 
-crop = (framed * 2).isel(column=slice(1, 3))  # ordinary xarray operations
-crop.rf.geometry.point_at(row=0, column=0)  # x=10.5, y=20.0: the crop's first sample
+crop = (framed * 2).isel(i=slice(1, 3))  # ordinary xarray operations
+crop.rf.geometry.point_at(j=0, i=0)  # x=10.5, y=20.0: the crop's first sample
 crop.rf.resample_to(framed)  # back onto the full grid, still framed
 ```
+
+Each named vector says how the frame coordinates change for a unit increase in that source
+coordinate. Its components and the translation follow the explicitly asserted `target_axes`
+order, which must match the frame. Index names do not imply physical directions. If you
+already have coefficients, use `AffineTransform.from_matrix(source=..., target=...,
+matrix=..., translation=...)`; matrix rows follow target axes and columns follow source axes.
 
 Adding `framed` to an array framed in a different reference frame raises a `ValueError` that
 names both frames and suggests resampling with an explicit transform, or `rf.assume_frame` if
@@ -132,7 +139,8 @@ patient = xrf.ReferenceFrame.local(anatomy.patient_coordinate_system(anatomy.LPS
 index_to_patient = xrf.AffineTransform(
     source=xrf.ArrayCoordinates(("k", "j", "i"), ("1", "1", "1"), sample_offset=(0.5, 0.5, 0.5)),
     target=patient,
-    matrix=[[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [3.0, 0.0, 0.0]],  # columns: k, j, i
+    target_axes=("x", "y", "z"),
+    basis_vectors={"k": (0.0, 0.0, 3.0), "j": (0.0, 1.0, 0.0), "i": (1.0, 0.0, 0.0)},
     translation=[-2.5, -2.0, 0.0],
 )
 k = np.arange(4)
@@ -180,7 +188,7 @@ the same space as anything else.
 def acquisition() -> xr.DataArray:
     """Stands in for nifti.open(...) on a file that names no space."""
     frame = xrf.ReferenceFrame.anonymous(anatomy.patient_coordinate_system(anatomy.RAS, "mm"))
-    to_frame = xrf.AffineTransform(
+    to_frame = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("i", "j", "k"), ("1", "1", "1")),
         target=frame,
         matrix=np.eye(3),

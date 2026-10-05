@@ -30,7 +30,7 @@ from xarrayrf import (
 
 @pytest.fixture
 def framed() -> xr.DataArray:
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("y", "x"), ("1", "1")),
         target=ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm"))),
         matrix=np.array([[2.0, 0.5], [0.0, 3.0]]),
@@ -107,7 +107,7 @@ def test_frame_refuses_an_encoded_binding_left_in_attrs(framed: xr.DataArray) ->
 
 def test_unframe_drops_a_stale_encoded_binding(framed: xr.DataArray) -> None:
     old = framed.rf.encode().attrs["xarrayrf_binding"]
-    other = AffineTransform(
+    other = AffineTransform.from_matrix(
         source=framed.rf.coordinate_transform.source,
         target=framed.rf.reference_frame,
         matrix=np.eye(2),
@@ -125,7 +125,7 @@ def test_unframe_drops_a_stale_encoded_binding(framed: xr.DataArray) -> None:
 
 def test_resample_to_does_not_carry_a_stale_encoded_binding(framed: xr.DataArray) -> None:
     pytest.importorskip("scipy", minversion="1.18")
-    other = AffineTransform(
+    other = AffineTransform.from_matrix(
         source=framed.rf.coordinate_transform.source,
         target=framed.rf.reference_frame,
         matrix=np.eye(2),

@@ -113,7 +113,7 @@ def _measure(
 def run() -> dict[str, object]:
     """Run the fixed stage-3 matrix and return machine-readable observations."""
     frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("y", "x"), ("1", "1")),
         target=frame,
         matrix=np.eye(2),
@@ -128,7 +128,7 @@ def run() -> dict[str, object]:
     raw = raw.assign_coords(y=raw.y.assign_attrs(units="1"), x=raw.x.assign_attrs(units="1"))
     image = raw.rf.frame(transform, dims=("y", "x"))
     plane = image.isel(y=1)
-    shifted_transform = AffineTransform(
+    shifted_transform = AffineTransform.from_matrix(
         source=transform.source,
         target=frame,
         matrix=transform.matrix,

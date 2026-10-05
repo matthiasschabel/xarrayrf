@@ -41,7 +41,7 @@ def test_index_origin_and_sample_anchor_live_in_the_declaration() -> None:
     target_frame = ReferenceFrame.local(CoordinateSystem(("S",), ("mm",)))
 
     def build(name: str, offset: float) -> AffineTransform:
-        return AffineTransform(
+        return AffineTransform.from_matrix(
             target=target_frame,
             source=ArrayCoordinates((name,), ("1",)),
             matrix=((spacing,),),
@@ -66,7 +66,7 @@ def test_index_origin_and_sample_anchor_live_in_the_declaration() -> None:
 def generic_plane_transform() -> AffineTransform:
     """The 2-D example from ``docs/dev/architecture/cross_domain_cases.md``."""
     target_frame = ReferenceFrame.local(CoordinateSystem(("x", "y"), ("mm", "mm")))
-    return AffineTransform(
+    return AffineTransform.from_matrix(
         target=target_frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=((0.0, 0.5), (0.5, 0.0)),
@@ -128,7 +128,7 @@ def test_dicom_style_direction_matrix_places_an_oblique_stack() -> None:
     normal = np.cross(row_direction, column_direction)
     assert_allclose(normal, [0.8, -0.6, 0.0], rtol=0, atol=ATOL)
     row_spacing, column_spacing = 0.5, 0.75
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=target_frame,
         source=ArrayCoordinates(("slice", "row", "column"), ("mm", "1", "1")),
         matrix=np.column_stack(
@@ -161,7 +161,7 @@ def test_ngff_channel_example_reaches_the_published_point() -> None:
     example declares no units.
     """
     target_frame = ReferenceFrame.local(CoordinateSystem(("y", "x"), ("1", "1")))
-    stored = AffineTransform(
+    stored = AffineTransform.from_matrix(
         target=target_frame,
         source=ArrayCoordinates(("j", "i"), ("1", "1")),
         matrix=((1.0, 2.0), (4.0, 5.0)),
@@ -180,7 +180,7 @@ def test_ngff_channel_example_reaches_the_published_point() -> None:
 
     # An adapter that rebases labels must compose the crop into the mapping instead:
     # y = 13 + 2r + 2i, x = 46 + 8r + 5i.
-    composed = AffineTransform(
+    composed = AffineTransform.from_matrix(
         target=target_frame,
         source=ArrayCoordinates(("r", "i"), ("1", "1")),
         matrix=((2.0, 2.0), (8.0, 5.0)),

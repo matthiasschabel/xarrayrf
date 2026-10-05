@@ -263,6 +263,6 @@ def compose(*transforms: SupportsPoints) -> AffineTransform | CompositeTransform
         assert isinstance(member, SupportsAffine)
         matrix = member.matrix @ matrix
         translation = member.matrix @ translation + member.translation
-    return AffineTransform(
+    return AffineTransform.from_matrix(
         source=chain.source, target=chain.target, matrix=matrix, translation=translation
     )

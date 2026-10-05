@@ -56,7 +56,7 @@ def adopt_frame(
     affine = (
         transform
         if isinstance(transform, AffineTransform)
-        else AffineTransform(
+        else AffineTransform.from_matrix(
             source=transform.source,
             target=transform.target,
             matrix=transform.matrix,

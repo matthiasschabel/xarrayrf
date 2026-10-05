@@ -58,7 +58,7 @@ def geometry(
         translation[3] = 7.0
         if time_coupling:
             matrix[0, 3] = 1.0
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(
             dims,
             ("1",) * len(dims),
@@ -190,7 +190,7 @@ def test_coordinate_field_is_refused_with_lattice_cause() -> None:
     source_affine = cast(AffineTransform, source.transform)
     field = np.broadcast_to(np.arange(4)[:, None], (4, 5))
     array = source.array.assign_coords(field=(("i", "j"), field, {"units": "1"}))
-    transformed = AffineTransform(
+    transformed = AffineTransform.from_matrix(
         source=ArrayCoordinates(
             ("field", "j", "k"),
             ("1", "1", "1"),
@@ -242,7 +242,7 @@ def test_invalid_arguments_and_geometry_refused() -> None:
             dims=("i", "j", "k", "t"),
         )
     timed = geometry(shape=(4, 5, 6, 7), time_unit="s")
-    extra_axis = AffineTransform(
+    extra_axis = AffineTransform.from_matrix(
         source=source_affine.source,
         target=timed.frame,
         matrix=np.vstack((source_affine.matrix, np.zeros(3))),
@@ -250,7 +250,7 @@ def test_invalid_arguments_and_geometry_refused() -> None:
     )
     with pytest.raises(ValueError, match="requires 3 frame axes for 3 dims"):
         to_header(Geometry(source.array, extra_axis, dims=source.dims), dims=("i", "j", "k"))
-    four_axis = AffineTransform(
+    four_axis = AffineTransform.from_matrix(
         source=timed.transform.source,
         target=timed.frame,
         matrix=np.asarray(cast(AffineTransform, timed.transform).matrix),
@@ -258,7 +258,7 @@ def test_invalid_arguments_and_geometry_refused() -> None:
     )
     spatial_time = np.array(four_axis.matrix, copy=True)
     spatial_time[3, 0] = 0.5
-    coupled = AffineTransform(
+    coupled = AffineTransform.from_matrix(
         source=four_axis.source,
         target=four_axis.target,
         matrix=spatial_time,
@@ -268,7 +268,7 @@ def test_invalid_arguments_and_geometry_refused() -> None:
         to_header(Geometry(timed.array, coupled, dims=timed.dims), dims=("i", "j", "k", "t"))
     with pytest.raises(ValueError, match="requires a frame convertible to RAS"):
         unoriented = ReferenceFrame.local(CoordinateSystem(("x", "y", "z"), ("mm",) * 3))
-        changed = AffineTransform(
+        changed = AffineTransform.from_matrix(
             source=source.transform.source,
             target=unoriented,
             matrix=source_affine.matrix,

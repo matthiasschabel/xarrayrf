@@ -38,7 +38,7 @@ def transform(axes: tuple[str, ...] = ("offset",)) -> AffineTransform:
         ("synthetic", "grid"),
         CoordinateSystem(tuple(f"x{i}" for i in range(len(axes))), ("mm",) * len(axes)),
     )
-    return AffineTransform(
+    return AffineTransform.from_matrix(
         source=ArrayCoordinates(axes, ("mm",) * len(axes), sample_offset=(0.5,) * len(axes)),
         target=frame,
         matrix=np.eye(len(axes)),
@@ -212,7 +212,7 @@ def test_grid_constructor_endpoint_refusals() -> None:
         Grid(mapping.inverse(), {"x0": 0})
     with pytest.raises(ValueError, match="ReferenceFrame"):
         Grid(
-            AffineTransform(
+            AffineTransform.from_matrix(
                 source=mapping.source, target=mapping.source, matrix=[[1]], translation=[0]
             ),
             {"offset": 0},
@@ -526,7 +526,9 @@ def test_grid_equality_and_hash_normalize_signed_zero() -> None:
     assert isinstance(mapping.target, ReferenceFrame)
     other_frame = ReferenceFrame.local(mapping.target.coordinate_system)
     other = Grid(
-        AffineTransform(source=mapping.source, target=other_frame, matrix=[[1]], translation=[0]),
+        AffineTransform.from_matrix(
+            source=mapping.source, target=other_frame, matrix=[[1]], translation=[0]
+        ),
         {"offset": ("i", [0.0, 1.0])},
     )
     assert positive != other
@@ -539,7 +541,7 @@ def test_coincidence_frame_refusal_does_not_compute_chunked_coordinates() -> Non
         da.zeros(4, chunks=2), dims="i", coords={"offset": ("i", da.arange(4, chunks=2))}
     )
     assert isinstance(mapping.target, ReferenceFrame)
-    other_mapping = AffineTransform(
+    other_mapping = AffineTransform.from_matrix(
         source=mapping.source,
         target=ReferenceFrame.local(mapping.target.coordinate_system),
         matrix=[[1]],

@@ -33,7 +33,9 @@ IJK = xrf.ArrayCoordinates(("i", "j", "k"), ("1", "1", "1"))
 def affine(
     source: xrf.Endpoint, target: xrf.Endpoint, matrix: npt.ArrayLike, translation: npt.ArrayLike
 ) -> xrf.AffineTransform:
-    return xrf.AffineTransform(source=source, target=target, matrix=matrix, translation=translation)
+    return xrf.AffineTransform.from_matrix(
+        source=source, target=target, matrix=matrix, translation=translation
+    )
 
 
 def rotation_z(degrees: float) -> npt.NDArray[np.float64]:
@@ -352,7 +354,7 @@ def test_subclass_results_are_still_validated() -> None:
             return np.full_like(super().transform_point(points), np.nan)
 
     first = affine(IJK, A, np.eye(3), (0.0, 0.0, 0.0))
-    broken = Broken(source=A, target=B, matrix=np.eye(3), translation=np.zeros(3))
+    broken = Broken.from_matrix(source=A, target=B, matrix=np.eye(3), translation=np.zeros(3))
     with pytest.raises(ValueError, match="finite"):
         xrf.CompositeTransform(first, broken).transform_point(np.zeros((2, 3)))
     with pytest.raises(ValueError, match="finite"):

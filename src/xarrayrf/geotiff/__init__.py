@@ -165,7 +165,7 @@ def from_profile(
     xy_rows = ((affine.b, affine.a), (affine.e, affine.d))
     xy_translation = (x00, y00)
     order = _easting_northing_rows(pyproj.CRS.from_user_input(profile["crs"]))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=source,
         target=imported_frame,
         matrix=tuple(xy_rows[i] for i in order),

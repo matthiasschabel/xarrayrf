@@ -62,8 +62,11 @@ angle, pixel = np.deg2rad(10), 0.5
 placement = xrf.AffineTransform(
     source=xrf.ArrayCoordinates(("row", "column"), ("1", "1")),
     target=stage,
-    matrix=[[-np.sin(angle) * pixel, np.cos(angle) * pixel],
-            [np.cos(angle) * pixel, np.sin(angle) * pixel]],
+    target_axes=("x", "y"),
+    basis_vectors={
+        "row": (-np.sin(angle) * pixel, np.cos(angle) * pixel),
+        "column": (np.cos(angle) * pixel, np.sin(angle) * pixel),
+    },
     translation=[1200.0, 800.0],
 )
 pixels = plt.imread(tour_data.tissue_section())[..., :3]
@@ -122,7 +125,7 @@ are the same space, one explicit call says so."""
     code(
         """elsewhere = xrf.ReferenceFrame.local(stage.coordinate_system)  # another slide, same axes
 other = image.rf.unframe().rf.frame(
-    xrf.AffineTransform(source=placement.source, target=elsewhere,
+    xrf.AffineTransform.from_matrix(source=placement.source, target=elsewhere,
                         matrix=placement.matrix, translation=placement.translation),
     dims=("row", "column"),
 )
@@ -350,7 +353,7 @@ affine between the two spaces. In xarrayrf it becomes a transform that names bot
 `resample_to` uses it to put the subject on the template's grid."""
     ),
     code(
-        """mni_to_subject = xrf.AffineTransform(
+        """mni_to_subject = xrf.AffineTransform.from_matrix(
     source=template.rf.reference_frame, target=subject.rf.reference_frame,
     matrix=tour_data.MNI_TO_SUBJECT_MATRIX, translation=tour_data.MNI_TO_SUBJECT_TRANSLATION,
 )
@@ -433,7 +436,7 @@ canvas = xr.DataArray(
     np.zeros((1500, 1500), np.uint8), dims=("northing", "easting"),
     coords={"easting": easting, "northing": northing},
 ).rf.frame(
-    xrf.AffineTransform(source=xrf.ArrayCoordinates(("easting", "northing"), ("m", "m")),
+    xrf.AffineTransform.from_matrix(source=xrf.ArrayCoordinates(("easting", "northing"), ("m", "m")),
                         target=utm32, matrix=np.eye(2), translation=[0.0, 0.0]),
     dims=("northing", "easting"),
 )
@@ -486,12 +489,12 @@ rest = xrf.ReferenceFrame.declared(("demo", "object rest frame"), spacetime)
 lab = xrf.ReferenceFrame.declared(("demo", "laboratory"), spacetime)
 beta = 0.8
 gamma = 1 / np.sqrt(1 - beta**2)
-lab_to_rest = xrf.AffineTransform(source=lab, target=rest, translation=[0.0, 0.0],
+lab_to_rest = xrf.AffineTransform.from_matrix(source=lab, target=rest, translation=[0.0, 0.0],
                                   matrix=[[gamma, -gamma * beta], [-gamma * beta, gamma]])
 
 def spacetime_grid(ct, x, frame):
     array = xr.DataArray(np.zeros((len(ct), len(x))), dims=("ct", "x"), coords={"ct": ct, "x": x})
-    identity = xrf.AffineTransform(source=xrf.ArrayCoordinates(("ct", "x"), ("m", "m")),
+    identity = xrf.AffineTransform.from_matrix(source=xrf.ArrayCoordinates(("ct", "x"), ("m", "m")),
                                    target=frame, matrix=np.eye(2), translation=[0.0, 0.0])
     return array.rf.frame(identity, dims=("ct", "x"))
 

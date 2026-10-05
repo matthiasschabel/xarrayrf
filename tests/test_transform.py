@@ -64,7 +64,7 @@ def frame() -> xrf.ReferenceFrame:
 
 @pytest.fixture
 def affine(frame: xrf.ReferenceFrame) -> xrf.AffineTransform:
-    return xrf.AffineTransform(
+    return xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("row", "column"), ("1", "1")),
         target=frame,
         matrix=((0.0, 1.0), (1.0, 0.0)),

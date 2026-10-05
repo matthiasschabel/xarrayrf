@@ -214,8 +214,45 @@ cannot disagree with the source.
 | `SupportsAffine` | `matrix`, `translation`, plus the two above | Constant M and t |
 | `SupportsInverse` | `inverse()` | Exact inverse with endpoints swapped |
 
-`AffineTransform(*, source, target, matrix, translation)` (keyword-only) implements `SupportsAffine` and
-`SupportsInverse`. Its `inverse()` is computed only for a square matrix whose condition number,
+**`AffineTransform(*, source, target, target_axes, basis_vectors, translation)`** constructs
+an affine from named vectors. `basis_vectors` is a mapping with exactly the source axis names;
+its insertion order does not count. A vector gives the target displacement for a unit increase
+in that source coordinate, including scale and unit conversion. Its components and the
+translation follow `target_axes`, which must match the target's axis names and order exactly.
+Every vector must be finite, real and 1-D with one component per target axis, validated before
+assembly. Missing and extra names, differing target order, non-real values and wrong shapes
+raise explicit errors. Mixed Python sequences follow NumPy promotion within each vector;
+masked vectors are refused.
+
+The vectors need not be orthogonal, independent or a complete target-space basis. Names such as
+`k`, `j`, `i` do not imply directions such as `z`, `y`, `x`; the vectors establish that relation.
+They describe coordinate-value increments, not array-position increments when the coordinates
+are nonuniform or physical distances. Translation locates source coordinate zero, not
+necessarily the first retained sample.
+
+For a frame-to-frame map with source `moving` and target `fixed`, both using `(x, y, z)`, the
+keys name **source** axes and the vector components name **target** axes:
+
+```python
+registration = AffineTransform(
+    source=moving,
+    target=fixed,
+    target_axes=("x", "y", "z"),
+    basis_vectors={"x": (0, 1, 0), "y": (-1, 0, 0), "z": (0, 0, 1)},
+    translation=(10, 20, 30),
+)
+```
+
+**`AffineTransform.from_matrix(*, source, target, matrix, translation)`** constructs the same
+value from existing coefficients. Use this public constructor for matrices from registration
+tools, file formats or numerical operations. Rows follow target axes; columns follow source
+axes. Both constructors share coefficient validation, immutable storage, equality and hashing;
+schema 1 continues to encode matrix and translation, independently of the construction path.
+The old `AffineTransform(..., matrix=...)` call is replaced directly by `from_matrix` during
+pre-release development.
+
+`AffineTransform` implements `SupportsAffine` and `SupportsInverse`.
+Its `inverse()` is computed only for a square matrix whose condition number,
 measured after row and column equilibration so the choice of units does not matter, is within
 `INVERSE_CONDITION_LIMIT` (1/(10·eps)), and raises `ValueError` otherwise:
 a rectangular affine has no inverse, and projecting onto its image is a separate operation.

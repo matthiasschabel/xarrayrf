@@ -43,7 +43,7 @@ def boost_matrix(beta: float) -> npt.NDArray[np.float64]:
 def boost(
     source: xrf.ReferenceFrame, target: xrf.ReferenceFrame, beta: float
 ) -> xrf.AffineTransform:
-    return xrf.AffineTransform(
+    return xrf.AffineTransform.from_matrix(
         source=source, target=target, matrix=boost_matrix(beta), translation=np.zeros(4)
     )
 
@@ -75,7 +75,7 @@ def test_collinear_boosts_compose_by_relativistic_velocity_addition() -> None:
 
 def test_a_poincare_transformation_is_a_boost_with_a_translation() -> None:
     """Moving the origin event: the interval between two events is still preserved."""
-    poincare = xrf.AffineTransform(
+    poincare = xrf.AffineTransform.from_matrix(
         source=LAB, target=ROCKET, matrix=boost_matrix(0.8), translation=(10.0, -3.0, 2.0, 1.0)
     )
     first, second = np.array([1.0, 0.5, 0.0, 0.0]), np.array([4.0, 2.0, 1.0, -1.0])
@@ -114,7 +114,7 @@ def test_a_spacetime_field_is_resampled_into_a_boosted_frame() -> None:
     )
 
     def locate(frame: xrf.ReferenceFrame) -> xrf.AffineTransform:
-        return xrf.AffineTransform(
+        return xrf.AffineTransform.from_matrix(
             source=xrf.ArrayCoordinates(("t", "x", "y", "z"), ("m",) * 4),
             target=frame,
             matrix=np.eye(4),
@@ -151,7 +151,7 @@ def test_a_boost_in_si_units_inverts() -> None:
             [0.0, 0.0, 0.0, 1.0],
         ]
     )
-    lab_to_rocket = xrf.AffineTransform(
+    lab_to_rocket = xrf.AffineTransform.from_matrix(
         source=lab, target=rocket, matrix=matrix, translation=np.zeros(4)
     )
     event = np.array([1e-8, 3.0, 0.0, 0.0])

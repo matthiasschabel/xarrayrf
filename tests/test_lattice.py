@@ -29,7 +29,7 @@ def geometry(
         dims=("k", "j", "i"),
         coords={"k": k_values, "j": np.arange(4), "i": np.arange(5)},
     )
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("i", "j", "k"), ("1", "1", "1")),
         target=FRAME,
         matrix=matrix,
@@ -135,7 +135,7 @@ def test_a_coordinate_field_forms_no_lattice() -> None:
         dims=("j", "i"),
         coords={"u": (("j", "i"), [[0.0, 1.0], [2.0, 3.0]]), "i": [0, 1]},
     )
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("u", "i"), ("1", "1")),
         target=xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("mm", "mm"))),
         matrix=np.eye(2),
@@ -162,7 +162,7 @@ def test_spacing_needs_one_unit_across_the_frame(units: tuple[str, str, str]) ->
     array = xr.DataArray(
         np.zeros((2, 2, 2)), dims=("k", "j", "i"), coords={"k": [0, 1], "j": [0, 1], "i": [0, 1]}
     )
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("i", "j", "k"), ("1", "1", "1")),
         target=frame,
         matrix=np.eye(3),
@@ -179,7 +179,7 @@ def test_spacing_needs_one_unit_across_the_frame(units: tuple[str, str, str]) ->
 def test_reciprocal_space_has_a_spacing_in_its_common_unit() -> None:
     frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("kx", "ky"), ("1/mm", "1/mm")))
     array = xr.DataArray(np.zeros((3, 3)), dims=("v", "u"), coords={"v": [0, 1, 2], "u": [0, 1, 2]})
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("u", "v"), ("1", "1")),
         target=frame,
         matrix=np.diag([0.25, 0.5]),
@@ -195,7 +195,7 @@ def test_range_index_coordinates_give_their_exact_step() -> None:
 
     index = RangeIndex.arange(0.0, 3.0, 0.1, coord_name="i", dim="i")
     array = xr.DataArray(np.zeros(30), dims="i", coords=xr.Coordinates.from_xindex(index))
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("i",), ("mm",)),
         target=xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x",), ("mm",))),
         matrix=((1.0,),),
@@ -248,7 +248,7 @@ def test_signed_zero_does_not_split_equal_lattices() -> None:
 
 def test_a_fully_selected_point_forms_a_zero_dimensional_lattice() -> None:
     frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("a",), ("mm",)))
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("i",), ("1",)),
         target=frame,
         matrix=[[2.0]],

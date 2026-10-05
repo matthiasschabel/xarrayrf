@@ -24,7 +24,7 @@ from xarrayrf._binding import BindingIndex
 @pytest.fixture
 def transform() -> AffineTransform:
     frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-    return AffineTransform(
+    return AffineTransform.from_matrix(
         source=ArrayCoordinates(("y", "x"), ("1", "1")),
         target=frame,
         matrix=np.eye(2),
@@ -130,14 +130,14 @@ def test_resample_to_accepts_transform_across_frames(framed: xr.DataArray) -> No
     other = ReferenceFrame.local(framed.rf.reference_frame.coordinate_system)
     original = framed.rf.coordinate_transform
     assert isinstance(original, AffineTransform)
-    target_transform = AffineTransform(
+    target_transform = AffineTransform.from_matrix(
         source=original.source,
         target=other,
         matrix=original.matrix,
         translation=original.translation,
     )
     target = framed.rf.unframe().rf.frame(target_transform, dims=("y", "x"))
-    frame_map = AffineTransform(
+    frame_map = AffineTransform.from_matrix(
         source=other,
         target=framed.rf.reference_frame,
         matrix=np.eye(2),
@@ -168,7 +168,7 @@ def test_assume_frame_adopts_declaration_and_checks_mapping(framed: xr.DataArray
     assert_allclose((rebound + matching).values, 2 * framed.values, rtol=0, atol=1e-12)
     original = framed.rf.coordinate_transform
     assert isinstance(original, AffineTransform)
-    scaled = AffineTransform(
+    scaled = AffineTransform.from_matrix(
         source=original.source,
         target=current,
         matrix=2 * original.matrix,
@@ -336,7 +336,7 @@ _HAS_INDEX_HOOKS = hasattr(xr.Index, "join_overlapping")
 def _supports_mixed_index_alignment() -> bool:
     """Probe #11532 without relying on a version or checkout path."""
     frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("y", "x"), ("1", "1")),
         target=frame,
         matrix=np.eye(2),
@@ -507,7 +507,7 @@ def test_plain_operand_unit_attribute_is_validated(
     image: xr.DataArray, units: object, error: type[Exception], message: str
 ) -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-    undeclared = AffineTransform(
+    undeclared = AffineTransform.from_matrix(
         source=ArrayCoordinates(("y", "x"), (None, None)),
         target=frame,
         matrix=np.eye(2),
@@ -543,7 +543,7 @@ def test_align_override_raises(framed: xr.DataArray, order: str) -> None:
 def _dataset_reduction_drops_whole_binding() -> bool:
     """Probe the xarray fix that drops a multi-coordinate index whole in Dataset reductions."""
     frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("y", "x"), ("1", "1")),
         target=frame,
         matrix=np.eye(2),
@@ -557,7 +557,7 @@ def _dataset_reduction_drops_whole_binding() -> bool:
 def _dataset_update_keeps_binding() -> bool:
     """Probe the xarray fix that keeps a Dataset's own index when update supplies labels."""
     frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("y", "x"), ("1", "1")),
         target=frame,
         matrix=np.eye(2),
@@ -623,7 +623,7 @@ def test_dataset_holds_distinct_grids_and_refuses_conflicting_frames(
     framed: xr.DataArray, image: xr.DataArray, transform: AffineTransform
 ) -> None:
     other_grid = image.rename(y="v", x="u").rf.frame(
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(("v", "u"), ("1", "1")),
             target=transform.target,
             matrix=np.eye(2),
@@ -635,7 +635,7 @@ def test_dataset_holds_distinct_grids_and_refuses_conflicting_frames(
     assert dataset["first"].rf.geometry_dims == ("y", "x")
     assert dataset["second"].rf.geometry_dims == ("v", "u")
     shifted = framed.rf.unframe().rf.frame(
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=transform.source,
             target=transform.target,
             matrix=np.eye(2),
@@ -652,7 +652,7 @@ def test_dataset_reduction_over_geometry_unframes_only_that_grid(
     framed: xr.DataArray, image: xr.DataArray, transform: AffineTransform
 ) -> None:
     other_grid = image.rename(y="v", x="u").rf.frame(
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(("v", "u"), ("1", "1")),
             target=transform.target,
             matrix=np.eye(2),
@@ -703,7 +703,7 @@ def test_pickle_round_trip(framed: xr.DataArray) -> None:
 
 def test_fixed_and_auxiliary_source_coordinates(transform: AffineTransform) -> None:
     source = ArrayCoordinates(("y", "x"), ("1", "1"))
-    mapped = AffineTransform(
+    mapped = AffineTransform.from_matrix(
         source=source,
         target=transform.target,
         matrix=transform.matrix,
@@ -742,7 +742,7 @@ def test_non_affine_source_rename_is_refused(
 def test_transform_mismatch_is_refused(
     image: xr.DataArray, transform: AffineTransform, framed: xr.DataArray
 ) -> None:
-    different = AffineTransform(
+    different = AffineTransform.from_matrix(
         source=transform.source,
         target=transform.target,
         matrix=transform.matrix,
@@ -947,7 +947,7 @@ def test_coarsen_nongeometry_keeps_binding(
 
 def test_bind_refuses_source_coordinates_sharing_a_dimension() -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("x", "y"), ("1", "1")),
         target=frame,
         matrix=np.eye(2),
@@ -995,7 +995,7 @@ def test_incompatible_bindings_say_why(framed: xr.DataArray, transform: AffineTr
     with pytest.raises(ValueError, match=r"different reference frames.*rf\.assume_frame"):
         _ = framed + elsewhere
     regridded = framed.rf.unframe().rf.frame(
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=transform.source,
             target=transform.target,
             matrix=2 * np.eye(2),
@@ -1051,7 +1051,7 @@ import numpy as np
 import xarray as xr
 import xarrayrf as xrf
 frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x",), ("mm",)))
-transform = xrf.AffineTransform(
+transform = xrf.AffineTransform.from_matrix(
     source=xrf.ArrayCoordinates(("i",), ("1",)), target=frame,
     matrix=((2.0,),), translation=(0.0,),
 )
@@ -1075,7 +1075,7 @@ def test_anonymous_adoption_keeps_different_grids_and_names_resampling(
     original = first.rf.coordinate_transform
     assert isinstance(original, AffineTransform)
     shifted = original.with_endpoints(target=ReferenceFrame.anonymous(system))
-    shifted = AffineTransform(
+    shifted = AffineTransform.from_matrix(
         source=shifted.source,
         target=shifted.target,
         matrix=shifted.matrix,
@@ -1204,7 +1204,7 @@ def test_numerically_matching_points_do_not_bypass_binding_checks(framed: xr.Dat
         first.rf.unframe()
         .assign_coords(y=first.y / 2, x=first.x / 2)
         .rf.frame(
-            AffineTransform(
+            AffineTransform.from_matrix(
                 source=original.source,
                 target=ReferenceFrame.anonymous(first.rf.reference_frame.coordinate_system),
                 matrix=2 * original.matrix,

@@ -60,7 +60,7 @@ def grid(frame, **axes):
     \"\"\"An empty field sampled on the given axes of a spacetime frame.\"\"\"
     names = frame.coordinate_system.axes
     values = np.zeros([len(axes[name]) for name in names])
-    identity = xrf.AffineTransform(
+    identity = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(names, ("m",) * len(names)), target=frame,
         matrix=np.eye(len(names)), translation=np.zeros(len(names)),
     )
@@ -80,7 +80,7 @@ object's "now" (ct′ = 0) are different lines: slicing one is not slicing the o
 rest_frame = xrf.ReferenceFrame.declared(("demo", "object"), plane)
 lab = xrf.ReferenceFrame.declared(("demo", "laboratory"), plane)
 matrix, gamma = boost([0.6])
-lab_to_rest = xrf.AffineTransform(source=lab, target=rest_frame, matrix=matrix, translation=[0.0, 0.0])
+lab_to_rest = xrf.AffineTransform.from_matrix(source=lab, target=rest_frame, matrix=matrix, translation=[0.0, 0.0])
 
 x = np.linspace(-12, 12, 481)
 profile = np.exp(-(((x - 1.0) / 0.6) ** 2)) + 0.6 * np.exp(-(((x + 1.5) / 1.0) ** 2))  # any shape
@@ -110,7 +110,7 @@ its own rest frame and resampled into the other frame's instant."""
         """barn_frame = xrf.ReferenceFrame.declared(("demo", "barn"), plane)
 pole_frame = xrf.ReferenceFrame.declared(("demo", "pole"), plane)
 matrix, gamma = boost([0.8])
-barn_to_pole = xrf.AffineTransform(source=barn_frame, target=pole_frame, matrix=matrix, translation=[0.0, 0.0])
+barn_to_pole = xrf.AffineTransform.from_matrix(source=barn_frame, target=pole_frame, matrix=matrix, translation=[0.0, 0.0])
 
 x = np.linspace(-15, 15, 1201)
 def occupied(start, stop):
@@ -153,7 +153,7 @@ tile_frame = xrf.ReferenceFrame.declared(("demo", "tile"), space)
 lab2 = xrf.ReferenceFrame.declared(("demo", "laboratory 2D"), space)
 beta = 0.8 * np.array([1.0, 1.0]) / np.sqrt(2)
 matrix, gamma = boost(beta)
-lab_to_tile = xrf.AffineTransform(source=lab2, target=tile_frame, matrix=matrix, translation=[0.0, 0.0, 0.0])
+lab_to_tile = xrf.AffineTransform.from_matrix(source=lab2, target=tile_frame, matrix=matrix, translation=[0.0, 0.0, 0.0])
 
 s = np.linspace(-5, 5, 201)
 X, Y = np.meshgrid(s, s, indexing="ij")
@@ -226,7 +226,7 @@ body_frame = xrf.ReferenceFrame.declared(("demo", "body"), space3)
 lab3 = xrf.ReferenceFrame.declared(("demo", "laboratory 3D"), space3)
 direction = np.array([2.0, 1.0, 2.0]) / 3
 matrix, gamma = boost(0.8 * direction)
-lab_to_body = xrf.AffineTransform(source=lab3, target=body_frame, matrix=matrix, translation=np.zeros(4))
+lab_to_body = xrf.AffineTransform.from_matrix(source=lab3, target=body_frame, matrix=matrix, translation=np.zeros(4))
 
 s = np.linspace(-7, 7, 71)
 X, Y, Z = np.meshgrid(s, s, s, indexing="ij")

@@ -124,7 +124,7 @@ def test_nifti_adopts_lps_dicom_through_both_remedies(tmp_path: Path, array_targ
     target = xr.DataArray(
         pixels, dims=("i", "j", "k"), coords={"i": range(2), "j": range(3), "k": range(4)}
     ).rf.frame(
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(("i", "j", "k"), ("1",) * 3),
             target=frame,
             matrix=np.eye(3),

@@ -43,7 +43,7 @@ from xarrayrf import AffineTransform, ArrayCoordinates, CoordinateSystem, Refere
 import xarrayrf.native
 
 frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-transform = AffineTransform(
+transform = AffineTransform.from_matrix(
     source=ArrayCoordinates(("y", "x"), ("1", "1")),
     target=frame,
     matrix=np.eye(2),

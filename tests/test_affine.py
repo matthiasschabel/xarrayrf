@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import cast
 
 import numpy as np
@@ -38,7 +38,8 @@ def plane_transform(plane_frame: ReferenceFrame) -> AffineTransform:
     return AffineTransform(
         target=plane_frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
-        matrix=((2.0, -1.0), (0.5, 3.0)),
+        target_axes=("x", "y"),
+        basis_vectors={"column": (-1.0, 3.0), "row": (2.0, 0.5)},
         translation=(1.0, -1.0),
     )
 
@@ -54,7 +55,7 @@ def test_generic_affine_evaluates_both_target_axes(plane_transform: AffineTransf
 
 def test_two_to_three_embedding_places_a_plane_in_a_volume() -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("L", "P", "S"), ("mm", "mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=((0.6, 0.0), (0.8, 0.0), (0.0, -1.0)),
@@ -70,7 +71,7 @@ def test_two_to_three_embedding_places_a_plane_in_a_volume() -> None:
 
 def test_non_square_mapping_accepts_more_source_axes_than_target_axes() -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("u", "v"), ("mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=frame,
         source=ArrayCoordinates(("slice", "row", "column"), ("mm", "1", "1")),
         matrix=((1.0, 0.5, 0.0), (0.0, 0.0, 2.0)),
@@ -85,7 +86,7 @@ def test_non_square_mapping_accepts_more_source_axes_than_target_axes() -> None:
 
 def test_nonuniform_sample_coordinates_are_read_as_given() -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("S",), ("mm",)))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=frame,
         source=ArrayCoordinates(("slice",), ("mm",)),
         matrix=((1.0,),),
@@ -109,7 +110,7 @@ def test_scalar_and_array_source_axes_broadcast(plane_transform: AffineTransform
 
 def test_a_fixed_scalar_coordinate_broadcasts_against_varying_ones() -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("L", "P", "S"), ("mm", "mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=frame,
         source=ArrayCoordinates(("slice", "row", "column"), ("mm", "1", "1")),
         matrix=((0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0)),
@@ -121,13 +122,13 @@ def test_a_fixed_scalar_coordinate_broadcasts_against_varying_ones() -> None:
 
 
 def test_one_frame_can_be_shared_by_several_transforms(plane_frame: ReferenceFrame) -> None:
-    first = AffineTransform(
+    first = AffineTransform.from_matrix(
         target=plane_frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=((1.0, 0.0), (0.0, 1.0)),
         translation=(0.0, 0.0),
     )
-    second = AffineTransform(
+    second = AffineTransform.from_matrix(
         target=plane_frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=((1.0, 0.0), (0.0, 1.0)),
@@ -139,13 +140,13 @@ def test_one_frame_can_be_shared_by_several_transforms(plane_frame: ReferenceFra
 
 
 def test_transforms_in_independently_minted_frames_are_unrelated() -> None:
-    first = AffineTransform(
+    first = AffineTransform.from_matrix(
         target=ReferenceFrame.local(CoordinateSystem(("x",), ("mm",))),
         source=ArrayCoordinates(("row",), ("1",)),
         matrix=((1.0,),),
         translation=(0.0,),
     )
-    second = AffineTransform(
+    second = AffineTransform.from_matrix(
         target=ReferenceFrame.local(CoordinateSystem(("x",), ("mm",))),
         source=ArrayCoordinates(("row",), ("1",)),
         matrix=((1.0,),),
@@ -157,7 +158,7 @@ def test_transforms_in_independently_minted_frames_are_unrelated() -> None:
 def test_transform_owns_its_coefficients(plane_frame: ReferenceFrame) -> None:
     matrix = np.array([[1.0, 0.0], [0.0, 1.0]])
     translation = np.array([1.0, 2.0])
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=plane_frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=matrix,
@@ -260,7 +261,7 @@ def test_evaluation_does_not_write_into_the_caller_values(plane_transform: Affin
 
 def test_structural_equality_is_exact(plane_frame: ReferenceFrame) -> None:
     def build(corner: float) -> AffineTransform:
-        return AffineTransform(
+        return AffineTransform.from_matrix(
             target=plane_frame,
             source=ArrayCoordinates(("row", "column"), ("1", "1")),
             matrix=((corner, 0.0), (0.0, 1.0)),
@@ -276,7 +277,7 @@ def test_structural_equality_is_exact(plane_frame: ReferenceFrame) -> None:
 
 def test_negative_zero_does_not_split_identity(plane_frame: ReferenceFrame) -> None:
     def build(sign: float) -> AffineTransform:
-        return AffineTransform(
+        return AffineTransform.from_matrix(
             target=plane_frame,
             source=ArrayCoordinates(("row", "column"), ("1", "1")),
             matrix=((1.0, sign), (0.0, 1.0)),
@@ -345,7 +346,7 @@ def test_coefficient_shapes_and_values_are_validated(
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        AffineTransform(
+        AffineTransform.from_matrix(
             target=plane_frame,
             source=ArrayCoordinates(("row", "column"), ("1", "1")),
             matrix=matrix,
@@ -378,7 +379,7 @@ def test_matrix_rejects_non_real_dtypes(
     never declared.
     """
     with pytest.raises(TypeError, match="real integer or floating values"):
-        AffineTransform(
+        AffineTransform.from_matrix(
             target=plane_frame,
             source=ArrayCoordinates(("row", "column"), ("1", "1")),
             matrix=matrix,
@@ -400,7 +401,7 @@ def test_translation_rejects_non_real_dtypes(
     translation: npt.ArrayLike,
 ) -> None:
     with pytest.raises(TypeError, match="real integer or floating values"):
-        AffineTransform(
+        AffineTransform.from_matrix(
             target=plane_frame,
             source=ArrayCoordinates(("row", "column"), ("1", "1")),
             matrix=((1.0, 0.0), (0.0, 1.0)),
@@ -410,7 +411,7 @@ def test_translation_rejects_non_real_dtypes(
 
 def test_integer_coefficients_are_accepted(plane_frame: ReferenceFrame) -> None:
     """Rejecting non-real dtypes must not reject ordinary integer arithmetic."""
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=plane_frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=np.array([[2, -1], [0, 3]]),
@@ -430,7 +431,7 @@ def test_mixed_python_sequences_follow_numpy_promotion(plane_frame: ReferenceFra
     nothing walks a container hunting for individual boolean elements. Stating this here
     keeps the decision explicit rather than incidental.
     """
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=plane_frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=[[True, 2.0], [0.0, 1.0]],
@@ -459,7 +460,7 @@ def test_coefficients_reject_a_masked_array(plane_frame: ReferenceFrame, field: 
     else:
         translation = masked_invalid(np.array([np.nan, 0.0]))
     with pytest.raises(TypeError, match=f"{field} must not be a masked array"):
-        AffineTransform(
+        AffineTransform.from_matrix(
             target=plane_frame,
             source=ArrayCoordinates(("row", "column"), ("1", "1")),
             matrix=matrix,
@@ -541,7 +542,7 @@ def test_transform_named_rejects_non_broadcastable_source_axes(
 
 
 def test_transform_named_rejects_an_overflowing_evaluation(plane_frame: ReferenceFrame) -> None:
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=plane_frame,
         source=ArrayCoordinates(("row",), ("1",)),
         matrix=((1e300,), (1.0,)),
@@ -637,7 +638,7 @@ def test_jacobian_rejects_non_real_points(plane_transform: AffineTransform) -> N
 
 def test_array_coordinates_may_be_angular(plane_frame: ReferenceFrame) -> None:
     """Source coordinates are values; an angle is a legitimate source coordinate."""
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("azimuth", "distance"), ("deg", "micrometer")),
         target=plane_frame,
         matrix=((1.0, 0.0), (0.0, 1.0)),
@@ -656,7 +657,7 @@ def test_endpoints_must_be_frames_or_array_coordinates(
     }
     endpoints[field] = ("x", "y")
     with pytest.raises(TypeError, match=f"{field} must be a ReferenceFrame or ArrayCoordinates"):
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=cast(ReferenceFrame, endpoints["source"]),
             target=cast(ReferenceFrame, endpoints["target"]),
             matrix=((1.0, 0.0), (0.0, 1.0)),
@@ -665,13 +666,13 @@ def test_endpoints_must_be_frames_or_array_coordinates(
 
 
 def test_a_transform_between_frames_uses_the_frame_axes(plane_frame: ReferenceFrame) -> None:
-    moved = AffineTransform(
+    moved = AffineTransform.from_matrix(
         source=plane_frame,
         target=plane_frame,
         matrix=((1.0, 0.0), (0.0, 1.0)),
         translation=(5.0, 0.0),
     )
-    from_array = AffineTransform(
+    from_array = AffineTransform.from_matrix(
         source=ArrayCoordinates(("x", "y"), ("mm", "mm")),
         target=plane_frame,
         matrix=((1.0, 0.0), (0.0, 1.0)),
@@ -682,7 +683,7 @@ def test_a_transform_between_frames_uses_the_frame_axes(plane_frame: ReferenceFr
     assert moved != from_array
     assert transform_named(moved, {"x": 1.0, "y": 2.0})["x"] == pytest.approx(6.0, abs=ATOL)
     with pytest.raises(ValueError, match="matrix must be 2-by-3"):
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ReferenceFrame.local(CoordinateSystem(("a", "b", "c"), ("mm",) * 3)),
             target=plane_frame,
             matrix=((1.0, 0.0), (0.0, 1.0)),
@@ -693,7 +694,7 @@ def test_a_transform_between_frames_uses_the_frame_axes(plane_frame: ReferenceFr
 def test_with_endpoints_keeps_coefficients_and_validates_shape() -> None:
     a = ReferenceFrame.local(CoordinateSystem(("p", "q"), ("mm", "mm")))
     b = ReferenceFrame.local(CoordinateSystem(("p", "q"), ("mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("i", "j"), ("1", "1")),
         target=a,
         matrix=[[2.0, 0.5], [0.0, 3.0]],
@@ -709,3 +710,267 @@ def test_with_endpoints_keeps_coefficients_and_validates_shape() -> None:
         transform.with_endpoints(source=ArrayCoordinates(("i",), ("1",)))
     with pytest.raises(TypeError):
         transform.with_endpoints(target="frame")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("dtype", [np.int64, np.float32, np.float64])
+def test_basis_and_matrix_construction_have_the_same_identity(
+    plane_frame: ReferenceFrame, dtype: type[np.generic]
+) -> None:
+    source = ArrayCoordinates(("j", "i"), ("1", "1"))
+    matrix = np.array([[2, -1], [1, 3]], dtype=dtype)
+    translation = np.array([1, -0.0], dtype=dtype)
+    named = AffineTransform(
+        source=source,
+        target=plane_frame,
+        target_axes=["x", "y"],
+        basis_vectors={"i": matrix[:, 1], "j": matrix[:, 0]},
+        translation=translation,
+    )
+    coefficients = AffineTransform.from_matrix(
+        source=source, target=plane_frame, matrix=matrix, translation=translation
+    )
+    assert named == coefficients
+    assert hash(named) == hash(coefficients)
+    assert_allclose(named.transform_point([4, 5]), [4, 19], rtol=0, atol=ATOL)
+
+
+def test_basis_components_follow_the_asserted_target_axis_order() -> None:
+    frame = ReferenceFrame.local(CoordinateSystem(("z", "x", "y"), ("mm",) * 3))
+    placement = AffineTransform(
+        source=ArrayCoordinates(("j", "i"), ("1", "1")),
+        target=frame,
+        target_axes=("z", "x", "y"),
+        basis_vectors={"i": (3, 7, 13), "j": (2, 5, 11)},
+        translation=(17, 19, 23),
+    )
+    point = transform_named(placement, {"j": 2, "i": 3})
+    assert tuple(point) == ("z", "x", "y")
+    assert_allclose(list(point.values()), [30, 50, 84], rtol=0, atol=ATOL)
+
+
+@pytest.mark.parametrize("axes", [("y", "x"), ("x", "z"), ("x",)])
+def test_basis_constructor_refuses_a_different_target_axis_order(
+    plane_frame: ReferenceFrame, axes: tuple[str, ...]
+) -> None:
+    with pytest.raises(ValueError, match=r"target_axes must match target axes.*in order"):
+        AffineTransform(
+            source=ArrayCoordinates(("j", "i"), ("1", "1")),
+            target=plane_frame,
+            target_axes=axes,
+            basis_vectors={"j": (1, 0), "i": (0, 1)},
+            translation=(0, 0),
+        )
+
+
+@pytest.mark.parametrize("axes", ["xy", ["x", 2]])
+def test_basis_constructor_validates_the_target_axis_sequence(
+    plane_frame: ReferenceFrame, axes: object
+) -> None:
+    with pytest.raises(TypeError, match="target_axes"):
+        AffineTransform(
+            source=ArrayCoordinates(("j", "i"), ("1", "1")),
+            target=plane_frame,
+            target_axes=cast(Sequence[str], axes),
+            basis_vectors={"j": (1, 0), "i": (0, 1)},
+            translation=(0, 0),
+        )
+
+
+@pytest.mark.parametrize("vectors", [None, [("j", (1, 0)), ("i", (0, 1))]])
+def test_basis_vectors_must_be_a_mapping(plane_frame: ReferenceFrame, vectors: object) -> None:
+    with pytest.raises(TypeError, match="basis_vectors must be a mapping"):
+        AffineTransform(
+            source=ArrayCoordinates(("j", "i"), ("1", "1")),
+            target=plane_frame,
+            target_axes=("x", "y"),
+            basis_vectors=cast(Mapping[str, npt.ArrayLike], vectors),
+            translation=(0, 0),
+        )
+
+
+def test_basis_vector_keys_must_be_strings(plane_frame: ReferenceFrame) -> None:
+    with pytest.raises(TypeError, match="basis_vectors keys must be strings"):
+        AffineTransform(
+            source=ArrayCoordinates(("j", "i"), ("1", "1")),
+            target=plane_frame,
+            target_axes=("x", "y"),
+            basis_vectors=cast(Mapping[str, npt.ArrayLike], {"j": (1, 0), 1: (0, 1)}),
+            translation=(0, 0),
+        )
+
+
+@pytest.mark.parametrize(
+    ("vectors", "message"),
+    [
+        ({"j": (1, 0)}, r"missing \('i',\), extra \(\)"),
+        ({"j": (1, 0), "i": (0, 1), "k": (0, 0)}, r"missing \(\), extra \('k',\)"),
+        ({"j": (1, 0), "I": (0, 1)}, r"missing \('i',\), extra \('I',\)"),
+    ],
+)
+def test_basis_vectors_must_match_the_source_axis_names(
+    plane_frame: ReferenceFrame, vectors: Mapping[str, npt.ArrayLike], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        AffineTransform(
+            source=ArrayCoordinates(("j", "i"), ("1", "1")),
+            target=plane_frame,
+            target_axes=("x", "y"),
+            basis_vectors=vectors,
+            translation=(0, 0),
+        )
+
+
+@pytest.mark.parametrize(
+    ("vector", "error", "message"),
+    [
+        (0.5, ValueError, "one component per target axis"),
+        ((1,), ValueError, "one component per target axis"),
+        (((1, 0),), ValueError, "one component per target axis"),
+        ((np.nan, 0), ValueError, "only finite"),
+        ((1, np.inf), ValueError, "only finite"),
+        (("1", "0"), TypeError, "real integer or floating"),
+        ((1 + 2j, 0), TypeError, "real integer or floating"),
+        ((True, False), TypeError, "real integer or floating"),
+    ],
+)
+def test_basis_vector_errors_name_the_source_axis(
+    plane_frame: ReferenceFrame,
+    vector: npt.ArrayLike,
+    error: type[Exception],
+    message: str,
+) -> None:
+    with pytest.raises(error, match=rf"basis_vectors\['j'\].*{message}"):
+        AffineTransform(
+            source=ArrayCoordinates(("j", "i"), ("1", "1")),
+            target=plane_frame,
+            target_axes=("x", "y"),
+            basis_vectors={"j": vector, "i": (0.0, 1.0)},
+            translation=(0, 0),
+        )
+
+
+def test_basis_constructor_refuses_a_masked_vector(plane_frame: ReferenceFrame) -> None:
+    masked = cast(Callable[..., npt.NDArray[np.float64]], np.ma.masked_array)(
+        [1.0, 0.0], mask=[False, True]
+    )
+    with pytest.raises(TypeError, match=r"basis_vectors\['j'\].*masked array"):
+        AffineTransform(
+            source=ArrayCoordinates(("j", "i"), ("1", "1")),
+            target=plane_frame,
+            target_axes=("x", "y"),
+            basis_vectors={"j": masked, "i": (0, 1)},
+            translation=(0, 0),
+        )
+
+
+def test_one_dimensional_basis_requires_a_vector_not_a_scalar() -> None:
+    frame = ReferenceFrame.local(CoordinateSystem(("x",), ("mm",)))
+    with pytest.raises(ValueError, match=r"basis_vectors\['i'\].*got shape \(\)"):
+        AffineTransform(
+            source=ArrayCoordinates(("i",), ("1",)),
+            target=frame,
+            target_axes=("x",),
+            basis_vectors={"i": 0.5},
+            translation=(0,),
+        )
+    placement = AffineTransform(
+        source=ArrayCoordinates(("i",), ("1",)),
+        target=frame,
+        target_axes=("x",),
+        basis_vectors={"i": (0.5,)},
+        translation=(1,),
+    )
+    assert_allclose(placement.transform_point([3]), [2.5], rtol=0, atol=ATOL)
+
+
+def test_basis_constructor_supports_a_rectangular_projection() -> None:
+    source = ReferenceFrame.local(CoordinateSystem(("x", "y", "z"), ("mm",) * 3))
+    target = ArrayCoordinates(("u", "v"), ("1", "1"))
+    projection = AffineTransform(
+        source=source,
+        target=target,
+        target_axes=("u", "v"),
+        basis_vectors={"z": (3, 6), "y": (2, 5), "x": (1, 4)},
+        translation=(7, 8),
+    )
+    assert_allclose(projection.transform_point([1, 2, 3]), [21, 40], rtol=0, atol=ATOL)
+    with pytest.raises(ValueError, match="different dimension"):
+        projection.inverse()
+
+
+@pytest.mark.parametrize(("vector", "expected"), [((1, 2), (13, 26)), ((0, 0), (10, 20))])
+def test_singular_basis_vectors_define_a_forward_map_without_an_inverse(
+    plane_frame: ReferenceFrame, vector: tuple[int, int], expected: tuple[int, int]
+) -> None:
+    placement = AffineTransform(
+        source=ArrayCoordinates(("j", "i"), ("1", "1")),
+        target=plane_frame,
+        target_axes=("x", "y"),
+        basis_vectors={"j": vector, "i": (2, 4)},
+        translation=(0, 0),
+    )
+    assert_allclose(placement.transform_point([3, 5]), expected, rtol=0, atol=ATOL)
+    with pytest.raises(ValueError, match=r"singular|ill-conditioned"):
+        placement.inverse()
+
+
+def test_basis_vectors_preserve_nonuniform_coordinate_values_and_unit_scales() -> None:
+    frame = ReferenceFrame.local(CoordinateSystem(("x", "y", "z"), ("m",) * 3))
+    placement = AffineTransform(
+        source=ArrayCoordinates(("slice_offset", "j", "i"), ("mm", "1", "1")),
+        target=frame,
+        target_axes=("x", "y", "z"),
+        basis_vectors={"i": (0.003, 0, 0), "j": (0, 0.002, 0), "slice_offset": (0, 0, 0.001)},
+        translation=(0.1, 0.2, 0.3),
+    )
+    assert_allclose(
+        placement.transform_point([[0, 2, 3], [15, 2, 3], [40, 2, 3]]),
+        [[0.109, 0.204, 0.3], [0.109, 0.204, 0.315], [0.109, 0.204, 0.34]],
+        rtol=0,
+        atol=ATOL,
+    )
+
+
+def test_basis_constructor_owns_the_vectors_and_translation(plane_frame: ReferenceFrame) -> None:
+    vectors = {"row": np.array([2.0, 0.5]), "column": np.array([-1.0, 3.0])}
+    translation = np.array([1.0, -1.0])
+    placement = AffineTransform(
+        source=ArrayCoordinates(("row", "column"), ("1", "1")),
+        target=plane_frame,
+        target_axes=("x", "y"),
+        basis_vectors=vectors,
+        translation=translation,
+    )
+    before = hash(placement)
+    vectors["row"][:] = 99
+    vectors["column"] = np.array([99, 99])
+    translation[:] = 99
+    assert_allclose(placement.transform_point([4, 5]), [4, 16], rtol=0, atol=ATOL)
+    assert hash(placement) == before
+    assert not placement.matrix.flags.writeable
+    assert not placement.translation.flags.writeable
+
+
+@pytest.mark.parametrize("translation", [(0,), (0, np.inf)])
+def test_basis_constructor_validates_translation(
+    plane_frame: ReferenceFrame, translation: npt.ArrayLike
+) -> None:
+    with pytest.raises(ValueError, match="translation"):
+        AffineTransform(
+            source=ArrayCoordinates(("j", "i"), ("1", "1")),
+            target=plane_frame,
+            target_axes=("x", "y"),
+            basis_vectors={"j": (1, 0), "i": (0, 1)},
+            translation=translation,
+        )
+
+
+def test_affine_repr_names_the_matrix_constructor(plane_transform: AffineTransform) -> None:
+    assert repr(plane_transform).startswith("AffineTransform.from_matrix(")
+    namespace = {
+        "AffineTransform": AffineTransform,
+        "ArrayCoordinates": ArrayCoordinates,
+        "ReferenceFrame": ReferenceFrame,
+        "CoordinateSystem": CoordinateSystem,
+    }
+    assert eval(repr(plane_transform), namespace) == plane_transform

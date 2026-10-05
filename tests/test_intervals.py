@@ -30,7 +30,7 @@ ATOL = 1e-12  # Roundoff for synthetic coordinate arithmetic in millimetres.
 
 
 def mapping(offset: float | None = 0.5) -> AffineTransform:
-    return AffineTransform(
+    return AffineTransform.from_matrix(
         source=ArrayCoordinates(("z",), ("mm",), sample_offset=(offset,)),
         target=ReferenceFrame.declared(
             ("synthetic", "intervals"), CoordinateSystem(("Z",), ("mm",))
@@ -290,7 +290,7 @@ def test_coordinate_merge_with_repeated_labels_raises_xarray_merge_error(reverse
 
 
 def two_axis_array() -> xr.DataArray:
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("z", "x"), ("mm", "mm"), sample_offset=(0.5, 0.5)),
         target=ReferenceFrame.declared(
             ("synthetic", "plane"), CoordinateSystem(("Z", "X"), ("mm", "mm"))
@@ -522,7 +522,7 @@ def test_interval_agreement_tolerance_is_relative_to_width() -> None:
 def test_epoch_scale_interval_agreement_accepts_roundoff_but_refuses_disagreement(
     accepted: bool,
 ) -> None:
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("t",), ("s",), sample_offset=(0.5,)),
         target=ReferenceFrame.declared(("synthetic", "epoch"), CoordinateSystem(("T",), ("s",))),
         matrix=[[1]],

@@ -402,7 +402,9 @@ def _import_transform(
         translation = translation[target_keep]
         source = _subset(source, source_keep)
         target = _subset(target, target_keep)
-    return AffineTransform(source=source, target=target, matrix=matrix, translation=translation)
+    return AffineTransform.from_matrix(
+        source=source, target=target, matrix=matrix, translation=translation
+    )
 
 
 def _subset(

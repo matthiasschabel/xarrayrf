@@ -31,7 +31,7 @@ def test_a_rotated_volume_resamples_onto_another_frame_through_a_registration() 
     source_array, source = synthetic.volume(spacing=(1.0, 1.0, 1.0))
     moved = synthetic.patient_frame()
     rotation = synthetic.rotation_z(90.0)
-    registration = xrf.AffineTransform(
+    registration = xrf.AffineTransform.from_matrix(
         source=moved, target=source.frame, matrix=rotation.T, translation=np.zeros(3)
     )
     target_array, target = synthetic.volume(spacing=(1.0, 1.0, 1.0), rotation=rotation, frame=moved)

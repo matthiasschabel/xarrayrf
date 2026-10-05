@@ -260,7 +260,7 @@ def reoriented(grid: Grid, orientation: str | tuple[str, ...]) -> Grid:
                 offset = offsets[j]
                 assert offset is not None
                 offsets[j] = 1.0 - offset
-        reflected = AffineTransform(
+        reflected = AffineTransform.from_matrix(
             source=ArrayCoordinates(
                 source.axes, source.units, axis_types=source.axis_types, sample_offset=offsets
             ),
@@ -431,7 +431,7 @@ def cardinal_grid(
     for i in unoriented:
         origin[i] = (corners[:, i].min() + corners[:, i].max()) / 2
     return Grid(
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(
                 names, ("1",) * 3, sample_offset=(0.5,) * 3 if cover == "cells" else (None,) * 3
             ),

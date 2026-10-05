@@ -1,7 +1,7 @@
 # Core model: frames, coordinate systems and transforms
 
 **Status:** Implemented
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-04
 **Scope:** The NumPy-only core: `ReferenceFrame`, `CoordinateSystem`, roles, direction
 vocabularies, the `Transform` protocols and endpoints, quantity rules, units, affine classes and
 `Lattice.affine`. [The core interface](../../core_interface.md) is normative; this note records
@@ -150,6 +150,25 @@ series from different frames uses an explicit transform, never an automatic one.
   Equilibration makes the test unit-independent: an SI Lorentz boost has entries spanning about
   17 orders of magnitude and a raw condition number near 5e16, yet is well conditioned.
 - Orientation-only poses were removed: a transform with unknown translation cannot map points.
+
+### Affine construction
+
+The default `AffineTransform` constructor takes `basis_vectors` keyed by source axis and a
+required `target_axes` assertion for vector and translation component order. The assertion
+must match the target endpoint exactly; dictionary order is ignored and matrix columns are
+assembled in source-axis order. Vectors describe unit coordinate-value increments, include
+scale, and may be nonorthogonal or dependent. They are properties of the transform, so two
+arrays with different sampling can still share one reference frame and coordinate system.
+
+`AffineTransform.from_matrix` remains public for adapters, codecs and numerical operations
+that already have coefficients. Both paths share validation and immutable matrix/translation
+storage, preserving structural identity and schema 1. Per-vector validation happens before
+assembly so dtype promotion between vectors cannot hide a boolean or masked vector. The
+pre-release API changes directly, without a deprecation shim, by explicit project decision.
+
+An ordered vector list would retain source-order ambiguity; nested component mappings were
+rejected as unnecessary complexity. Explicit target-axis assertion catches a mistaken order,
+but cannot verify that the caller assigned the right numbers to those declared components.
 
 ### Quantity rules
 

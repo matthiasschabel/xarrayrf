@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Mapping, Sequence
+from typing import Final, Self
 
 import numpy as np
 import numpy.typing as npt
 
 from ._transform import Endpoint, check_endpoint
-from ._validation import frozen_float_array, real_float_array
+from ._validation import check_names, frozen_float_array, real_float_array
 
 INVERSE_CONDITION_LIMIT: Final = 1.0 / (10.0 * float(np.finfo(np.float64).eps))
 """Largest condition number, after equilibration, for which an inverse is computed.
@@ -62,6 +63,11 @@ class AffineTransform:
     the original coordinate values. Between frames, it is a registration, a relation such as
     patient to equipment, or a coordinate-system change.
 
+    Construct with ``basis_vectors`` keyed by source axis and an explicit ``target_axes``
+    order for their components and the translation. Each vector is the target displacement
+    for a unit increase in its source coordinate, including scale. If you already have
+    coefficients, use :meth:`from_matrix` directly.
+
     ``matrix`` has one row per target axis and one column per source axis, with no requirement
     to be square, orthonormal or invertible. The transform carries no array, shape or sample
     ownership. It implements :class:`~xarrayrf.SupportsAffine` and
@@ -88,34 +94,114 @@ class AffineTransform:
         *,
         source: Endpoint,
         target: Endpoint,
-        matrix: npt.ArrayLike,
+        target_axes: Sequence[str],
+        basis_vectors: Mapping[str, npt.ArrayLike],
         translation: npt.ArrayLike,
     ) -> None:
-        """Validate and freeze an affine transform.
+        """Construct an affine from named source-axis vectors.
 
         Affine in the coordinate values does not imply uniformly sampled array positions: the
         source coordinates may be nonuniform offsets, physical distances, one-based labels or a
         scalar retained by a selection. Any unit conversion from source to target units is
-        carried by ``matrix``.
+        carried by the basis vectors.
 
         Args:
-            source: The endpoint points are mapped from; its axes order the matrix columns.
-            target: The endpoint points are mapped to; its axes order the matrix rows.
-            matrix: Real coefficients shaped (target axes, source axes). A mixed Python
-                sequence follows ordinary NumPy promotion, so its inferred dtype is what must
-                be real integer or floating; a masked array is refused rather than unmasked.
-            translation: One real value per target axis: where the zero source point lands,
+            source: The endpoint points are mapped from.
+            target: The endpoint points are mapped to.
+            target_axes: Component order for every vector and the translation. Must match
+                the target's axes exactly, including order.
+            basis_vectors: One vector per source axis, keyed by its name. Mapping order is
+                ignored. Vectors include scale and need not be orthogonal or independent.
+                Each must be a finite real 1-D array with one component per target axis.
+            translation: One real value per asserted target axis: where the zero source point lands,
                 not where the first sample lands.
 
         Raises:
-            TypeError: If an endpoint is not a :class:`~xarrayrf.ReferenceFrame` or
-                :class:`~xarrayrf.ArrayCoordinates`, or the coefficients have a non-real
-                inferred dtype or are a masked array.
-            ValueError: If the coefficients are not a rectangular numeric array, their shape
-                disagrees with the endpoints' axes, or any coefficient is not finite.
+            TypeError: If an endpoint, axis sequence or mapping has the wrong type, mapping
+                keys are not strings, or coefficients have a non-real dtype or are masked.
+            ValueError: If target axis order disagrees, source names are missing or extra,
+                or coefficients have the wrong shape or are not finite.
         """
-        self._source = check_endpoint(source, field="source")
-        self._target = check_endpoint(target, field="target")
+        source = check_endpoint(source, field="source")
+        target = check_endpoint(target, field="target")
+        axes = check_names(target_axes, field="target_axes")
+        if axes != target.axes:
+            raise ValueError(
+                f"target_axes must match target axes {target.axes} in order, got {axes}"
+            )
+        if not isinstance(basis_vectors, Mapping):
+            raise TypeError("basis_vectors must be a mapping keyed by source axis name")
+        if any(not isinstance(name, str) for name in basis_vectors):
+            raise TypeError("basis_vectors keys must be strings")
+        missing = tuple(sorted(set(source.axes) - basis_vectors.keys()))
+        extra = tuple(sorted(basis_vectors.keys() - set(source.axes)))
+        if missing or extra:
+            raise ValueError(
+                "basis_vectors must name every source axis exactly once; "
+                f"missing {missing}, extra {extra}"
+            )
+        vectors = []
+        for name in source.axes:
+            field = f"basis_vectors[{name!r}]"
+            vector = real_float_array(basis_vectors[name], field=field)
+            if vector.shape != (len(axes),):
+                raise ValueError(
+                    f"{field} must have one component per target axis {axes}, "
+                    f"with shape {(len(axes),)}, got shape {vector.shape}"
+                )
+            vectors.append(vector)
+        self._initialize(
+            source=source,
+            target=target,
+            matrix=np.column_stack(vectors),
+            translation=translation,
+        )
+
+    @classmethod
+    def from_matrix(
+        cls,
+        *,
+        source: Endpoint,
+        target: Endpoint,
+        matrix: npt.ArrayLike,
+        translation: npt.ArrayLike,
+    ) -> Self:
+        """Construct an affine from coefficients in endpoint-axis order.
+
+        Args:
+            source: Endpoint whose axes order the matrix columns.
+            target: Endpoint whose axes order the matrix rows and translation components.
+            matrix: Finite real coefficients shaped (target axes, source axes). Mixed Python
+                sequences follow NumPy dtype promotion; masked arrays are refused.
+            translation: Where the zero source point lands, one value per target axis.
+
+        Returns:
+            An immutable affine with the supplied coefficients.
+
+        Raises:
+            TypeError: If an endpoint has the wrong type, or coefficients have a non-real
+                inferred dtype or are masked.
+            ValueError: If coefficients have the wrong shape or are not finite.
+        """
+        result = cls.__new__(cls)
+        result._initialize(
+            source=check_endpoint(source, field="source"),
+            target=check_endpoint(target, field="target"),
+            matrix=matrix,
+            translation=translation,
+        )
+        return result
+
+    def _initialize(
+        self,
+        *,
+        source: Endpoint,
+        target: Endpoint,
+        matrix: npt.ArrayLike,
+        translation: npt.ArrayLike,
+    ) -> None:
+        self._source = source
+        self._target = target
         expected = (len(target.axes), len(source.axes))
         self._matrix = frozen_float_array(matrix, field="matrix")
         if self._matrix.shape != expected:
@@ -243,7 +329,7 @@ class AffineTransform:
                 "no inverse; projecting a point onto its image is a separate operation",
             )
         inverse = equilibrated_inverse(self._matrix)
-        return AffineTransform(
+        return AffineTransform.from_matrix(
             source=self._target,
             target=self._source,
             matrix=inverse,
@@ -266,7 +352,7 @@ class AffineTransform:
             TypeError: If a replacement is not an endpoint.
             ValueError: If a replacement's axis count disagrees with the coefficients.
         """
-        return AffineTransform(
+        return AffineTransform.from_matrix(
             source=self._source if source is None else source,
             target=self._target if target is None else target,
             matrix=self._matrix,
@@ -304,6 +390,6 @@ class AffineTransform:
     def __repr__(self) -> str:
         """Return an unambiguous representation naming the endpoints and coefficients."""
         return (
-            f"AffineTransform(source={self._source!r}, target={self._target!r}, "
+            f"AffineTransform.from_matrix(source={self._source!r}, target={self._target!r}, "
             f"matrix={self._matrix.tolist()!r}, translation={self._translation.tolist()!r})"
         )

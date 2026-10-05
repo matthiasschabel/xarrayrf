@@ -38,7 +38,7 @@ def patient_frame() -> ReferenceFrame:
 @pytest.fixture
 def volume_transform(patient_frame: ReferenceFrame) -> AffineTransform:
     """L = 10 + 0.5*column, P = 20 + 0.25*row, S = -5 + slice_offset."""
-    return AffineTransform(
+    return AffineTransform.from_matrix(
         target=patient_frame,
         source=ArrayCoordinates(("slice_offset", "row", "column"), ("mm", "1", "1")),
         matrix=((0.0, 0.0, 0.5), (0.0, 0.25, 0.0), (1.0, 0.0, 0.0)),
@@ -108,7 +108,7 @@ def test_declared_properties_are_derived_afresh_and_read_only(
 
 def test_embedded_plane_maps_two_source_axes_into_three_axes() -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("L", "P", "S"), ("mm", "mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=((0.6, 0.0), (0.8, 0.0), (0.0, -1.0)),
@@ -130,7 +130,7 @@ def test_embedded_plane_maps_two_source_axes_into_three_axes() -> None:
 def test_one_based_labels_are_absorbed_by_the_affine_offset() -> None:
     """Position 0 carries label 1; the transform's translation, not the view, handles the origin."""
     frame = ReferenceFrame.local(CoordinateSystem(("x", "y"), ("mm", "mm")))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=frame,
         source=ArrayCoordinates(("row", "column"), ("1", "1")),
         matrix=((2.0, 0.0), (0.0, 3.0)),
@@ -191,7 +191,7 @@ def test_dimension_order_does_not_change_placement(
 
 def test_a_multidimensional_coordinate_field_is_read_at_the_requested_sample() -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("x",), ("mm",)))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=frame,
         source=ArrayCoordinates(("u", "v"), ("mm", "mm")),
         matrix=((1.0, 2.0),),
@@ -424,7 +424,7 @@ def test_repr_names_the_target_and_geometry_dimensions(
 
 def test_a_dimension_named_self_can_be_queried() -> None:
     frame = ReferenceFrame.local(CoordinateSystem(("x",), ("mm",)))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         target=frame,
         source=ArrayCoordinates(("self",), ("1",)),
         matrix=((2.0,),),
@@ -451,7 +451,7 @@ def _queries_geometry(k: list[float]) -> Geometry:
         dims=("k", "j", "i"),
         coords={"k": ("k", k), "j": np.arange(3), "i": np.arange(4)},
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("i", "j", "k"), ("1", "1", "mm")),
         target=frame,
         matrix=np.diag([0.5, 0.5, 1.0]),
@@ -517,7 +517,7 @@ def test_positions_at_refuses_two_axes_along_one_dimension() -> None:
     array = xr.DataArray(
         np.zeros(3), dims=("s",), coords={"a": ("s", [0.0, 1.0, 2.0]), "b": ("s", [0.0, 2.0, 4.0])}
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("a", "b"), ("1", "1")),
         target=frame,
         matrix=np.eye(2),
@@ -571,7 +571,7 @@ def _cells_geometry(
         dims=("k", "j", "i"),
         coords={"k": ("k", k), "j": np.arange(3), "i": np.arange(4)},
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(
             ("i", "j", "k"), ("1", "1", "mm"), sample_offset=(0.5, j_offset, offset)
         ),
@@ -701,7 +701,7 @@ def _grid(
             "i": np.arange(shape[2]),
         },
     )
-    transform: Any = AffineTransform(
+    transform: Any = AffineTransform.from_matrix(
         source=ArrayCoordinates(("i", "j", "k"), ("1", "1", "1")),
         target=frame,
         matrix=matrix,
@@ -804,7 +804,7 @@ def test_dimensions_pair_by_name_and_size() -> None:
     assert grid.is_coincident(stored)
     renamed = Geometry(
         grid.array.rename(k="s"),
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(("i", "j", "s"), ("1", "1", "1")),
             target=grid.frame,
             matrix=np.diag([0.5, 0.5, 2.0]),
@@ -902,7 +902,7 @@ def test_a_unitless_axis_refuses_a_units_attribute_and_writes_none() -> None:
     array = xr.DataArray(
         np.zeros((2, 3)), dims=("c", "i"), coords={"c": ("c", [0.0, 1.0]), "i": np.arange(3)}
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("c", "i"), (None, "1")),
         target=frame,
         matrix=np.diag([1.0, 0.5]),

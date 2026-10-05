@@ -55,7 +55,7 @@ def volume(
         name="signal",
     )
     matrix = np.eye(3) if rotation is None else np.asarray(rotation, dtype=np.float64)
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("i", "j", "k"), ("1",) * 3, sample_offset=(0.5,) * 3),
         target=frame,
         matrix=matrix @ np.diag(spacing),
@@ -89,7 +89,7 @@ def time_series(
     matrix = np.zeros((4, 4))
     matrix[:3, :3] = np.diag([1.0, 1.0, 3.0])
     matrix[3, 3] = interval
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(
             ("i", "j", "k", "t"),
             ("1",) * 4,
@@ -120,7 +120,7 @@ def reciprocal(shape: tuple[int, int, int] = (6, 6, 5)) -> tuple[xr.DataArray, x
     array = xr.DataArray(
         np.random.default_rng(0).random(shape), dims=("kx", "ky", "w"), coords=coords, name="power"
     )
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("kx", "ky", "w"), ("1/mm", "1/mm", "rad/s")),
         target=frame,
         matrix=np.eye(3),

@@ -21,7 +21,7 @@ abstractions are general rather than tuned to images. It does, with three fixes 
 | Physics | xarrayrf |
 |---|---|
 | Inertial frame | `ReferenceFrame` with `CoordinateSystem(("ct", "x", "y", "z"))` in metres (SI also works) |
-| Lorentz boost / Poincaré transformation | `AffineTransform(source=lab, target=rocket, matrix=Λ, translation=a)` |
+| Lorentz boost / Poincaré transformation | `AffineTransform.from_matrix(source=lab, target=rocket, matrix=Λ, translation=a)` |
 | Inverse, successive boosts | `inverse()` (exact); `compose` reproduces velocity addition `(a + b)/(1 + ab)` |
 | 4-velocity, 4-momentum | `jacobian() @ u` |
 | Wave vector, gradient (covectors) | `J^-T` |

@@ -45,7 +45,7 @@ def round_trip(value: object, **kwargs: Any) -> Any:
 def affine(source: xrf.Endpoint, target: xrf.Endpoint) -> xrf.AffineTransform:
     size_out, size_in = len(target.axes), len(source.axes)
     matrix = np.full((size_out, size_in), 0.1) + np.eye(size_out, size_in) / 3.0
-    return xrf.AffineTransform(
+    return xrf.AffineTransform.from_matrix(
         source=source, target=target, matrix=matrix, translation=np.full(size_out, 1e-300)
     )
 
@@ -84,7 +84,7 @@ def test_metadata_keeps_the_types_the_core_compares() -> None:
 
 def test_affine_coefficients_round_trip_bitwise() -> None:
     values = np.array([0.1, 1.0 / 3.0, 1e-300, 5e-324, -2.5e17, np.nextafter(1.0, 2.0)])
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("a",), ("1",)),
         target=xrf.ReferenceFrame.local(xrf.CoordinateSystem(tuple("uvwxyz"), ("m",) * 6)),
         matrix=values.reshape(6, 1),
@@ -93,6 +93,27 @@ def test_affine_coefficients_round_trip_bitwise() -> None:
     decoded = round_trip(transform)
     assert decoded.matrix.tobytes() == transform.matrix.tobytes()
     assert decoded.translation.tobytes() == transform.translation.tobytes()
+
+
+def test_named_basis_uses_the_existing_matrix_encoding() -> None:
+    source = xrf.ArrayCoordinates(("j", "i"), ("1", "1"))
+    target = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y", "z"), ("mm",) * 3))
+    named = xrf.AffineTransform(
+        source=source,
+        target=target,
+        target_axes=("x", "y", "z"),
+        basis_vectors={"i": (-1.0, 3.0, -0.0), "j": (2.0, 0.5, 0.0)},
+        translation=(1.0, -1.0, -0.0),
+    )
+    coefficients = xrf.AffineTransform.from_matrix(
+        source=source,
+        target=target,
+        matrix=((2.0, -1.0), (0.5, 3.0), (0.0, 0.0)),
+        translation=(1.0, -1.0, 0.0),
+    )
+    assert json.dumps(xrf.encode(named)) == json.dumps(xrf.encode(coefficients))
+    assert round_trip(named) == coefficients
+    assert hash(round_trip(named)) == hash(coefficients)
 
 
 def test_a_composite_round_trips_with_its_array_coordinate_end() -> None:
@@ -304,10 +325,15 @@ def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
     )
     frame = xrf.ReferenceFrame.local(system)
     array = xrf.ArrayCoordinates(("i",), ("1",), sample_offset=(0.5,))
-    affine = xrf.AffineTransform(source=array, target=frame, matrix=[[2.0]], translation=[1.0])
+    affine = xrf.AffineTransform.from_matrix(
+        source=array, target=frame, matrix=[[2.0]], translation=[1.0]
+    )
     frame_b = xrf.ReferenceFrame.local(system)
     composite = xrf.CompositeTransform(
-        affine, xrf.AffineTransform(source=frame, target=frame_b, matrix=[[1.0]], translation=[0.0])
+        affine,
+        xrf.AffineTransform.from_matrix(
+            source=frame, target=frame_b, matrix=[[1.0]], translation=[0.0]
+        ),
     )
     seen = set()
     for value in (

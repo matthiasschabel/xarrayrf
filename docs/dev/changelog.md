@@ -2,6 +2,30 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-04] — QA of named-basis affine construction
+
+- **Problem**: Matrix-only construction left source-column and target-component ordering
+  implicit. The implementation review also caught two accidentally migrated SimpleITK
+  constructors; the QA pass found one remaining old-signature example in the relativity notes.
+- **Resolution**: The default constructor uses source-named `basis_vectors` and requires
+  `target_axes` to match the target exactly. Each vector is validated before assembly; both
+  construction paths share immutable coefficients and retain schema 1. Matrix callers use
+  `from_matrix`. The SimpleITK helper is byte-for-byte unchanged from the baseline, and the
+  stale documentation example is corrected. QA found no remaining functional defect.
+- **Verification**: 150 focused tests pass; stock xarray has 1617 passing tests and 47 expected
+  failures for existing hook gaps; patched xarray has 1664 passing tests. Lint, formatting,
+  mypy and `git diff --check` pass. An AST audit confirms 35 migrated Python files changed
+  only the constructor spelling. The implementation pass also executed all 10 relativity
+  notebook cells and checked the tour's placement against an independent point calculation.
+  The full network-backed tour and optional SimpleITK registration helper were not executed.
+- **Files affected**: `src/xarrayrf/_affine.py`; matrix callers in the core, anatomy and
+  DICOM, NIfTI, NGFF and GeoTIFF adapters; affine, encoding, README and integration tests;
+  `README.md`, `CHANGELOG.md`, `docs/core_interface.md`, the core-model and relativity notes,
+  binding-operation inventory; notebook examples, their builders, the binding probe and
+  resampling benchmark.
+- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); implementation reviews
+  by Claude Opus 5.5 (`claude-opus-5-5`).
+
 ## [2026-10-01] — QA fixes for anonymous frames (grid plan stage 5)
 
 - **Problem**: A QA pass over stage 5 found that a framed array written to NetCDF and read back

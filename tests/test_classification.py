@@ -20,7 +20,7 @@ def transform(
     target_units: tuple[str, ...] | None = None,
 ) -> xrf.AffineTransform:
     rows, columns = matrix.shape
-    return xrf.AffineTransform(
+    return xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(
             tuple(f"a{i}" for i in range(columns)), source_units or ("mm",) * columns
         ),
@@ -190,7 +190,7 @@ def test_malformed_affine_coefficients_are_rejected() -> None:
     valid = transform(np.eye(2))
     with pytest.raises(ValueError, match=r"affine\.matrix must have shape"):
         xrf.affine_class(
-            WrongMatrix(
+            WrongMatrix.from_matrix(
                 source=valid.source,
                 target=valid.target,
                 matrix=np.eye(2),
@@ -199,7 +199,7 @@ def test_malformed_affine_coefficients_are_rejected() -> None:
         )
     with pytest.raises(ValueError, match="affine translation must have shape"):
         xrf.affine_class(
-            WrongTranslation(
+            WrongTranslation.from_matrix(
                 source=valid.source,
                 target=valid.target,
                 matrix=np.eye(2),

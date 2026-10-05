@@ -85,7 +85,7 @@ def volume(
     rotation = np.array(
         [[np.cos(theta), -np.sin(theta), 0], [np.sin(theta), np.cos(theta), 0], [0, 0, 1]]
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("u", "v", "w"), ("1",) * 3, sample_offset=offsets),
         target=ReferenceFrame.local(patient_coordinate_system(orientation, "mm")),
         matrix=rotation @ np.diag([2.0, 3.0, 4.0]),
@@ -176,7 +176,7 @@ def test_all_signed_permutations_preserve_points_and_cells(
 
 def test_assignment_is_global_when_nearest_axes_collide() -> None:
     grid = volume()
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=grid.transform.source,
         target=grid.frame,
         matrix=np.array([[1, 0.8, 0], [0.1, 0.6, 0], [0, 0, 1]]),
@@ -188,7 +188,7 @@ def test_assignment_is_global_when_nearest_axes_collide() -> None:
 @pytest.mark.parametrize("sign", [1, -1])
 def test_assignment_refuses_parallel_anatomical_directions(sign: int) -> None:
     grid = volume()
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=grid.transform.source,
         target=grid.frame,
         matrix=[[1, sign, 0], [1, sign, 0], [0, 0, 1]],
@@ -204,7 +204,7 @@ def test_assignment_refuses_parallel_anatomical_directions(sign: int) -> None:
 
 def test_assignment_accepts_45_degree_shear() -> None:
     grid = volume()
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=grid.transform.source,
         target=grid.frame,
         matrix=[[1, 1, 0], [0, 1, 0], [0, 0, 1]],
@@ -405,7 +405,7 @@ def test_ambiguous_cardinal_defaults_request_explicit_spacing_and_dims(
 
 def test_explicit_cardinal_grid_still_requires_rank_three_anatomical_directions() -> None:
     grid = volume()
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=grid.transform.source,
         target=grid.frame,
         matrix=[[1, 0, 1], [0, 1, 1], [0, 0, 0]],
@@ -509,7 +509,7 @@ def test_frame_and_zero_column_refusals() -> None:
         ),
     ]
     for system in systems:
-        transform = AffineTransform(
+        transform = AffineTransform.from_matrix(
             source=grid.transform.source,
             target=ReferenceFrame.local(system),
             matrix=np.eye(3),
@@ -517,7 +517,7 @@ def test_frame_and_zero_column_refusals() -> None:
         )
         with pytest.raises(ValueError, match=r"spatial axes|share one unit"):
             orientation_codes(Grid(transform, grid.coordinates))
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=grid.transform.source,
         target=grid.frame,
         matrix=np.diag([0, 1, 1]),
@@ -632,7 +632,7 @@ def test_too_many_dims_and_non_anatomical_displacement_refuse() -> None:
         orientation=(*RAS, None),
     )
     frame = ReferenceFrame.local(system)
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("a", "b", "c", "d"), ("1",) * 4),
         target=frame,
         matrix=np.eye(4),
@@ -643,7 +643,7 @@ def test_too_many_dims_and_non_anatomical_displacement_refuse() -> None:
         orientation_codes(grid)
     with pytest.raises(ValueError, match=r"retained scalar"):
         cardinal_grid(grid.isel(d=0), "RAS", spacing=1, cover="samples")
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("a", "b", "c"), ("1",) * 3),
         target=frame,
         matrix=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 1]]),
@@ -669,7 +669,7 @@ def test_cardinal_non_anatomical_cross_rows_allow_only_roundoff(
         vocabulary=VOCABULARY,
         orientation=(*RAS, None),
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("a", "b", "c"), ("1",) * 3, sample_offset=(0.5,) * 3),
         target=ReferenceFrame.local(system),
         # The same anatomy in finer units must not loosen the check on the time axis.
@@ -702,7 +702,7 @@ def test_cardinal_cross_row_bound_matches_each_column_to_its_coordinate_span(
         vocabulary=VOCABULARY,
         orientation=(*RAS, None),
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("a", "b", "c"), ("1",) * 3),
         target=ReferenceFrame.local(system),
         matrix=np.array(

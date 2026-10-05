@@ -176,7 +176,7 @@ def test_oblique_level_lossless_boundary(path: str) -> None:
     )
     geometry = Geometry(
         array,
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(dims, ("1", "1"), sample_offset=(0.5, 0.5)),
             target=frame,
             matrix=[[2.0, 0.5], [0.0, 3.0]],

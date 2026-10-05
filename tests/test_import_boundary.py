@@ -21,7 +21,7 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
     import xarrayrf as xrf
 
     frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x",), ("mm",)))
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         target=frame, source=xrf.ArrayCoordinates(("i",), ("1",)), matrix=((2.0,),), translation=(1.0,)
     )
     assert float(xrf.transform_named(transform, {"i": 3.0})["x"]) == 7.0

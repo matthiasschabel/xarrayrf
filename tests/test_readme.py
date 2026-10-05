@@ -30,7 +30,7 @@ def test_readme_examples_run_and_match_their_comments() -> None:
         exec(compile(block, str(README), "exec"), namespace)
 
     crop = namespace["crop"]
-    np.testing.assert_allclose(crop.rf.geometry.point_at(row=0, column=0).values, [10.5, 20.0])
+    np.testing.assert_allclose(crop.rf.geometry.point_at(j=0, i=0).values, [10.5, 20.0])
     grid = namespace["grid"]
     anatomy = namespace["anatomy"]
     np.testing.assert_allclose(grid.point_at(k=1, j=0, i=0), [-2.5, -2.0, 3.0])

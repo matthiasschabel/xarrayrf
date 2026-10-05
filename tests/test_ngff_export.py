@@ -34,7 +34,9 @@ def _geometry(*, diagonal: bool = True, offset: float = 0.5) -> Geometry:
     )
     return Geometry(
         array,
-        AffineTransform(source=source, target=frame, matrix=matrix, translation=[4.0, 5.0]),
+        AffineTransform.from_matrix(
+            source=source, target=frame, matrix=matrix, translation=[4.0, 5.0]
+        ),
         dims=("j", "i"),
     )
 
@@ -100,7 +102,7 @@ def test_shared_names_declare_every_transform_endpoint() -> None:
         geometry, path="s0", name="array-space", frame_name="physical"
     )
     names = {geometry.frame: "physical", other: "other"}
-    frame_transform = AffineTransform(
+    frame_transform = AffineTransform.from_matrix(
         source=geometry.frame, target=other, matrix=np.eye(2), translation=np.zeros(2)
     )
     exported, _ = to_transform(frame_transform, names=names)
@@ -139,7 +141,7 @@ def test_shared_names_declare_every_transform_endpoint() -> None:
 
 def test_local_frame_transform_needs_explicit_names() -> None:
     geometry = _geometry()
-    frame_transform = AffineTransform(
+    frame_transform = AffineTransform.from_matrix(
         source=geometry.frame, target=geometry.frame, matrix=np.eye(2), translation=np.zeros(2)
     )
     with pytest.raises(ValueError, match="needs a name in names for NGFF export"):
@@ -169,7 +171,7 @@ def test_level_reports_every_unrepresented_declaration() -> None:
     )
     geometry = Geometry(
         array,
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(dims, ("1",) * 3, sample_offset=(0.0,) * 3),
             target=frame,
             matrix=np.eye(3),
@@ -206,7 +208,7 @@ def test_level_round_trip_preserves_rfc4_orientation(diagonal: bool) -> None:
     )
     geometry = Geometry(
         base.array,
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=base.transform.source,
             target=base.frame.with_coordinate_system(system),
             matrix=base.transform.matrix,
@@ -235,7 +237,7 @@ def test_to_transform_exports_rectangular_affine_and_losses() -> None:
     target = ReferenceFrame.declared(
         ("ome-zarr", "file:///store#target"), CoordinateSystem(("x", "y", "z"), (None, None, None))
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=source, target=target, matrix=[[1, 0], [0, 2], [3, 4]], translation=[5, 6, 7]
     )
     value, report = to_transform(transform)
@@ -307,7 +309,7 @@ def test_rectangular_level_refuses() -> None:
     )
     geometry = Geometry(
         base.array,
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=base.transform.source,
             target=frame,
             matrix=[[1, 0], [0, 2], [3, 4]],
@@ -325,7 +327,7 @@ def test_array_unit_loss_includes_undeclared_unit() -> None:
     array.coords["j"].attrs.pop("units")
     geometry = Geometry(
         array,
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(("j", "i"), (None, "1"), sample_offset=(0.5, 0.5)),
             target=base.frame,
             matrix=np.diag([2, 3]),
@@ -341,7 +343,7 @@ def test_array_axis_type_loss_is_reported() -> None:
     base = _geometry()
     geometry = Geometry(
         base.array,
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(
                 ("j", "i"), ("1", "1"), axis_types=("space", None), sample_offset=(0.5, 0.5)
             ),
@@ -387,7 +389,7 @@ def test_orientation_on_a_non_space_axis_is_reported_not_written() -> None:
     )
     geometry = Geometry(
         array,
-        AffineTransform(
+        AffineTransform.from_matrix(
             source=ArrayCoordinates(("t", "i", "j"), ("1", "1", "1")),
             target=frame,
             matrix=np.eye(3),

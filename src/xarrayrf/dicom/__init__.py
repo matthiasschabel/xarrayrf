@@ -328,7 +328,7 @@ def _assemble(
         axis_types=("space",) * 3,
         sample_offset=(0.5,) * 3,
     )
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=source,
         target=frame,
         matrix=np.column_stack(
@@ -517,7 +517,7 @@ def _check_matrix_type(
             f"{name} has unsupported FrameOfReferenceTransformationMatrixType {matrix_type!r}"
         )
     axes = ArrayCoordinates(("x", "y", "z"), ("mm",) * 3)
-    transform = AffineTransform(
+    transform = AffineTransform.from_matrix(
         source=axes, target=axes, matrix=matrix[:3, :3], translation=matrix[:3, 3]
     )
     classification = affine_class(transform, tolerance=tolerance)
@@ -570,7 +570,7 @@ def equipment_transform(
         CoordinateSystem(("x", "y", "z"), ("mm",) * 3, axis_types=("space",) * 3),
         definition=definition,
     )
-    return AffineTransform(
+    return AffineTransform.from_matrix(
         source=patient_frame(_optional_text(dataset, "FrameOfReferenceUID")),
         target=equipment,
         matrix=matrix[:3, :3],
@@ -636,7 +636,7 @@ def registrations(
             _check_matrix_type(matrix, matrix_type or "", name, orientation_tolerance)
             combined = combined @ matrix
         result.append(
-            AffineTransform(
+            AffineTransform.from_matrix(
                 source=patient_frame(uid),
                 target=target,
                 matrix=combined[:3, :3],

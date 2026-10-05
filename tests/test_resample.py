@@ -58,7 +58,7 @@ def volume(
     }
     coords.update(extra or {})
     array = xr.DataArray(data, dims=dims, coords=coords)
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=IJK, target=frame, matrix=matrix, translation=translation
     )
     return xrf.Geometry(array, transform, dims=("k", "j", "i"))
@@ -192,7 +192,7 @@ def test_the_general_path_agrees_with_the_lattice_path() -> None:
     other = xrf.ReferenceFrame.declared(("test", "moved"), LPS.coordinate_system)
     source = volume(ramp((5, 6, 7)))
     target = volume(np.zeros((5, 6, 7)), frame=other)
-    affine = xrf.AffineTransform(
+    affine = xrf.AffineTransform.from_matrix(
         source=other, target=LPS, matrix=np.eye(3), translation=(0.25, 0.0, 0.0)
     )
     lattice_result = xrf.resample(source, target, transform=affine)
@@ -214,7 +214,7 @@ def test_nonuniform_slice_offsets_are_interpolated_by_position() -> None:
     )
     stack = xrf.Geometry(
         array,
-        xrf.AffineTransform(
+        xrf.AffineTransform.from_matrix(
             source=xrf.ArrayCoordinates(("column", "row", "slice_offset"), ("1", "1", "mm")),
             target=LPS,
             matrix=np.eye(3),
@@ -241,7 +241,7 @@ def test_different_frames_need_a_transform() -> None:
     target = volume(np.zeros((4, 5, 6)), frame=other)
     with pytest.raises(ValueError, match="different frames; supply the transform"):
         xrf.resample(source, target)
-    registration = xrf.AffineTransform(
+    registration = xrf.AffineTransform.from_matrix(
         source=other, target=LPS, matrix=np.eye(3), translation=(0.0, 0.0, 0.0)
     )
     assert_allclose(
@@ -327,7 +327,7 @@ def test_a_target_dimension_may_not_be_a_source_non_geometry_dimension() -> None
     )
     target = xrf.Geometry(
         array,
-        xrf.AffineTransform(
+        xrf.AffineTransform.from_matrix(
             source=xrf.ArrayCoordinates(("i", "j", "echo"), ("1", "1", "1")),
             target=LPS,
             matrix=np.eye(3),
@@ -345,7 +345,7 @@ def test_a_plane_source_cannot_be_located_in_a_volume() -> None:
     )
     source = xrf.Geometry(
         plane,
-        xrf.AffineTransform(
+        xrf.AffineTransform.from_matrix(
             source=xrf.ArrayCoordinates(("i", "j"), ("1", "1")),
             target=LPS,
             matrix=[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
@@ -369,7 +369,7 @@ def test_cubic_agrees_between_the_two_paths() -> None:
     other = xrf.ReferenceFrame.declared(("test", "moved"), LPS.coordinate_system)
     source = volume(np.random.default_rng(1).random((5, 6, 7)))
     target = volume(np.zeros((5, 6, 7)), frame=other)
-    affine = xrf.AffineTransform(
+    affine = xrf.AffineTransform.from_matrix(
         source=other, target=LPS, matrix=np.eye(3), translation=(0.3, 0.0, 0.0)
     )
     fast = xrf.resample(source, target, transform=affine, method="cubic")
@@ -389,7 +389,7 @@ def test_a_finite_fill_value_marks_outside_samples(general: bool) -> None:
     transform: xrf.SupportsPoints = (
         Shift(other, LPS, 1.0)
         if general
-        else xrf.AffineTransform(
+        else xrf.AffineTransform.from_matrix(
             source=other, target=LPS, matrix=np.eye(3), translation=(1.0, 0.0, 0.0)
         )
     )
@@ -413,7 +413,7 @@ def test_a_plane_target_samples_a_volume() -> None:
     )
     target = xrf.Geometry(
         plane,
-        xrf.AffineTransform(
+        xrf.AffineTransform.from_matrix(
             source=xrf.ArrayCoordinates(("i", "j"), ("1", "1")),
             target=LPS,
             matrix=[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
@@ -434,7 +434,9 @@ def test_descending_coordinates_are_located() -> None:
     )
     descending = xrf.Geometry(
         array,
-        xrf.AffineTransform(source=IJK, target=LPS, matrix=np.eye(3), translation=(0.0, 0.0, 0.0)),
+        xrf.AffineTransform.from_matrix(
+            source=IJK, target=LPS, matrix=np.eye(3), translation=(0.0, 0.0, 0.0)
+        ),
         dims=("k", "j", "i"),
     )
     shifted = xrf.resample(descending, volume(np.zeros((4, 5, 6)), frame=LPS), transform=None)
@@ -477,7 +479,7 @@ def centred(geometry: xrf.Geometry) -> xrf.Geometry:
     assert isinstance(transform, xrf.AffineTransform)
     return xrf.Geometry(
         geometry.array,
-        xrf.AffineTransform(
+        xrf.AffineTransform.from_matrix(
             source=CENTRED,
             target=transform.target,
             matrix=transform.matrix,
@@ -538,7 +540,9 @@ def test_both_paths_agree_on_rotated_cells_with_asymmetric_offsets(method: xrf.M
     coordinates = xrf.ArrayCoordinates(("i", "j", "k"), ("1", "1", "1"), sample_offset=(0, 0.25, 1))
     source = xrf.Geometry(
         array,
-        xrf.AffineTransform(source=coordinates, target=LPS, matrix=rotation, translation=(0, 0, 0)),
+        xrf.AffineTransform.from_matrix(
+            source=coordinates, target=LPS, matrix=rotation, translation=(0, 0, 0)
+        ),
         dims=("k", "j", "i"),
     )
     target = volume(np.zeros((9, 11, 12)), translation=(-3.0, -1.5, -1.8), matrix=np.eye(3) * 0.8)
@@ -644,7 +648,7 @@ def test_a_transform_applies_only_to_the_frames_it_was_computed_between() -> Non
     other = xrf.ReferenceFrame.declared(("test", "other patient"), LPS.coordinate_system)
     source = volume(ramp(), frame=other)
     target = volume(np.zeros((2, 2, 2)))
-    registration = xrf.AffineTransform(
+    registration = xrf.AffineTransform.from_matrix(
         source=LPS, target=other, matrix=np.eye(3), translation=np.zeros(3)
     )
     xrf.resample(source, target, transform=registration)  # computed between these frames
@@ -653,7 +657,7 @@ def test_a_transform_applies_only_to_the_frames_it_was_computed_between() -> Non
         ValueError, match=r"maps test:patient to test:other patient.*computed between"
     ):
         xrf.resample(volume(ramp(), frame=third), target, transform=registration)
-    in_ras = xrf.AffineTransform(
+    in_ras = xrf.AffineTransform.from_matrix(
         source=RAS, target=other, matrix=np.eye(3), translation=np.zeros(3)
     )
     with pytest.raises(ValueError, match="same frames, different coordinate systems"):

@@ -55,7 +55,7 @@ def test_patient_grid_resamples_exactly_between_index_and_mm_offsets(
             "x": np.arange(5) * steps[2],
         },
     )
-    offset_transform = AffineTransform(
+    offset_transform = AffineTransform.from_matrix(
         source=ArrayCoordinates(("z", "y", "x"), ("mm",) * 3),
         target=patient_frame("1.2.3.4"),
         matrix=geometry.transform.matrix / steps,

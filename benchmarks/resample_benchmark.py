@@ -41,7 +41,7 @@ def geometry(
         coords["slice_offset"] = ("k", offsets)
         axes = ("i", "j", "slice_offset")
     array = xr.DataArray(values, dims=("k", "j", "i"), coords=coords)
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(axes, ("1", "1", "1")),
         target=FRAME,
         matrix=matrix,

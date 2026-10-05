@@ -99,7 +99,7 @@ def coordinate_system_change(source: ReferenceFrame, target: ReferenceFrame) -> 
             "the coordinate systems have different numbers of unoriented axes; the change is "
             "not derivable",
         )
-    return AffineTransform(
+    return AffineTransform.from_matrix(
         source=source,
         target=target,
         matrix=matrix,

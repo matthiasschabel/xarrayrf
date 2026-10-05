@@ -53,7 +53,7 @@ def _offset_source() -> xrf.Geometry:
     coordinates = xrf.ArrayCoordinates(("i", "j", "k"), ("1", "1", "1"), sample_offset=(0, 0.25, 1))
     return xrf.Geometry(
         array,
-        xrf.AffineTransform(
+        xrf.AffineTransform.from_matrix(
             source=coordinates, target=LPS, matrix=_rotation(20.0), translation=(0, 0, 0)
         ),
         dims=("k", "j", "i"),
@@ -69,7 +69,7 @@ def _nonuniform_stack() -> xrf.Geometry:
     )
     return xrf.Geometry(
         array,
-        xrf.AffineTransform(
+        xrf.AffineTransform.from_matrix(
             source=xrf.ArrayCoordinates(("column", "row", "slice_offset"), ("1", "1", "mm")),
             target=LPS,
             matrix=np.eye(3),

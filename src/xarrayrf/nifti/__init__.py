@@ -264,7 +264,7 @@ def from_header(
         axis_types=("space",) * 3 + (("time",) if time else ()),
         sample_offset=(0.5,) * 3 + ((None,) if time else ()),
     )
-    ras_affine = AffineTransform(
+    ras_affine = AffineTransform.from_matrix(
         source=source, target=ras_view, matrix=matrix, translation=translation
     )
     try:

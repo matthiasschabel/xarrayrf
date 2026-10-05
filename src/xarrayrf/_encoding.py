@@ -440,7 +440,7 @@ class _Decoder:
         )
 
     def affine_transform(self, fields: Mapping[str, Any]) -> AffineTransform:
-        return AffineTransform(
+        return AffineTransform.from_matrix(
             source=self._endpoint(fields["source"]),
             target=self._endpoint(fields["target"]),
             matrix=self._numbers(fields["matrix"], "matrix"),

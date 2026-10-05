@@ -34,7 +34,7 @@ def geometry(
         dims=("k", "j", "i"),
         coords={"k": np.arange(3), "j": np.arange(4), "i": np.arange(5)},
     )
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("i", "j", "k"), ("1", "1", "1"), sample_offset=sample_offset),
         target=FRAME,
         matrix=rotation @ np.diag([0.5, 0.5, 2.0]),
@@ -153,7 +153,7 @@ def test_irregular_samples_have_frame_coordinates() -> None:
 
 def test_a_plane_in_a_volume_has_coordinates_but_no_reverse_selection() -> None:
     plane = xr.DataArray(np.zeros((2, 3)), dims=("j", "i"), coords={"j": [0, 1], "i": [0, 1, 2]})
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("i", "j"), ("1", "1")),
         target=FRAME,
         matrix=[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
@@ -216,7 +216,7 @@ def test_renamed_dimensions_keep_the_frame_coordinates() -> None:
 def test_the_same_lattice_in_another_dimension_order_does_not_align() -> None:
     """Swapped dims give different frame coordinates even with equal sizes and matrix."""
     array = xr.DataArray(np.zeros((3, 3)), dims=("a", "b"), coords={"a": [0, 1, 2], "b": [0, 1, 2]})
-    transform = xrf.AffineTransform(
+    transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("a", "b"), ("1", "1")),
         target=xrf.ReferenceFrame.local(xrf.CoordinateSystem(("u", "v"), ("mm", "mm"))),
         matrix=[[1.0, 0.0], [0.0, 2.0]],

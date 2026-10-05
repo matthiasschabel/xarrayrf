@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `AffineTransform` now takes `basis_vectors` keyed by source axis and a required
+  `target_axes` assertion for vector and translation component order. Vectors include scale
+  and support general rectangular, sheared and singular maps. Existing matrix inputs move
+  to `AffineTransform.from_matrix`; the old constructor is replaced without a deprecation
+  shim during active pre-release development. Matrix storage and persistence schema 1 are
+  unchanged.
+
 ### Added
 
 - `ngff.open` accepts `frame=` as a frame or framed DataArray, matching every other reader.
@@ -79,7 +88,7 @@
   - The `Transform` protocol has separate capability protocols (`SupportsPoints`,
     `SupportsJacobian`, `SupportsAffine`, `SupportsInverse`), satisfied structurally by
     user-defined transforms; there is no registry.
-  - `AffineTransform(source=..., target=..., matrix=..., translation=...)` implements
+  - `AffineTransform.from_matrix(source=..., target=..., matrix=..., translation=...)` implements
     `SupportsAffine`. `matrix` and `translation` return fresh read-only snapshots over their own
     buffers, so a caller can neither write to the transform's storage nor change it by editing an
     array header.
