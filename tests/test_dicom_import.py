@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import dask.array as da
 import numpy as np
 import numpy.typing as npt
@@ -152,6 +154,64 @@ def test_to_dataarray_orders_classic_pixels_with_positions() -> None:
             atol=ATOL,
         )
     assert "slice_intervals" not in array.coords
+
+
+@pytest.mark.parametrize("count", [1, 3])
+def test_to_dataarray_requires_exact_classic_source_count(count: int) -> None:
+    geometry = from_datasets([image(0), image(2)])
+    with pytest.raises(ValueError, match="requires exactly 2 source slices"):
+        to_dataarray(geometry, np.zeros((count, 4, 5)))
+
+
+@pytest.mark.parametrize("count", [2, 4])
+def test_enhanced_selection_requires_full_original_stack(count: int) -> None:
+    geometry = from_enhanced(enhanced([0, 2, 4]), frame_indices=[0, 1])
+    with pytest.raises(ValueError, match="requires exactly 3 source slices"):
+        to_dataarray(geometry, np.zeros((count, 4, 5)))
+
+
+def test_source_count_validation_does_not_evaluate_lazy_pixels() -> None:
+    geometry = from_datasets([image(0), image(2)])
+    pixels = da.zeros((3, 4, 5), chunks=(1, 4, 5))
+    tasks: list[object] = []
+    with (
+        Callback(pretask=lambda key, *args: tasks.append(key)),  # type: ignore[no-untyped-call]
+        pytest.raises(ValueError, match="requires exactly 2 source slices"),
+    ):
+        to_dataarray(geometry, pixels)
+    assert not tasks
+
+
+def test_manual_geometry_without_source_count_keeps_index_validation() -> None:
+    imported = from_datasets([image(0), image(2)])
+    manual = DicomGeometry(
+        imported.dims,
+        imported.coords,
+        imported.transform,
+        imported.frame,
+        imported.order,
+        imported.patient_position,
+        imported.slice_intervals,
+        imported.report,
+    )
+    assert manual.source_count is None
+    assert to_dataarray(manual, np.zeros((3, 4, 5))).shape == (2, 4, 5)
+    with pytest.raises(ValueError, match="slice axis 0 requires index 1"):
+        to_dataarray(manual, np.zeros((1, 4, 5)))
+
+
+@pytest.mark.parametrize("count,error", [(True, TypeError), ("2", TypeError), (0, ValueError)])
+def test_source_count_requires_a_positive_integer(count: object, error: type[Exception]) -> None:
+    imported = from_datasets([image(0), image(2)])
+    with pytest.raises(error, match="source_count must be a positive integer or None"):
+        replace(imported, source_count=count)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("order", [(-1, 1), (0, 2)])
+def test_explicit_source_count_must_contain_selected_indices(order: tuple[int, int]) -> None:
+    imported = from_datasets([image(0), image(2)])
+    with pytest.raises(ValueError, match="order must contain source indices within source_count"):
+        replace(imported, order=order)
 
 
 def test_to_dataarray_selects_original_enhanced_frames() -> None:

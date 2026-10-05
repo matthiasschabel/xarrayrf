@@ -49,7 +49,8 @@ class DicomGeometry:
 
     ``order`` maps sorted slices to input dataset or original frame indices.
     ``slice_intervals`` uses the slice coordinate's units and is absent when any
-    slice has no positive thickness.
+    slice has no positive thickness. ``source_count`` is the original pixel-stack
+    length, before selection; ``None`` preserves index-only validation for manual objects.
     """
 
     dims: tuple[str, str, str]
@@ -60,6 +61,16 @@ class DicomGeometry:
     patient_position: str | None
     slice_intervals: npt.NDArray[np.float64] | None
     report: Report
+    source_count: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_count is not None:
+            if isinstance(self.source_count, bool) or not isinstance(self.source_count, int):
+                raise TypeError("source_count must be a positive integer or None")
+            if self.source_count < 1:
+                raise ValueError("source_count must be a positive integer or None")
+            if any(index < 0 or index >= self.source_count for index in self.order):
+                raise ValueError("order must contain source indices within source_count")
 
 
 def to_dataarray(geometry: DicomGeometry, data: DuckArray) -> xr.DataArray:
@@ -81,7 +92,7 @@ def to_dataarray(geometry: DicomGeometry, data: DuckArray) -> xr.DataArray:
 
     Raises:
         TypeError: If ``geometry`` has the wrong type or ``data`` is not a duck array.
-        ValueError: If the in-plane shape differs or the source lacks a selected slice.
+        ValueError: If the source shape differs or lacks a selected slice.
     """
     if not isinstance(geometry, DicomGeometry):
         raise TypeError(f"geometry must be a DicomGeometry, got {type(geometry).__name__}")
@@ -90,6 +101,11 @@ def to_dataarray(geometry: DicomGeometry, data: DuckArray) -> xr.DataArray:
     source_shape = data.shape
     if len(source_shape) != len(shape) or source_shape[1:] != shape[1:]:
         raise ValueError(f"data shape {source_shape} does not match geometry shape {shape}")
+    if geometry.source_count is not None and source_shape[0] != geometry.source_count:
+        raise ValueError(
+            f"data shape {source_shape} cannot supply geometry shape {shape}: "
+            f"slice axis 0 requires exactly {geometry.source_count} source slices"
+        )
     if source_shape[0] <= max(geometry.order):
         raise ValueError(
             f"data shape {source_shape} cannot supply geometry shape {shape}: "
@@ -222,6 +238,8 @@ def _assemble(
     orientation_tolerance: float,
     slice_tolerance: float,
     supplied_frame: ReferenceFrame | xr.DataArray | None = None,
+    *,
+    source_count: int,
 ) -> DicomGeometry:
     if not slices:
         raise ValueError("datasets must contain at least one image")
@@ -362,6 +380,7 @@ def _assemble(
         patient_position,
         intervals,
         tuple(report),
+        source_count,
     )
 
 
@@ -396,6 +415,7 @@ def from_datasets(
         orientation_tolerance,
         slice_tolerance,
         frame,
+        source_count=len(datasets),
     )
 
 
@@ -487,7 +507,7 @@ def from_enhanced(
         if hasattr(measures, "SliceThickness"):
             synthetic.SliceThickness = measures.SliceThickness
         slices.append(_read_slice(synthetic, index, dataset))
-    return _assemble(slices, orientation_tolerance, slice_tolerance, frame)
+    return _assemble(slices, orientation_tolerance, slice_tolerance, frame, source_count=count)
 
 
 def _homogeneous_matrix(
