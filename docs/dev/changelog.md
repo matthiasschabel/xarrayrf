@@ -2,6 +2,36 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-06] — Audit stage 4 API contracts and completed QA
+
+- **Problem**: Geometry queries disagreed on dimension order, Grid framing silently replaced
+  conflicting coordinates, and extension-transform value requirements were overstated.
+  Indexed assignment semantics needed an explicit destination-frame contract.
+- **Resolution**: Declared sampling order is canonical across queries; NGFF extracts storage
+  columns explicitly. Grid framing requires `replace_coordinates=True` for conflicts and gives
+  per-coordinate diagnostic reasons. Compatible metadata/pixels remain intact; opt-in adopts
+  Grid declarations, including malformed unit replacement. Documented stable extension
+  transforms, conditional hashing and assignment under xarray's label checks. No compatibility
+  aliases, deprecation machinery, generic freezer or new assignment API was added.
+- **Verification**: Opus accepted the plan and two implementation passes. gpt-6-astra implemented
+  the work and diagnostic/index-coverage followups. Independent QA reproduces 15 failures against
+  original source, passes the 486-test initial focused suite with 41 expected stock failures,
+  and checks eager/Dask query parity, native encode/decode, NGFF storage-axis mapping, replacement
+  pixel identity and metadata, custom values and distinct-frame assignment. Followup Grid tests:
+  199 passed on patched xarray. Final independent full suites on main: stock xarray 1,764 passed
+  and 47 expected failures; patched xarray 1,811 passed. Both retain three existing dependency
+  warnings. Ruff lint/format, mypy (81 source files), links and whitespace pass. Reviewed source
+  bytes and unrelated user edits were preserved through integration and commit.
+- **Files affected**: `src/xarrayrf/_geometry.py`, `src/xarrayrf/native.py`,
+  `src/xarrayrf/ngff/_export.py`, `src/xarrayrf/_grid.py`, `src/xarrayrf/_transform.py`;
+  their public tests in `tests/test_geometry.py`, `tests/test_grid.py`, `tests/test_native.py`,
+  `tests/test_frame_coordinates.py`, `tests/test_ngff_export.py`; `README.md`,
+  `docs/core_interface.md`, `CHANGELOG.md`, the [audit plan](codebase_audit_plan.md) and
+  [stage 4 refinement record](stage4_implementation_review.md).
+- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`); independent QA and orchestration by
+  Codex GPT-6 (exact serving model ID not exposed). Implemented by Codex gpt-6-astra
+  (initial CLI used high reasoning effort).
+
 ## [2026-10-05] — Independent QA of audit stage 3
 
 - **Problem**: The committed NGFF semantics and linear NaN fixes needed a fresh QAEngineer

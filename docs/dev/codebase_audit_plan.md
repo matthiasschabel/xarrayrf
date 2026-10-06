@@ -1,7 +1,7 @@
 # Codebase audit and staged remediation plan
 
 **Status:** Active
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-06
 **Scope:** xarrayrf correctness, public API consistency, adapters, resampling, and supporting tools
 
 ## Context
@@ -9,8 +9,8 @@
 The user requested a thorough audit emphasizing material correctness, comprehensible APIs,
 and the principle of least surprise, followed by critique from Claude Opus 5.5. This plan
 covers the checkout at `de48d8ab0097bf6196fdcbced0779de0ae155fea`. Stage 1 has been implemented, cross-reviewed, verified by QA and committed to main;
-stage 2 and stage 3 are also implemented, cross-reviewed, verified by QA and committed to main.
-Stages 4–5 remain recommendations.
+stages 2–4 are also implemented, cross-reviewed, verified by QA and committed to main.
+Stage 5 remains the recommendation queue.
 
 The audit inspected the shipped modules, native xarray binding, sampling and resampling,
 format adapters and readers, public contracts, test coverage, and supporting tooling.
@@ -72,6 +72,21 @@ The subsequent QAEngineer pass reproduces 34 failures against the original sourc
 round trips, and repeats both full suites and static checks. It finds no additional defect;
 the [internal changelog](changelog.md) and stage 3 review record retain the fresh evidence.
 
+**Stage 4 completed, 2026-10-06:** The user explicitly authorized direct clean API changes
+without compatibility/deprecation scaffolding during development. A1 chooses declared geometry
+dimension order across queries and snapshots, with explicit storage order for NGFF export.
+A2 adds `replace_coordinates=False`: conflicting Grid coordinate declarations refuse unless
+replacement is explicit, with per-coordinate diagnostics. A5 documents stable extension
+transforms and conditional hashing; F5 documents destination-frame payload assignment under
+xarray's label checks. Opus accepted the plan and both implementation passes; gpt-6-astra
+implemented and resolved the useful followups. Independent QA reproduces 15 failures against
+the original source and checks eager/Dask queries, native round trips, NGFF physical mappings,
+replacement pixel identity and metadata. Final suites: stock xarray 1,764 passed and 47 expected
+failures; patched xarray 1,811 passed, with three existing dependency warnings in both lanes.
+Ruff lint/format, mypy and whitespace pass. See
+[the stage 4 implementation record](stage4_implementation_review.md) and
+[internal changelog](changelog.md) for full review/verification evidence.
+
 Keep the architecture: frame identity, coordinate systems, transforms, sampling, and array
 binding form a coherent model. Preserve explicit registration between distinct frames,
 separation of identity from numerical coincidence, and coordinate values that survive
@@ -89,7 +104,10 @@ global frame registry, or replacement of native xarray binding is not justified.
 | F7 | Geometry.points collides with axis/units output names and its private stacking dimension. | Confirmed name collisions and units-metadata loss; fixed in stage 2. |
 | F3 | Non-diagonal NGFF export labels an unmixed time axis as spatial and pairs column axes with row units by index. | Fixed in stage 3 with conservative representability rules and contextual v06 layout errors. |
 | F4 | Equivalent resampling paths disagree on NaNs at exact sample locations. | Linear zero-weight NaN contamination fixed in stage 3; cubic prefilter limitation explicitly documented. |
-| F5 | Indexed assignment accepts another frame's labelled payload while preserving the destination frame. | Intentional payload replacement; documentation, not a runtime bug fix. |
+| F5 | Indexed assignment accepts another frame's labelled payload while preserving the destination frame. | Intentional payload replacement; documented and tested in stage 4, with destination frame retained and xarray label checks enforced. |
+| A1 | Positional queries and dense point/lattice outputs used different dimension orders. | Unified on declared sampling order in stage 4; exporters request storage order explicitly. |
+| A2 | Grid framing silently replaced conflicting coordinates. | Stage 4 requires explicit replacement and reports what disagrees. |
+| A5 | Grid/binding docs overstated immutability and unconditional hashing for extensions. | Stage 4 states stable transform value contracts and conditional hashing. |
 
 The order below is the recommended default. Each fix is independently reviewable. A public
 interface decision in one item must not hold up an unrelated, straightforward fix.
@@ -198,26 +216,28 @@ original samples. That consistency limitation and SciPy infinity behavior remain
 documented and tested. General-path NaN tasks retain bounded position caching or per-slice
 recomputation; optional routing optimization awaits profiling.
 
-### Stage 4: Decide the public paradigm before changing interfaces
+### Stage 4: Make API contracts consistent (completed)
 
-- **A1, dimension ordering:** make positional queries and dense point/lattice outputs agree
-  by default, or expose their order explicitly. Compare declaration order with current
-  DataArray order using a transposed, anisotropic example. Choose one public contract and
-  migration story before changing defaults; do not rewrite binding internals speculatively.
-- **A2, framing and coordinate replacement:** decide whether `rf.frame(grid)` should require
-  explicit permission to replace conflicting coordinates. My recommendation is an explicit
-  replacement option rather than silently changing labels. The current behavior is documented,
-  so this is an API policy revision.
-- **A5, extension transforms:** document immutability, equality, and conditional hashability
-  requirements for transforms retained by Grid. Avoid pretending arbitrary third-party objects
-  can be made immutable with a generic deepcopy or freezer.
-- **F5, indexed assignment:** document that assignment replaces payload in the destination
-  frame. Keep current runtime behavior and leave an upstream assignment guard out of scope.
-  This clarification can land earlier with related binding documentation.
+- **A1, dimension ordering:** declared geometry dimensions govern positional query input/output,
+  dense points, default lattice columns, frame-coordinate fields and Grid snapshots. Pixel
+  transpose preserves binding order. Use named xarray transpose and explicit lattice dimensions
+  for a consumer's storage order; NGFF export requests actual pixel-axis order itself.
+- **A2, coordinate replacement:** `rf.frame(grid, replace_coordinates=False)` supplies missing
+  coordinates and retains compatible metadata. Conflicting dimensions, values, dtype kind or
+  explicit unit attrs refuse with coordinate-specific reasons. Explicit replacement adopts the
+  Grid declarations, discarding stale metadata and repairing malformed units while sharing
+  pixels. The flag is boolean; True with a transform refuses. No resampling/conversion occurs.
+- **A5, extension transforms:** endpoints, behavior and scalar equality must stay stable when
+  retained by Grid or binding. Hashing is conditional and equality-consistent. Grid freezes its
+  own coordinates/intervals and retains transforms by reference; composites depend on members.
+  Unhashable extensions remain valid for querying, equality and binding. No generic freezer.
+- **F5, indexed assignment:** replaces destination-frame values when xarray's dimension-label
+  checks permit it; it neither adopts nor resamples the right operand's frame. Documentation
+  and public tests clarify the existing runtime behavior; no upstream guard was added.
 
-Acceptance: concise examples demonstrate the chosen contracts; intentional policies are
-identified; any changed signature/default has a migration note and focused public coverage.
-These are design decisions, not automatic correctness patches.
+The direct public contracts and concise usage examples replace the earlier ambiguity.
+Focused public tests and full QA verify these deliberate API choices. No deprecation wrappers,
+legacy aliases, migration modes or encoding schema bump were introduced.
 
 ### Stage 5: Improve usability and tool reliability
 
@@ -253,15 +273,15 @@ cannot be represented safely.
 
 ## Deferred Work
 
-Stages 4–5 remain pending. Stage 4 needs deliberate public-contract choices;
-Stage 5 contains optional usability work. Cubic path dependence with NaNs remains an explicit
+Stage 5 remains pending and contains optional usability/tool work. Stage 4 public contracts
+are settled and implemented without backward-compatibility scaffolding. Cubic path dependence with NaNs remains an explicit
 limitation unless a later interpolation policy change is justified. Stage 3's optional
 many-context-slice routing optimization awaits profiling above the position cache budget.
-Stages 1–3 are committed to main. No remote publication has been made, and the user's
+Stages 1–4 are committed to main. No remote publication has been made, and the user's
 unrelated uncommitted work is preserved.
 
 ## Next Steps
 
-Stages 1–3 are complete. Stage 4 is next: choose consistent dimension ordering, deliberate
-coordinate replacement and extension-transform contracts before changing public interfaces.
-Revisit this plan if the chosen contracts reveal a materially different cause or wider scope.
+Stages 1–4 are complete. Stage 5 is next: prioritize concrete usability friction and DICOM
+batch output reliability before adding optional API surface. Continue direct clean-development
+changes with focused public coverage; revisit scope if a materially different cause emerges.

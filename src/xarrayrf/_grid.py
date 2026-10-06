@@ -1,4 +1,4 @@
-"""Immutable sampling values, independent of pixels and xarray."""
+"""Sampling declarations with frozen coordinates, independent of pixels and xarray."""
 
 from __future__ import annotations
 
@@ -44,6 +44,13 @@ class Grid:
     for retained scalars. Integers are stored as int64, floats as float64. Units come
     from the transform's source. Optional intervals map source axis names to finite
     [lo, hi] rows agreeing with each sample's declared offset.
+
+    The transform is retained by reference. Its endpoints, behavior and scalar-boolean
+    equality must stay stable for this Grid's lifetime. Equality reflects the transform's
+    chosen declaration identity, which may be object identity. Built-in affine transforms
+    are immutable; composite stability depends on their members. Hashing a Grid additionally
+    requires a hashable transform with a stable, equality-consistent hash. Unhashable
+    transforms support queries and equality, but ``hash(grid)`` raises TypeError.
     """
 
     __slots__ = ("_axes", "_dims", "_intervals", "_transform")

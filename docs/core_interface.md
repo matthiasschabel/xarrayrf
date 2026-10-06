@@ -15,7 +15,7 @@ The public surface has five layers. Each section below is normative for its laye
 |---|---|---|
 | Value objects (NumPy only) | `ReferenceFrame` (declared, local, anonymous), `CoordinateSystem`, `DirectionVocabulary`, `ArrayCoordinates` | [Value objects](#value-objects), [Glossary](#glossary) |
 | Transforms | `AffineTransform`, `CompositeTransform`, `compose`, `coordinate_system_change`, the `Transform` protocols | [Transforms](#transforms) |
-| Sampling | `Grid` (immutable, no pixels), `Geometry` (live view of an array), `Lattice` (regular case), declared intervals, `xarrayrf.anatomy` grid operations | [Grid values](#grid-values), [Anatomical grids](#anatomical-grids), [Geometry queries](#geometry-queries) |
+| Sampling | `Grid` (frozen coordinates, no pixels), `Geometry` (live view of an array), `Lattice` (regular case), declared intervals, `xarrayrf.anatomy` grid operations | [Grid values](#grid-values), [Anatomical grids](#anatomical-grids), [Geometry queries](#geometry-queries) |
 | Binding and operations | the `.rf` accessor (`frame`, `grid`, `geometry`, `resample_to`, `assume_frame`, `encode`/`decode`, `unframe`), `native.frame_array`, `native.grid_coordinates`, `resample` | [Native binding](#native-binding), [Native grid doors](#native-grid-doors), [Resampling](#resampling) |
 | Persistence and adapters | `encode`/`decode`, `dicom`, `nifti`, `ngff`, `geotiff` | [Persistence](#persistence), [Adapters](#adapters) |
 
@@ -37,9 +37,19 @@ retained scalar); `rf.unframe()` clears that;
 `array.rf.reference_frame`, `array.rf.coordinate_transform`, and `array.rf.geometry_dims`
 expose the binding declaration.
 `array.rf.geometry` builds a fresh `Geometry` from the current array; `array.rf.grid`
-returns its immutable `Grid` snapshot (reading geometry coordinates, never pixels).
+returns its `Grid` coordinate snapshot (reading geometry coordinates, never pixels).
 `array.rf.unframe()` removes the binding while retaining ordinary coordinate values and
 indexes. The binding has no declaration coordinate.
+
+Indexed assignment from another framed array replaces destination values. It does not register
+or resample the right operand and does not adopt its frame. Shared dimension coordinates must
+agree with the indexed destination or xarray raises `IndexError`. For two arrays bound to
+distinct frames with matching dimension labels:
+
+```python
+destination[{"y": slice(0, 2)}] = source.isel(y=slice(0, 2))
+# destination keeps its original binding; the selected pixel values come from source.
+```
 
 With the [pinned native-operation patches](dev/xarray-upstream/xarray_patches.md#series-4-current-published),
 stacking, padding (including zero width), or coarsening a geometry dimension raises
@@ -120,7 +130,7 @@ Each term has one meaning. Public names, docstrings, errors and docs use these m
 | **Direction** | A token `<from>-to-<to>` naming the way an axis increases, from a direction vocabulary. |
 | **Role** | The descriptive label `"world"` or `"object"` on a frame. The word "world" is used for nothing else. |
 | **Geometry dimensions** | The array dimensions a `Geometry`'s source axes vary along (`Geometry.dims`), which may include time, as for a spacetime or fMRI array. Every other dimension, such as echo or channel, is a non-geometry dimension, carried through unchanged. |
-| **Grid** | An immutable sampling without pixels: a coordinate transform plus the values of each 0-D or 1-D source coordinate and optional declared intervals. `Grid`; a framed array's snapshot is `rf.grid`. |
+| **Grid** | A sampling declaration with frozen coordinates and no pixels: a coordinate transform plus the values of each 0-D or 1-D source coordinate and optional declared intervals. `Grid`; a framed array's snapshot is `rf.grid`. |
 | **Declared interval** | A sample's declared cell, `[lo, hi]` in its source axis's own coordinate values, keyed by source axis name. Overrides the sample-offset default for the `"cells"` domain; may leave gaps or overlap. |
 | **Orientation code** | For each varying dimension, the direction its index increases toward, as an RFC-4 token or a patient letter (`R` = toward the right). `xarrayrf.anatomy.orientation_codes`. |
 | **Binding** | The association of a transform from array coordinates with a particular array, held by a private index that owns the source coordinates (`array.rf.frame`). |
@@ -276,8 +286,11 @@ it (a non-square affine's inverse, a chain whose member has no Jacobian) the met
 never approximates.
 
 User-defined transforms satisfy the protocols structurally; there is no registry. A transform
-used in a binding must implement exact structural `__eq__` and `__hash__`, and persists only
-through a versioned, data-only encoding.
+used in a binding or Grid must keep its endpoints, coefficients/behavior and equality stable
+for their lifetime. Equality must return a scalar boolean reflecting its chosen declaration
+identity; object-identity equality is valid. Hashing is optional, including for binding.
+A hashable transform must provide an equality-consistent stable hash. Persistence requires
+a versioned, data-only encoding.
 
 ### Endpoint rules
 
@@ -334,8 +347,8 @@ rules (diffusion PPD, ITK's J·T·J⁻¹) live downstream.
 
 ## Grid values
 
-`Grid(transform, coordinates, *, intervals=None)` is an immutable, hashable NumPy-only sampling
-value, exported from `xarrayrf`. It describes geometry without pixels. The transform must map
+`Grid(transform, coordinates, *, intervals=None)` is a NumPy-only sampling
+value with frozen coordinates, exported from `xarrayrf`. It describes geometry without pixels. The transform must map
 `ArrayCoordinates` into a `ReferenceFrame`. Coordinates name exactly its source axes, with one
 entry `name: (dim, values)` per varying axis (1-D values), or `name: value` per retained scalar
 (0-D). At most one axis varies along each dimension. Values are copied into immutable storage,
@@ -356,6 +369,12 @@ its declared interval exactly: `lo <= sample <= hi`, for both varying axes and r
 Point-sampled axes (`s=None`) refuse intervals. Gaps and
 overlaps are allowed; tiling is not required. `Grid.intervals` returns a read-only mapping (empty when
 undeclared) of fresh read-only views, with the same header-isolation guarantee as coordinates.
+
+The transform is retained by reference, without copying or runtime freezing. Built-in affine
+transforms are immutable; composite stability and hashability depend on their members. Extension
+transforms must honor the stable endpoint, behavior and scalar-boolean equality contract above.
+`hash(grid)` requires a hashable transform with a stable, equality-consistent hash; an unhashable
+transform remains valid for queries and equality, and `hash(grid)` raises `TypeError`.
 
 `transform`, `frame`, `coordinates`, `dims` and read-only `sizes` expose the declaration. `dims`
 follows the varying coordinates' insertion order. Empty dimensions and fully scalar grids are
@@ -514,14 +533,21 @@ and a large translation cannot hide real variation; the output takes the midpoin
 
 ### Native grid doors
 
-`array.rf.frame(grid)` requires every grid dimension to be an array dimension with the same
-size. It assigns the grid's source coordinates and binding, retaining an existing coordinate
-when its dimensions, values and dtype kind match exactly (including its attrs). Other dimensions
-and coordinates are untouched. A `dims=` argument with a grid raises `TypeError`, even when
-`None`; the transform form still requires `dims`. Already framed arrays and arrays carrying an
-encoded binding refuse as in the transform form. Geometry coordinate attrs must still agree
-with the source's declared units. All doors preserve the grid's intervals exactly.
-Passing `intervals=` with a Grid is refused; the grid supplies them.
+`array.rf.frame(grid, *, replace_coordinates=False)` requires every grid dimension to be an
+array dimension with the same size. Missing source coordinates are supplied. Existing coordinates
+are retained with their attrs when dimensions, values and dtype kind agree and any explicit
+unit token matches the transform's source. An absent unit attr is compatible; descriptive attrs
+do not cause conflicts. Conflicts raise `ValueError`, naming the coordinates and
+`replace_coordinates=True`; malformed unit attrs raise `TypeError`.
+
+`replace_coordinates=True` replaces conflicting declarations with the Grid's dimensions, values,
+dtype and unit attrs, dropping stale descriptive attrs. It also replaces malformed unit attrs.
+Compatible coordinates retain their metadata even with opt-in. This relabels samples without
+resampling, unit conversion or pixel evaluation. Non-geometry coordinates, pixels and intervals
+are preserved. The flag must be a bool; True with a transform raises `ValueError`.
+A `dims=` argument with a Grid raises `TypeError`, even when `None`; the transform form requires
+`dims`. Already framed arrays and arrays carrying an encoded binding refuse as in the transform
+form. Passing `intervals=` with a Grid is refused; the grid supplies them.
 
 All framing doors (`rf.frame` with a transform or Grid, `frame_array`, `grid_coordinates`,
 and `rf.decode`) order bound coordinates canonically: varying coordinates in geometry dimension
@@ -552,13 +578,29 @@ validation rules, and `Geometry.intervals` exposes their read-only views. Declar
 are read to validate offset agreement; sampling queries recheck agreement against current values.
 Constructing a standalone `Geometry` does not attach a binding or enforce xarray operation
 lifecycles. Native `array.rf.geometry` exposes this query view over the attached binding and
-passes its intervals. `grid()` snapshots them. Beyond `point_at`:
+passes its intervals. `grid()` snapshots them.
 
-- `grid()`: an immutable `Grid` snapshot of the current coordinates, in `Geometry.dims` order.
+Declared sampling order governs `Geometry.dims`, native `geometry_dims`, Grid snapshots,
+`points_at` inputs, `positions_at` outputs, dense points, default lattice columns and frame
+coordinate fields. Transposing pixels retains the binding's order. Construct another Geometry
+with reordered `dims`, or use `Grid.transpose`, to declare a different sampling order.
+Dense Geometry points no longer positionally follow transposed pixels. To match pixel layout:
+
+```python
+order = tuple(d for d in geometry.array.dims if d in geometry.dims)
+points = geometry.points().transpose(*order, "axis")
+lattice = geometry.lattice(dims=order)
+```
+
+NGFF export explicitly uses pixel storage order for lattice columns after checking that every
+array dimension is a geometry dimension. Named `point_at` queries are independent of order.
+Beyond `point_at`:
+
+- `grid()`: a `Grid` coordinate snapshot of the current coordinates, in `Geometry.dims` order.
   Coordinate values are read, pixels are never read. Multidimensional coordinates and multiple
   source axes along one dimension are refused because they cannot form a grid.
 - `points(*, axis_dim="axis", units_coord="units")`: every sample's point as a `DataArray`
-  over the geometry dimensions in storage order and the component dimension `axis_dim`,
+  over the geometry dimensions in declared `dims` order and the component dimension `axis_dim`,
   labelled in the frame's axis order with per-component `units_coord`; lazy and chunked like
   the array when it is Dask-backed. Both names must be nonempty strings, distinct and absent
   from the carried geometry dimensions/index coordinates. For a dimension named `axis` or
@@ -568,13 +610,14 @@ passes its intervals. `grid()` snapshots them. Beyond `point_at`:
   to align an individual point with customized dense output. `Grid.points()` stays NumPy-only.
 - `lattice(dims=None, *, tolerance=...)`: a `Lattice` (origin, spacing, direction, matrix and
   `affine`, the homogeneous index-to-frame matrix such as a NIfTI 4x4) when the transform is affine and every source axis is a retained
-  scalar or a uniformly spaced one-dimensional coordinate. `dims` orders the columns, for
+  scalar or a uniformly spaced one-dimensional coordinate. Columns default to declared `dims`
+  order. Explicit `dims` orders the columns, for
   example `("i", "j", "k")` for ITK and NIfTI. Nonuniform, single-sample or field coordinates
   form no lattice. Coordinates defined by an xarray `RangeIndex` contribute their exact step.
   A `Lattice` maps positions to points with `transform_point(positions)` and is a value object
   (validated, compared and hashed by frame, dims, origin and matrix).
 - `frame_coordinates(names=None, *, domain="samples")`: exact lazy xarray coordinates of
-  each sample's frame coordinates, backed by a `CoordinateTransformIndex` that survives slicing;
+  each sample's frame coordinates in declared `dims` order, backed by a `CoordinateTransformIndex` that survives slicing;
   an interoperability aid for xarray, plotting and viewers, not an attachment. Selection is
   point-wise, with `DataArray` or `Variable` labels and `method="nearest"` (xarray's transform
   indexes accept no scalar labels), and alignment is exact only: equal frame coordinates align,

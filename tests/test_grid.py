@@ -6,10 +6,12 @@ import copy
 import json
 import pickle
 import warnings
+from dataclasses import dataclass
 from typing import Any
 
 import dask.array as da
 import numpy as np
+import numpy.typing as npt
 import pytest
 import xarray as xr
 from dask.callbacks import Callback
@@ -1058,3 +1060,42 @@ def test_transform_frame_refuses_coordinate_replacement() -> None:
     plain = xr.DataArray(np.zeros(2), dims="i", coords=dict(grid.coordinates))
     with pytest.raises(ValueError, match="requires a Grid"):
         plain.rf.frame(grid.transform, dims=grid.dims, replace_coordinates=True)
+
+
+@dataclass(frozen=True)
+class CustomShift:
+    source: ArrayCoordinates
+    target: ReferenceFrame
+    offset: float = 10.0
+
+    def transform_point(self, points: npt.ArrayLike) -> npt.NDArray[np.float64]:
+        return np.asarray(points, dtype=np.float64) + self.offset
+
+
+@dataclass(frozen=True)
+class UnhashableShift(CustomShift):
+    __hash__ = None  # type: ignore[assignment]
+
+
+@pytest.mark.parametrize("kind", [CustomShift, UnhashableShift])
+def test_extension_transform_grid_value_contract(kind: type[CustomShift]) -> None:
+    affine = transform()
+    assert isinstance(affine.target, ReferenceFrame)
+    source = ArrayCoordinates(("offset",), ("mm",))
+    first = kind(source, affine.target)
+    second = kind(source, affine.target)
+    grid = Grid(first, {"offset": ("i", [0, 2])})
+    equal = Grid(second, {"offset": ("i", [0, 2])})
+    assert grid.transform is first
+    assert grid == equal
+    assert grid != Grid(kind(source, affine.target, 20.0), {"offset": ("i", [0, 2])})
+    assert_allclose(grid.point_at(i=1), [12.0], atol=ATOL, rtol=0)
+    assert_allclose(grid.points(), [[10.0], [12.0]], atol=ATOL, rtol=0)
+    plain = xr.DataArray(np.zeros(2), dims="i")
+    assert plain.rf.frame(grid).rf.grid == equal
+    if kind is UnhashableShift:
+        with pytest.raises(TypeError, match="unhashable"):
+            hash(grid)
+    else:
+        assert hash(grid) == hash(equal)
+        assert {grid: "sampling"}[equal] == "sampling"

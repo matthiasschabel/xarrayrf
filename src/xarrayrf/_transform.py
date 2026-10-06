@@ -34,6 +34,13 @@ class Transform(Protocol):
 
     A transform also implements point mapping and any of the other capabilities protocol. Points are mapped from
     ``source.axes`` in ``source.units`` to ``target.axes`` in ``target.units``.
+
+    When retained by a Grid or binding, endpoints, coefficients/behavior and equality must
+    remain stable. Equality returns a scalar boolean and reflects the chosen declaration
+    identity; identity equality is valid. Hashing is optional for binding and queries. A
+    hashable transform must have a stable hash consistent with equality; hashing a Grid
+    containing an unhashable transform raises TypeError. Composite stability and hashability
+    depend on its members. These are caller contracts, not runtime immutability checks.
     """
 
     @property

@@ -70,11 +70,35 @@ the two are known to be the same space.
 For a longer introduction on real data from microscopy, medical imaging, brain atlases and
 satellite imagery, see [the xarrayrf tour](https://github.com/matthiasschabel/xarrayrf/blob/main/examples/xarrayrf_tour.ipynb).
 
+`array.rf.frame(grid)` supplies missing coordinates and refuses conflicts. Use
+`array.rf.frame(grid, replace_coordinates=True)` to replace conflicting labels, dtypes or unit
+attrs with the Grid declaration; pixels are shared, with no resampling or unit conversion.
+Matching coordinates retain their metadata.
+
+Geometry queries use declared `dims` order even after pixel transposition: dense points,
+default lattice columns and frame-coordinate fields agree with positional queries and Grid
+snapshots. To match pixel layout explicitly:
+
+```python
+geometry = framed.transpose("i", "j").rf.geometry
+order = tuple(d for d in geometry.array.dims if d in geometry.dims)
+points = geometry.points().transpose(*order, "axis")
+lattice = geometry.lattice(dims=order)
+```
+
+Indexed assignment replaces destination pixel values and preserves the destination binding,
+even when the right operand has a distinct frame. It does not register or resample that operand.
+Shared dimension labels must match the indexed destination or xarray raises `IndexError`.
+
 ## Architecture
 
 xarrayrf separates *which space* data lives in, *how* an array's coordinates map into it, and
-*which samples* an array has. Each is a small immutable value; the binding on a `DataArray`
-ties them to actual coordinates, and xarray's own operations carry the binding.
+*which samples* an array has. Built-in affine declarations and Grid coordinates are immutable.
+A Grid retains its transform by reference: extension transforms must keep endpoints, behavior
+and scalar-boolean equality stable. Hashing a Grid requires a hashable transform with a stable,
+equality-consistent hash; unhashable transforms still support queries, equality and binding.
+Composite stability depends on its members. The binding on a `DataArray` ties the declaration
+to actual coordinates, and xarray's own operations carry the binding.
 
 ```text
  format adapters                  value objects (NumPy only)
@@ -98,7 +122,7 @@ ties them to actual coordinates, and xarray's own operations carry the binding.
 | `CoordinateSystem`, `DirectionVocabulary` | How points in a frame are written: ordered axes, units, and optionally the direction each axis increases toward. One frame can be written in several systems (LPS and RAS for one patient). | Convert between systems with `coordinate_system_change`. |
 | `ArrayCoordinates` | An array's own coordinate axes as a transform endpoint, with units and where each sample sits in its cell (`sample_offset`). | Be the source of the transform that places samples. |
 | `AffineTransform`, `CompositeTransform`, the `Transform` protocols | Point mappings from array coordinates into a frame, or between frames (a registration result). | Place samples; relate frames explicitly. |
-| `Grid` | An immutable sampling without pixels: the transform plus the coordinate values of each geometry dimension and, optionally, declared cell intervals (slice thickness). | Describe a target for resampling, a region of interest, or any geometry you need without an array; persist it with `encode`. |
+| `Grid` | A sampling declaration with frozen coordinates and no pixels: the transform plus the coordinate values of each geometry dimension and, optionally, declared cell intervals (slice thickness). | Describe a target for resampling, a region of interest, or any geometry you need without an array; persist it with `encode`. |
 | `Geometry` (`array.rf.geometry`) | A live view of a framed array's current samples, re-read on every query. | Ask where samples are (`point_at`, `points_at`) and which samples are at given points (`positions_at`). |
 | `Lattice` | The regular special case: origin, spacing, direction and the homogeneous affine used by NIfTI and ITK. | Interoperate with affine-based libraries. |
 | The binding (`array.rf`) | A private xarray index that owns the geometry coordinates of a framed `DataArray`, so selection, arithmetic and alignment carry or refuse it. | Frame, query, resample, re-identify and persist arrays. |

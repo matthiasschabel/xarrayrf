@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Geometry dense points, default lattice columns and frame-coordinate fields now follow declared
+  `dims` order, agreeing with positional queries and Grid snapshots after pixel transposition.
+  Use `points().transpose(*order, "axis")` and `lattice(dims=order)` for pixel storage order.
+  NGFF exports explicitly use storage-axis columns.
+- `array.rf.frame(grid, replace_coordinates=False)` now refuses conflicting existing source
+  coordinates. Set `replace_coordinates=True` to use the Grid declarations without changing
+  pixels. Compatible coordinates retain attrs; replacements discard stale metadata.
+- Clarified extension-transform stability and conditional Grid hashing: unhashable transforms
+  remain valid for queries, equality and binding. Indexed framed-array assignment replaces
+  destination values while retaining its binding, subject to xarray's coordinate agreement.
+
 ### Fixed
 
 - NGFF non-diagonal exports derive intrinsic axis types, units and spacings from contributing

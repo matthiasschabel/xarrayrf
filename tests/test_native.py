@@ -1377,3 +1377,22 @@ def test_transpose_and_encoding_retain_declared_sampling_order(framed: xr.DataAr
         assert array.rf.geometry.points().dims == ("y", "x", "axis")
         assert array.rf.geometry.lattice().dims == ("y", "x")
         assert array.rf.grid == framed.rf.grid
+
+
+def test_indexed_assignment_replaces_values_and_preserves_destination_frame(
+    image: xr.DataArray, transform: AffineTransform
+) -> None:
+    destination = image.copy().rf.frame(transform, dims=("y", "x"))
+    assert isinstance(transform.target, ReferenceFrame)
+    other_frame = ReferenceFrame.local(transform.target.coordinate_system)
+    other_transform = transform.with_endpoints(target=other_frame)
+    source = (image + 100).rf.frame(other_transform, dims=("y", "x"))
+    original_grid = destination.rf.grid
+    assert source.rf.reference_frame != destination.rf.reference_frame
+    destination[{"y": slice(0, 2)}] = source.isel(y=slice(0, 2))
+    assert_array_equal(destination.data[:2], source.data[:2])
+    assert_array_equal(destination.data[2], image.data[2])
+    assert destination.rf.grid == original_grid
+    with pytest.raises(IndexError, match="coordinate"):
+        destination[{"y": slice(0, 2)}] = source.isel(y=slice(1, 3))
+    assert destination.rf.grid == original_grid
