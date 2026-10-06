@@ -213,8 +213,7 @@ def test_renamed_dimensions_keep_the_frame_coordinates() -> None:
     assert_allclose(renamed.x.values, framed.x.values[..., 1:3], rtol=0, atol=ATOL)
 
 
-def test_the_same_lattice_in_another_dimension_order_does_not_align() -> None:
-    """Swapped dims give different frame coordinates even with equal sizes and matrix."""
+def test_pixel_transpose_preserves_declared_frame_coordinate_order() -> None:
     array = xr.DataArray(np.zeros((3, 3)), dims=("a", "b"), coords={"a": [0, 1, 2], "b": [0, 1, 2]})
     transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("a", "b"), ("1", "1")),
@@ -226,7 +225,10 @@ def test_the_same_lattice_in_another_dimension_order_does_not_align() -> None:
     second = xrf.Geometry(array.transpose("b", "a"), transform, dims=("a", "b")).frame_coordinates()
     index_first = first.xindexes["u"]
     index_second = second.xindexes["u"]
-    assert not index_first.equals(index_second)
+    assert index_first.equals(index_second)
+    xr.testing.assert_identical(first.to_dataset(), second.to_dataset())
+    reordered = xrf.Geometry(array, transform, dims=("b", "a")).frame_coordinates()
+    assert not index_first.equals(reordered.xindexes["u"])
 
 
 @pytest.mark.parametrize(

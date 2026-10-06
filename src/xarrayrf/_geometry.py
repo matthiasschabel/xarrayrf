@@ -419,13 +419,10 @@ class Geometry:
             coords={AXIS_DIM: list(axes), "units": (AXIS_DIM, list(self._frame.units))},
         )
 
-    def _array_order(self) -> tuple[str, ...]:
-        return tuple(str(dim) for dim in self._array.dims if dim in self._dims)
-
     def points(self, *, axis_dim: str = AXIS_DIM, units_coord: str = "units") -> xr.DataArray:
         """Return every sample's point in the target frame.
 
-        The result has the geometry dimensions in the array's order followed by ``axis_dim``,
+        The result has the geometry dimensions in declared ``dims`` order followed by ``axis_dim``,
         labelled by the frame's axis names with a ``units_coord`` coordinate, and carries the array's
         index coordinates along the geometry dimensions. Coordinates are broadcast and evaluated;
         pixels are never read. When the array is chunked with Dask the result is chunked the same
@@ -456,7 +453,7 @@ class Geometry:
         if axis_dim == units_coord:
             raise ValueError("axis_dim and units_coord must be distinct")
         self._dependencies()
-        order = self._array_order()
+        order = self.dims
         for name in (axis_dim, units_coord):
             if name in order:
                 raise ValueError(
@@ -504,7 +501,7 @@ class Geometry:
         )
 
     def grid(self) -> Grid:
-        """Snapshot the current 0-D/1-D coordinates as an immutable Grid.
+        """Snapshot the current 0-D/1-D coordinates as a Grid, retaining the transform.
 
         Raises:
             ValueError: If a coordinate is multidimensional or dimensions share source axes.
@@ -555,7 +552,7 @@ class Geometry:
         Args:
             dims: The geometry dimensions in the order the lattice's columns should follow, such
                 as ``("i", "j", "k")`` for ITK when the array is stored ``("k", "j", "i")``.
-                Defaults to the array's own order. Must name every geometry dimension.
+                Defaults to declared ``dims`` order. Must name every geometry dimension.
             tolerance: Largest deviation of a coordinate from uniform spacing, as a fraction of
                 one step. Scanner positions often need a looser value than the default; nothing
                 is snapped silently. Coordinates defined by an xarray ``RangeIndex`` are uniform
@@ -571,8 +568,7 @@ class Geometry:
                 determined), a coordinate is not uniformly spaced within ``tolerance``, or a
                 dimension's step maps to no displacement in the frame.
         """
-        order = self._array_order() if dims is None else dims
-        return lattice(self._sampling(), order, tolerance=tolerance)
+        return lattice(self._sampling(), dims, tolerance=tolerance)
 
     def frame_coordinates(
         self,
@@ -608,8 +604,8 @@ class Geometry:
             domain: ``"samples"`` or ``"cells"``, as for :meth:`positions_at`.
 
         Returns:
-            Coordinates over the geometry dimensions, with a ``units`` attribute on each axis
-            that declares a unit.
+            Coordinates over the geometry dimensions in declared ``dims`` order, with a
+            ``units`` attribute on each axis that declares a unit.
 
         Raises:
             TypeError: If the transform is not affine, or ``names`` is not a sequence of
@@ -662,7 +658,7 @@ class Geometry:
                 f"names {taken} are already coordinates or dimensions of the array; pass other "
                 "names",
             )
-        sizes = {dim: self._array.sizes[dim] for dim in self._array_order()}
+        sizes = {dim: self._array.sizes[dim] for dim in self.dims}
         extents_by_dim = tuple(reach([by_dim[dim] for dim in sizes], domain))
         index = FrameCoordinateIndex(
             FrameCoordinateTransform(transform, samplings, chosen, sizes, extents_by_dim, domain)

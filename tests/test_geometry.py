@@ -596,10 +596,10 @@ def test_points_custom_names_support_nonseparable_lazy_coordinates() -> None:
         default = geometry.points()
         custom = geometry.points(axis_dim="component", units_coord="component_units")
     assert not tasks
-    assert custom.dims == ("row", "column", "component")
-    assert custom.chunks == ((1, 1), (2, 1), (2,))
+    assert custom.dims == ("column", "row", "component")
+    assert custom.chunks == ((2, 1), (1, 1), (2,))
     expected = np.stack([np.broadcast_to([0.0, 1.0, 2.0], u.shape), u], axis=-1)
-    assert_allclose(custom.compute(), expected, rtol=0, atol=ATOL)
+    assert_allclose(custom.compute(), expected.transpose(1, 0, 2), rtol=0, atol=ATOL)
     xr.testing.assert_identical(
         default.compute(), custom.rename(component="axis", component_units="units").compute()
     )
@@ -1039,3 +1039,53 @@ def test_a_unitless_axis_refuses_a_units_attribute_and_writes_none() -> None:
     labelled = array.assign_coords(c=array.c.assign_attrs(units="1"))
     with pytest.raises(ValueError, match="declares no unit"):
         Geometry(labelled, transform, dims=("c", "i"))
+
+
+@pytest.mark.parametrize("lazy", [False, True])
+@pytest.mark.parametrize("retained", [False, True])
+def test_declared_order_agrees_across_sampling_queries(lazy: bool, retained: bool) -> None:
+    transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("j", "i", "k"), ("1",) * 3)
+        if retained
+        else ArrayCoordinates(("j", "i"), ("1", "1")),
+        target=ReferenceFrame.local(CoordinateSystem(("y", "x"), ("mm", "mm"))),
+        matrix=[[2.0, 0.0, 5.0], [0.0, 3.0, 7.0]] if retained else np.diag([2.0, 3.0]),
+        translation=[10.0, 20.0],
+    )
+    array = xr.DataArray(
+        np.zeros((3, 4)), dims=("j", "i"), coords={"j": [0, 1, 2], "i": [0, 1, 2, 3]}
+    ).transpose("i", "j")
+    if lazy:
+        array = array.chunk({"i": 2, "j": 1})
+    if retained:
+        array = array.assign_coords(k=0)
+    dims = ("j", "i")
+    geometry = Geometry(array, transform, dims=dims)
+    position = [1, 0]
+    named = dict(zip(dims, position, strict=True))
+    with _recorded_tasks() as tasks:
+        dense = geometry.points()
+        grid = geometry.grid()
+        fields = geometry.frame_coordinates()
+    assert not tasks
+    assert dense.dims == (*dims, "axis")
+    assert fields["y"].dims == dims
+    assert geometry.lattice().dims == grid.dims == dims
+    for result in (
+        geometry.points_at(position),
+        geometry.point_at(**named),
+        dense.isel(named).compute(),
+        geometry.lattice().transform_point(position),
+        grid.point_at(**named),
+    ):
+        assert_allclose(result, [12.0, 20.0], atol=ATOL, rtol=0)
+    assert_allclose(dense.compute(), grid.points(), atol=ATOL, rtol=0)
+    assert_allclose(fields["y"].values, dense.sel(axis="y").compute(), atol=ATOL, rtol=0)
+    if not retained:
+        assert_allclose(geometry.positions_at([12.0, 20.0]), position, atol=ATOL, rtol=0)
+        assert_allclose(
+            geometry.lattice(dims=("i", "j")).transform_point([0, 1]),
+            [12.0, 20.0],
+            atol=ATOL,
+            rtol=0,
+        )

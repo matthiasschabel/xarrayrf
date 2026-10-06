@@ -185,12 +185,12 @@ def to_multiscale_level(
         raise TypeError(f"frame_name must be a string, got {type(frame_name).__name__}")
     if not frame_name:
         raise ValueError("frame_name must be nonempty")
+    if set(geometry.dims) != set(geometry.array.dims):
+        raise ValueError("NGFF level requires every array dimension to be a geometry dimension")
     try:
-        lattice = geometry.lattice()
+        lattice = geometry.lattice(dims=tuple(str(dim) for dim in geometry.array.dims))
     except (TypeError, ValueError) as error:
         raise ValueError(f"NGFF export requires a regular affine lattice: {error}") from error
-    if len(lattice.dims) != len(geometry.array.dims):
-        raise ValueError("NGFF level requires every array dimension to be a geometry dimension")
     frame = lattice.frame
     matrix, origin = lattice.matrix, lattice.origin
     if matrix.shape[1] != len(frame.axes):

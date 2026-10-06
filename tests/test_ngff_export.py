@@ -561,3 +561,21 @@ def test_unmixed_unknown_axis_and_spatial_rotation_preserve_lazy_pixels() -> Non
         rtol=0,
         atol=1e-12,
     )
+
+
+@pytest.mark.parametrize("diagonal", [False, True])
+def test_export_columns_follow_pixel_storage_with_different_declared_order(diagonal: bool) -> None:
+    base = _geometry(diagonal=diagonal)
+    geometry = Geometry(base.array, base.transform, dims=("i", "j"))
+    metadata, _ = to_multiscale_level(geometry, path="s0")
+    restored = from_multiscale(metadata, shapes={"s0": geometry.array.shape}, store="file:///test")
+    level = restored.levels["s0"].transform
+    positions = np.array([[0, 0], [1, 2], [2, 3]])
+    points = level.transform_point(positions)
+    if not diagonal:
+        points = restored.transforms[0].transform_point(points)
+    np.testing.assert_allclose(points, geometry.points_at(positions[:, ::-1]), rtol=0, atol=1e-12)
+    physical = metadata.coordinateSystems[-1]
+    assert tuple(axis.name for axis in physical.axes) == ("y", "x")
+    assert tuple(axis.type for axis in physical.axes) == ("space", "space")
+    assert tuple(axis.unit for axis in physical.axes) == ("micrometer", "micrometer")

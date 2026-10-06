@@ -1366,3 +1366,14 @@ def test_anonymous_adoption_retains_declared_support_checks(framed: xr.DataArray
     onto_first = adopted.rf.resample_to(first)
     assert onto_first.rf.grid == first.rf.grid
     assert_allclose(onto_first, first, rtol=0, atol=1e-12)
+
+
+def test_transpose_and_encoding_retain_declared_sampling_order(framed: xr.DataArray) -> None:
+    transposed = framed.transpose("x", "y")
+    restored = transposed.rf.encode().rf.decode()
+    for array in (transposed, restored):
+        assert array.dims == ("x", "y")
+        assert array.rf.geometry_dims == array.rf.grid.dims == ("y", "x")
+        assert array.rf.geometry.points().dims == ("y", "x", "axis")
+        assert array.rf.geometry.lattice().dims == ("y", "x")
+        assert array.rf.grid == framed.rf.grid
