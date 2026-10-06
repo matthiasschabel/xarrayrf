@@ -2,6 +2,33 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-05] — Audit stage 3 export semantics and linear missing weights
+
+- **Problem**: Non-diagonal NGFF export assigned every intrinsic axis a spatial type and
+  paired units with row indices rather than contributing quantities. Linear interpolation
+  let zero-weight NaN neighbours contaminate exact and partially integral samples.
+- **Resolution**: Intrinsic axes inherit contributing-row semantics; mixed rows require
+  explicitly spatial quantities with one canonical declared unit. Upstream layout errors
+  retain their cause and name caller actions for array and physical-frame ordering. Linear
+  resampling uses component-wise missing-weight masks and a shared measured `1e-9` allowance,
+  with one slice's buffers retained at a time. Public contracts and release notes are updated.
+- **Verification**: gpt-6-astra implemented the fixes; Claude Opus 5.5 accepted both
+  implementation review passes. Independent QA reproduces 33 failures against the original
+  source, checks four additional eager/Dask affine/general partial-integral queries and
+  physical-frame ordering, and verifies byte-for-byte integration. Full suites: stock xarray
+  1,739 passed and 47 expected failures; patched xarray 1,786 passed. Both retain three existing
+  dependency warnings. Ruff lint/format, mypy (81 source files) and whitespace pass. Original
+  user-owned documentation edits remain intact and outside the commits.
+- **Files affected**: `src/xarrayrf/ngff/_export.py`, `src/xarrayrf/_resample.py`,
+  `tests/test_ngff_export.py`, `tests/test_resample.py`, `docs/core_interface.md`,
+  `CHANGELOG.md`, the [audit plan](codebase_audit_plan.md) and
+  [stage 3 refinement record](stage3_implementation_review.md).
+- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`); independent QA and orchestration by
+  Codex GPT-6 (exact serving model ID not exposed). Implemented by Codex gpt-6-astra
+  (initial CLI used high reasoning effort).
+- **Deferred**: Cubic coefficient NaN spreading and existing SciPy infinity behavior remain
+  documented limitations; optional per-task slice routing awaits measured performance need.
+
 ## [2026-10-05] — QA of audit stage 2
 
 - **Problem**: Scalar-target resampling and dense point-output naming needed independent

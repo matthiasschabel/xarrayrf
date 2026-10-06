@@ -9,7 +9,8 @@
 The user requested a thorough audit emphasizing material correctness, comprehensible APIs,
 and the principle of least surprise, followed by critique from Claude Opus 5.5. This plan
 covers the checkout at `de48d8ab0097bf6196fdcbced0779de0ae155fea`. Stage 1 has been implemented, cross-reviewed, verified by QA and committed to main;
-stage 2 is also implemented, cross-reviewed, verified by QA and committed to main. Stages 3–5 remain recommendations.
+stage 2 and stage 3 are also implemented, cross-reviewed, verified by QA and committed to main.
+Stages 4–5 remain recommendations.
 
 The audit inspected the shipped modules, native xarray binding, sampling and resampling,
 format adapters and readers, public contracts, test coverage, and supporting tooling.
@@ -56,6 +57,17 @@ The subsequent QAEngineer pass reproduced 40 original scalar-target failures, ch
 nonlinear registration and coordinate-only Dask fields, and repeated both full suites and
 static checks without finding an additional defect.
 
+**Stage 3 completed, 2026-10-05:** F3/F4 are implemented by gpt-6-astra, reviewed by Opus 5.5
+and independently QA-verified. The reviewed files were integrated byte-for-byte; the fixes
+and shared records are committed to main separately. The two plan passes resolved the blockers;
+measured index errors settled the remaining rounding-bound choice. Both implementation passes
+ended in **Accept**, with one optional performance optimization explicitly deferred.
+Independent verification: stock xarray 1,739 passed and 47 expected failures; patched xarray
+1,786 passed. Ruff lint/format, mypy and whitespace pass; three existing dependency warnings
+remain in each lane. Public regressions fail 33 selected cases against the original source.
+See [the stage 3 implementation record](stage3_implementation_review.md) for complete reviewer
+reports, decisions, measured bounds and QA evidence.
+
 Keep the architecture: frame identity, coordinate systems, transforms, sampling, and array
 binding form a coherent model. Preserve explicit registration between distinct frames,
 separation of identity from numerical coincidence, and coordinate values that survive
@@ -71,8 +83,8 @@ global frame registry, or replacement of native xarray binding is not justified.
 | F8 | A classic DICOM geometry for two slices accepts three pixel slices and silently discards the third. | Confirmed cardinality defect; preserve enhanced subset selection. |
 | F6 | Resampling onto a valid scalar Grid or selected scalar DataArray fails in reshape logic. | Confirmed valid-input failure; fixed in stage 2. |
 | F7 | Geometry.points collides with axis/units output names and its private stacking dimension. | Confirmed name collisions and units-metadata loss; fixed in stage 2. |
-| F3 | Non-diagonal NGFF export labels an unmixed time axis as spatial and pairs column axes with row units by index. | Confirmed metadata defect; use conservative representability rules. |
-| F4 | Equivalent resampling paths disagree on NaNs at exact sample locations. | Linear exact-sample behavior needs correction; cubic prefilter behavior needs an explicit contract. |
+| F3 | Non-diagonal NGFF export labels an unmixed time axis as spatial and pairs column axes with row units by index. | Fixed in stage 3 with conservative representability rules and contextual v06 layout errors. |
+| F4 | Equivalent resampling paths disagree on NaNs at exact sample locations. | Linear zero-weight NaN contamination fixed in stage 3; cubic prefilter limitation explicitly documented. |
 | F5 | Indexed assignment accepts another frame's labelled payload while preserving the destination frame. | Intentional payload replacement; documentation, not a runtime bug fix. |
 
 The order below is the recommended default. Each fix is independently reviewable. A public
@@ -157,33 +169,30 @@ units, ordering, and lazy evaluation.
 **M1** is completed in stage 2: Geometry documentation now distinguishes a standalone query
 view from the existing native accessor and binding lifecycle.
 
-### Stage 3: Correct export semantics and narrow interpolation behavior
+### Stage 3: Correct export semantics and narrow interpolation behavior (completed)
 
-**F3: Preserve representable NGFF axis semantics; refuse the rest.** Retain unmixed axes with
-their type and unit. Allow columns mixing rows only when they describe compatible spatial
-axes with a shared unit; derive the column's unit from its contributing rows, not its index.
-Refuse mixed time/space or incompatible-unit sums clearly. If implementing this limited rule
-requires disproportionate machinery, initially refuse unsupported non-diagonal mixed-type or
-mixed-unit cases. Do not invent dimensional meaning for their Euclidean norms.
+**F3: Preserve representable NGFF axis semantics; refuse the rest.** Non-diagonal intrinsic
+columns inherit the type and unit of their contributing physical rows. Mixing is supported
+only for explicitly spatial rows with the same canonical declared unit; numeric scale
+conversion is not introduced. Exact structural zeros define support. Unsupported semantics
+and upstream v06 axis-order/count failures report actionable context and preserve the cause.
+Array transposition and physical frame reordering are distinguished; export does not reorder
+pixels. Tests verify metadata types/units, physical sample mappings, canonical spelling aliases,
+invalid mixtures/layouts, orientation/loss reports and lazy pixels.
 
-Acceptance checks: inspect emitted axis types and units for an unmixed time axis plus spatial
-permutation, preserve same-unit spatial rotations and their numeric geometry, and test explicit
-refusal of unsupported mixing. A successful numeric round trip alone is insufficient.
+**F4: Correct linear zero-weight NaN behavior; document cubic separately.** Linear resampling
+interpolates zero-filled values and component-wise NaN masks with the same kernel/boundaries,
+fixing fully integral and partially integral queries across affine and general paths. Buffers
+are prepared once per slice and held for one slice at a time. The shared `1e-9` gather and
+missing-weight allowance replaces `1e-6`, justified by measured oblique round trips up to
+4.66e-10 index error. Missing weights above the bound propagate; smaller deficits are not
+renormalized. Public tests cover complex components, large-origin affine mask queries,
+positive missing weights, scalar targets, eager/Dask output, cropped reads, cells and fill.
 
-**F4: Fix linear exact-sample NaN behavior; document cubic separately.** Reproduced identity
-resampling of `[1, NaN, 3, 4]` preserves the first sample on the gather path but turns it into
-NaN on the general linear path. Integer sample queries should preserve the actual sample
-under the declared mapping, regardless of a built-in equivalent transform representation.
-Use a bounded fix and preserve lazy execution.
-
-Cubic prefiltering can spread a NaN through the coefficients. Document that behavior and the
-existing same-grid gather exception initially. This leaves an explicit cubic consistency
-limitation; it does not establish path independence for every interpolation method. Do not
-add NaN-aware spline fitting or silently substitute nearest interpolation.
-
-Acceptance checks: equivalent linear paths preserve exact samples with missing neighbours;
-finite-data interpolation equivalence remains valid; nonintegral missing-data behavior and
-cubic propagation are documented and covered by representative public tests.
+Cubic prefiltering can spread a NaN through coefficients, while same-grid gather retains
+original samples. That consistency limitation and SciPy infinity behavior remain explicitly
+documented and tested. General-path NaN tasks retain bounded position caching or per-slice
+recomputation; optional routing optimization awaits profiling.
 
 ### Stage 4: Decide the public paradigm before changing interfaces
 
@@ -240,15 +249,15 @@ cannot be represented safely.
 
 ## Deferred Work
 
-Stages 3–5 remain pending. Stage 4 needs deliberate public-contract choices;
+Stages 4–5 remain pending. Stage 4 needs deliberate public-contract choices;
 Stage 5 contains optional usability work. Cubic path dependence with NaNs remains an explicit
-limitation unless a later interpolation policy change is justified. Stages 1 and 2 are committed
-to main. No remote publication has been made,
-and the user's unrelated uncommitted work is preserved.
+limitation unless a later interpolation policy change is justified. Stage 3's optional
+many-context-slice routing optimization awaits profiling above the position cache budget.
+Stages 1–3 are committed to main. No remote publication has been made, and the user's
+unrelated uncommitted work is preserved.
 
 ## Next Steps
 
-Stages 1 and 2 are complete. Stage 3 is the next independent task: F3 NGFF axis semantics and
-F4 linear exact-sample NaN behavior. Follow their acceptance checks when implementation is
-requested; revisit this plan if a fix reveals a materially different cause or requires wider
-API changes.
+Stages 1–3 are complete. Stage 4 is next: choose consistent dimension ordering, deliberate
+coordinate replacement and extension-transform contracts before changing public interfaces.
+Revisit this plan if the chosen contracts reveal a materially different cause or wider scope.

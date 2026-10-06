@@ -696,22 +696,37 @@ source and remains lazy for Dask pixels. An empty source with a non-empty target
 point location or interpolation, but frame identity, transform endpoints, method, domain and
 coordinate-name compatibility are still validated.
 
+Linear interpolation preserves exact samples near NaNs. For affected source slices, it
+interpolates zero-filled values and a missing-weight mask using the same kernel and boundary
+rules. Missing weights above `ROUNDING_ALLOWANCE=1e-9` propagate NaN; weights at or below it
+are treated as roundoff, without renormalizing the tiny finite-value deficit. Complex real
+and imaginary components are handled independently. Outside fill is applied afterward, and
+cells still hold edge values. The same `1e-9` allowance classifies signed-permutation gathers.
+It covers measured index round trips on 31-degree oblique grids with origins up to 120000
+and spacings down to 0.037 (maximum error 4.66e-10), not arbitrary ill-scaled custom transforms.
+Cubic spline prefiltering may spread NaNs throughout coefficients; same-grid gathers retain
+the original samples. Infinity behavior remains SciPy's existing behavior for interpolated
+queries; this is not normalized masked interpolation.
+
 Performance is part of the contract:
 
 - When both arrays form lattices and every transform is affine, target positions map to source
   positions through one composed affine. Signed-permutation maps with integral offset, bounded
-  within `1e-6` source samples at every target-box corner, gather source samples without
+  within `1e-9` source samples at every target-box corner, gather source samples without
   interpolation; samples outside the source use the selected domain's fill or edge rule.
-  Other maps use `scipy.ndimage.affine_transform` in a single compiled pass per non-geometry
-  slice, with a separable outside mask. At 128³ with a rotation, linear runs within about 15% and cubic within
-  about 5% of scipy applying the same composed map; the mask adds about 0.01 s
+  Other maps use `scipy.ndimage.affine_transform` in a compiled pass per non-geometry
+  slice, with a separable outside mask. For finite data at 128³ with a rotation, linear runs
+  within about 15% and cubic within about 5% of scipy applying the same composed map; the mask
+  adds about 0.01 s
   (`benchmarks/resample_benchmark.py`).
 - Otherwise target positions are processed in blocks of `block_points` samples (bounded
-  memory), positions are computed once per block and reused for every non-geometry slice, and
-  values are interpolated by `scipy.ndimage.map_coordinates`.
-- Cubic spline coefficients are computed for one slice at a time, so memory does not grow with the
-  number of non-geometry slices. A Dask-backed source is processed lazily, one task per chunk of
-  its non-geometry dimensions; positions and masks are shared within a task, not across tasks.
+  memory), positions are reused for every non-geometry slice when no linear NaN buffers are
+  needed, and values are interpolated by `scipy.ndimage.map_coordinates`.
+- Linear NaN buffers and cubic spline coefficients are prepared once per source slice and held
+  for only one slice at a time. General-path positions are cached up to `POSITION_CACHE_BYTES`
+  (256 MiB), or recomputed per slice beyond that budget. A Dask-backed source is processed
+  lazily, one task per chunk of its non-geometry dimensions; positions and masks are shared
+  within a task, not across tasks.
 - A single-sample target dimension (a one-slice target) keeps the fast path. Complex sources
   are resampled as complex128.
 - scipy is the optional `resample` extra; the core does not import it.
@@ -964,11 +979,23 @@ reports their loss.
 frame_name="physical", store=None) -> tuple[Multiscale, Report]` exports one regular affine level
 as a validated v06 multiscale model with one dataset. A diagonal lattice uses the frame's axes
 as its intrinsic system and a dataset sequence of scale then translation. For a non-diagonal
-lattice, the intrinsic system uses array dimension names as spatial axes with the frame's units;
-the dataset sequence scales by lattice column norms and translates by zero. One additional
+lattice, intrinsic axes use array dimension names. A column with one nonzero frame row inherits
+that row's axis type and unit (including `None`), and its spacing is the coefficient magnitude.
+A column mixing rows is supported only when all contributing rows are explicitly spatial and
+have the same declared unit, using the Euclidean column norm. Adapter unit spelling aliases
+agree (`mm` and `millimeter`), but different scales (`mm` and `um`) do not; no numbers are
+converted. Mixed time/space, multiple time rows, unknown types and missing or incompatible
+units in mixed columns are refused with the array axis and contributing frame declarations.
+Support uses exact structural zeros: a near-90-degree space/time rotation with a tiny nonzero
+cross term is still mixed. Supply actual zeros for an intended permutation; same-unit spatial
+rotations remain valid. Zero columns are refused before normalization. The dataset sequence
+scales by these spacings and translates by zero. One additional
 multiscale-level affine maps that intrinsic system to `frame_name`, whose axes are the frame's,
 using the normalized lattice matrix and origin. This synthesis is reported as
-`intrinsic-synthesized`. A level needs one array dimension per intrinsic axis; rectangular
+`intrinsic-synthesized`. Both systems are validated against v06 axis-order/count constraints;
+errors name intrinsic dimensions/types and advise transposing array geometry for ordering or
+providing explicit supported declarations for type counts. Export never reorders pixels.
+A level needs one array dimension per intrinsic axis; rectangular
 mappings remain available through `to_transform`. `xarrayrf.ngff.to_transform(t, *, names=None)`
 exports a frame-to-frame affine and returns `tuple[Affine, Report]`. `names` maps reference frames
 to coordinate-system names declared alongside the export; without a mapping entry, only a frame

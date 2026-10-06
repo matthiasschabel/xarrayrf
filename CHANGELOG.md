@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- NGFF non-diagonal exports derive intrinsic axis types, units and spacings from contributing
+  physical rows. Unmixed time and differently unitized spatial permutations retain their
+  semantics; mixed columns require explicit spatial axes with the same unit. Unsupported
+  v06 axis layouts now report actionable errors without reordering pixels.
+- Linear resampling preserves exact samples and zero-weight neighbors near NaNs across
+  affine and general paths, including independent complex components. Missing weights above
+  the shared `1e-9` rounding allowance propagate NaN; integral gather classification now uses
+  that bound instead of `1e-6`. Cubic prefilter NaN spreading and SciPy infinity behavior remain.
+
 - Resampling accepts fully scalar Grid and selected Geometry/DataArray targets, preserving
   scalar coordinates, source context and lazy Dask output. Affine queries retain cropped
   source reads, including for cubic interpolation and cells-domain edge holding.
