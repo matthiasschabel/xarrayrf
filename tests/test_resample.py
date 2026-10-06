@@ -778,3 +778,225 @@ def test_resampling_keeps_nongeometry_custom_index(target_kind: str) -> None:
     assert isinstance(result.xindexes["echo"], RangeIndex)
     assert result.xindexes["echo"].equals(index)
     xr.testing.assert_identical(result.coords["echo"], source.array.coords["echo"])
+
+
+def _nan_line(values: npt.ArrayLike) -> xrf.Geometry:
+    frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x",), ("mm",)))
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(("i",), ("1",), sample_offset=(0.5,)),
+        target=frame,
+        matrix=[[1.0]],
+        translation=[0.0],
+    )
+    return xrf.Geometry(
+        xr.DataArray(values, dims="i", coords={"i": np.arange(len(np.asarray(values)))}),
+        transform,
+        dims=("i",),
+    )
+
+
+@pytest.mark.parametrize("lazy", [False, True])
+@pytest.mark.parametrize("path", ["affine", "composite", "points"])
+def test_linear_nan_exact_and_fractional_queries(lazy: bool, path: str) -> None:
+    source = _nan_line([1.0, np.nan, 3.0, 4.0])
+    if lazy:
+        source = xrf.Geometry(source.array.chunk({"i": 2}), source.transform, dims=source.dims)
+    assert isinstance(source.transform, xrf.AffineTransform)
+    transform = (
+        xrf.CompositeTransform(source.transform)
+        if path == "composite"
+        else PointOnly(source.transform)
+        if path == "points"
+        else source.transform
+    )
+    target = xrf.Grid(transform, {"i": ("i", [0.0, 1.0, 2.0, 3.0])})
+    assert_allclose(xrf.resample(source, target), [1.0, np.nan, 3.0, 4.0], rtol=0, atol=ATOL)
+    for position, expected in [
+        (-0.75, -9.0),
+        (-0.25, 1.0),
+        (0.0, 1.0),
+        (0.5, np.nan),
+        (1e-8, np.nan),
+        (2.0, 3.0),
+        (2.5, 3.5),
+    ]:
+        scalar = xrf.Grid(transform, {"i": position})
+        actual = xrf.resample(source, scalar, domain="cells", fill_value=-9)
+        assert_allclose(actual, expected, rtol=0, atol=ATOL)
+
+
+@pytest.mark.parametrize("general", [False, True])
+def test_linear_nan_partial_integral_queries(general: bool) -> None:
+    values = ramp()
+    values[1, 2, 2] = np.nan
+    source = volume(values)
+    transform = xrf.CompositeTransform(source.transform) if general else source.transform
+    # j is integral: the missing sample in the next row has zero weight.
+    for j, expected in [(1.0, 14.0), (1.5, np.nan)]:
+        target = xrf.Grid(transform, {"i": 2.5, "j": j, "k": 1.0})
+        assert_allclose(xrf.resample(source, target), expected, rtol=0, atol=ATOL)
+    grid = xrf.Grid(
+        transform, {"i": ("i", [2.0, 2.5]), "j": ("j", [1.0, 1.5]), "k": ("k", [1.0, 2.0])}
+    )
+    result = xrf.resample(source, grid).transpose("k", "j", "i").values
+    assert_allclose(result[0, 0], [13.0, 14.0], rtol=0, atol=ATOL)
+    assert np.isnan(result[0, 1]).all()
+    assert np.isfinite(result[1]).all()
+
+
+@pytest.mark.parametrize("general", [False, True])
+def test_linear_nan_complex_components_remain_independent(general: bool) -> None:
+    values = np.array([complex(1, np.nan), complex(np.nan, 2), complex(3, 4), complex(5, 6)])
+    source = _nan_line(values)
+    transform = xrf.CompositeTransform(source.transform) if general else source.transform
+    for position, real, imag in [
+        (0.0, 1.0, np.nan),
+        (1.0, np.nan, 2.0),
+        (2.0, 3.0, 4.0),
+        (1.5, np.nan, 3.0),
+        (2.5, 4.0, 5.0),
+    ]:
+        result = xrf.resample(source, xrf.Grid(transform, {"i": position})).values
+        assert_allclose(result.real, real, rtol=0, atol=ATOL)
+        assert_allclose(result.imag, imag, rtol=0, atol=ATOL)
+
+
+@pytest.mark.parametrize("origin", [(-250.0, 300.0), (-13700.0, 8456.0), (100000.0, -120000.0)])
+@pytest.mark.parametrize("spacing", [(0.5, 0.7), (0.037, 0.081)])
+def test_linear_nan_oblique_round_trip_at_large_origins(
+    origin: tuple[float, float], spacing: tuple[float, float]
+) -> None:
+    angle = np.deg2rad(31.0)
+    matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]) @ np.diag(
+        spacing
+    )
+    frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("mm", "mm")))
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(("j", "i"), ("1", "1")),
+        target=frame,
+        matrix=matrix,
+        translation=origin,
+    )
+    values = np.ones((13, 17))
+    values[5, 7] = np.nan
+    source = xrf.Geometry(
+        xr.DataArray(values, dims=("j", "i"), coords={"j": np.arange(13), "i": np.arange(17)}),
+        transform,
+        dims=("j", "i"),
+    )
+    for mapping in (transform, xrf.CompositeTransform(transform)):
+        target = xrf.Grid(mapping, {"j": ("j", np.arange(13)), "i": ("i", np.arange(17))})
+        result = xrf.resample(source, target, block_points=19).values
+        assert_array_equal(np.isnan(result), np.isnan(values))
+        # Measured public index round-trip errors reach 4.66e-10; no renormalization.
+        assert_allclose(result, values, rtol=0, atol=1e-9)
+
+    # A 1e-8 pixel shift exceeds the 1e-9 gather bound even at the largest origin.
+    # Missing weight from this shift must propagate, while cross-axis roundoff must not.
+    shifted = xrf.Grid(transform, {"j": ("j", np.arange(12) + 1e-8), "i": ("i", np.arange(16))})
+    result = xrf.resample(source, shifted).values
+    expected = values[:12, :16].copy()
+    expected[4, 7] = np.nan
+    assert_array_equal(np.isnan(result), np.isnan(expected))
+    assert_allclose(result, expected, rtol=0, atol=1e-9)
+
+
+def test_cubic_nan_prefilter_spreads_missing_values_except_on_gather() -> None:
+    source = _nan_line([1.0, np.nan, 3.0, 4.0])
+    assert_allclose(xrf.resample(source, source, method="cubic"), source.array, rtol=0, atol=ATOL)
+    target = xrf.Grid(xrf.CompositeTransform(source.transform), {"i": ("i", [0.0, 1.0, 2.0, 3.0])})
+    assert np.isnan(xrf.resample(source, target, method="cubic")).all()
+
+
+@pytest.mark.parametrize("general", [False, True])
+@pytest.mark.parametrize("offset", [1e-8, 5e-10])
+def test_linear_missing_weight_uses_measured_rounding_allowance(
+    general: bool, offset: float
+) -> None:
+    source = _nan_line([1.0, np.nan, 3.0, 4.0])
+    transform = xrf.CompositeTransform(source.transform) if general else source.transform
+    target = xrf.Grid(transform, {"i": ("i", np.arange(3) + offset)})
+    result = xrf.resample(source, target).values
+    assert_array_equal(np.isnan(result), [offset > 1e-9, True, False])
+    if offset <= 1e-9:
+        assert_allclose(result[0], 1.0, rtol=0, atol=1e-9)
+    # A scalar avoids the gather path and demonstrates the unnormalized finite deficit.
+    scalar = xrf.resample(source, xrf.Grid(transform, {"i": offset})).values
+    assert_allclose(scalar, np.nan if offset > 1e-9 else 1.0 - offset, rtol=0, atol=1e-15)
+
+
+@pytest.mark.parametrize("cache_bytes", [0, 1 << 20])
+def test_linear_nan_buffers_are_reused_per_slice_and_released(
+    monkeypatch: pytest.MonkeyPatch, cache_bytes: int
+) -> None:
+    import weakref
+
+    monkeypatch.setattr("xarrayrf._resample.POSITION_CACHE_BYTES", cache_bytes)
+    values = np.stack([ramp(), ramp() + 20, ramp() + 40])
+    values[:, 1, 2, 2] = np.nan
+    source = volume(values, extra={"context": 7, "echo": [0, 1, 2]})
+    assert isinstance(source.transform, xrf.AffineTransform)
+    target = xrf.Geometry(source.array, PointOnly(source.transform), dims=source.dims)
+    references: list[weakref.ReferenceType[npt.NDArray[np.generic]]] = []
+    calls = 0
+    original = ndimage.map_coordinates
+
+    def recording(data: npt.NDArray[np.generic], *args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        if not any(ref() is data for ref in references):
+            references.append(weakref.ref(data))
+        # The public resample call may hold only one slice's value and mask buffers.
+        assert sum(ref() is not None for ref in references) <= 2
+        return original(data, *args, **kwargs)
+
+    monkeypatch.setattr(ndimage, "map_coordinates", recording)
+    result = xrf.resample(source, target, block_points=11)
+    assert_allclose(result, source.array, rtol=0, atol=ATOL)
+    assert len(references) == 6  # one value buffer and one mask per source slice
+    assert calls > len(references)  # reused across blocks
+    assert all(ref() is None for ref in references)
+    xr.testing.assert_identical(result.context, source.array.context)
+    xr.testing.assert_identical(result.echo, source.array.echo)
+
+
+def test_linear_nan_lazy_crop_reads_only_nearby_chunks() -> None:
+    class MissingArray(_RecordingArray):
+        def __getitem__(self, key: tuple[slice, ...]) -> npt.NDArray[np.float64]:
+            self.reads.append(key)
+            values = np.ones(self.shape)
+            values[2, 4, 2] = np.nan
+            return values[key]
+
+    recording = MissingArray()
+    lazy = da.from_array(recording, chunks=(8, 16, 16))  # type: ignore[no-untyped-call]
+    base = volume(np.zeros(recording.shape))
+    source = xrf.Geometry(base.array.copy(data=lazy), base.transform, dims=base.dims)
+    target = xrf.Grid(source.transform, {"i": 2.5, "j": 3.0, "k": 2.0})
+    recording.reads.clear()
+    result = xrf.resample(source, target)
+    assert not recording.reads
+    assert_allclose(result.compute(), 1.0, rtol=0, atol=ATOL)
+    assert len(recording.reads) == 1
+
+
+@pytest.mark.parametrize("general", [False, True])
+def test_linear_infinities_retain_scipy_behavior(general: bool) -> None:
+    values = np.array([1.0, np.inf, 3.0, 4.0])
+    source = _nan_line(values)
+    transform = xrf.CompositeTransform(source.transform) if general else source.transform
+    positions = np.array([0.0, 0.5, 2.0, 2.5])
+    target = xrf.Grid(transform, {"i": ("i", positions)})
+    expected = ndimage.map_coordinates(
+        values, positions[None, :], order=1, mode="nearest", prefilter=False
+    )
+    assert_allclose(xrf.resample(source, target), expected, rtol=0, atol=ATOL)
+
+
+@pytest.mark.parametrize("general", [False, True])
+def test_linear_nan_cells_hold_missing_edges_and_outside_fill(general: bool) -> None:
+    source = _nan_line([np.nan, 1.0, 2.0, np.nan])
+    transform = xrf.CompositeTransform(source.transform) if general else source.transform
+    target = xrf.Grid(transform, {"i": ("i", [-0.75, -0.25, 3.25, 3.75])})
+    result = xrf.resample(source, target, domain="cells", fill_value=-9)
+    assert_allclose(result, [-9.0, np.nan, np.nan, -9.0], rtol=0, atol=ATOL)

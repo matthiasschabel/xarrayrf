@@ -28,11 +28,14 @@ type Method = Literal["nearest", "linear", "cubic"]
 
 _SPLINE_ORDER: Final = {"nearest": 0, "linear": 1, "cubic": 3}
 
+ROUNDING_ALLOWANCE: Final = 1e-9
+"""Index/gather and missing-weight roundoff bound, measured on large-origin oblique grids."""
+
 _SLAB_SAMPLES: Final = 1 << 22
 """Target samples per slab when computing the outside mask of the lattice path."""
 
 POSITION_CACHE_BYTES: Final = 1 << 28
-"""Largest size of general-path positions kept across slices for cubic resampling (256 MiB)."""
+"""Largest size of general-path positions kept across source slices (256 MiB)."""
 
 BLOCK_POINTS: Final = 1 << 20
 """Target samples located per block: bounds the position arrays to a few tens of megabytes."""
@@ -263,7 +266,7 @@ def _same_grid_indices(
     for corner in product(*((0, size - 1) for size in target_shape)):
         position = np.asarray(corner, dtype=np.float64)
         error = (linear - rounded) @ position + lattice_map.offset - offset
-        if np.max(np.abs(error)) > 1e-6:
+        if np.max(np.abs(error)) > ROUNDING_ALLOWANCE:
             return None
     source_to_target = tuple(int(np.flatnonzero(row)[0]) for row in rounded)
     indices = tuple(
@@ -433,22 +436,65 @@ def _coefficients(plan: _Plan, volume: npt.NDArray[np.generic]) -> npt.NDArray[n
     return filtered
 
 
+def _linear_inputs(
+    volume: npt.NDArray[np.generic],
+) -> tuple[npt.NDArray[np.generic], npt.NDArray[np.generic] | None]:
+    """Zero missing components and encode their weights once for one source slice."""
+    if not np.isnan(volume).any():
+        return volume, None
+    values = volume.copy()
+    missing = np.zeros(volume.shape, dtype=np.complex128 if np.iscomplexobj(volume) else np.float64)
+    if np.iscomplexobj(volume):
+        for component, mask in ((values.real, missing.real), (values.imag, missing.imag)):
+            absent = np.isnan(component)
+            mask[absent] = 1.0
+            component[absent] = 0.0
+    else:
+        absent = np.isnan(values)
+        missing[absent] = 1.0
+        values[absent] = 0.0
+    return values, missing
+
+
+def _restore_missing(values: npt.NDArray[np.generic], weights: npt.NDArray[np.generic]) -> None:
+    """Propagate positive missing weight, allowing measured position roundoff."""
+    values.real[weights.real > ROUNDING_ALLOWANCE] = np.nan
+    if np.iscomplexobj(values):
+        values.imag[weights.imag > ROUNDING_ALLOWANCE] = np.nan
+
+
 def _interpolate(
-    plan: _Plan, volume: npt.NDArray[np.generic], positions: npt.NDArray[np.float64], size: int
+    plan: _Plan,
+    volume: npt.NDArray[np.generic],
+    positions: npt.NDArray[np.float64],
+    size: int,
+    missing: npt.NDArray[np.generic] | None = None,
 ) -> npt.NDArray[np.generic]:
     """Interpolate one position block, holding edge values within outer cells."""
     inside = ~np.isnan(positions[0])
     block = np.full(size, plan.fill_value, dtype=plan.output_dtype)
     # Beyond the outer samples, in their cells, the edge value holds; a cubic spline would
     # otherwise extrapolate there.
-    block[inside] = plan.ndimage.map_coordinates(
+    clipped = np.clip(positions[:, inside], 0.0, plan.source_last)
+    sampled = plan.ndimage.map_coordinates(
         volume,
-        np.clip(positions[:, inside], 0.0, plan.source_last),
+        clipped,
         order=plan.order,
         mode="nearest",
         prefilter=False,
         output=plan.output_dtype,
     )
+    if missing is not None:
+        weights = plan.ndimage.map_coordinates(
+            missing,
+            clipped,
+            order=plan.order,
+            mode="nearest",
+            prefilter=False,
+            output=plan.output_dtype,
+        )
+        _restore_missing(sampled, weights)
+    block[inside] = sampled
     return block
 
 
@@ -479,7 +525,7 @@ def _lattice_block(
             lattice_map.lowest,
             lattice_map.highest,
         )
-    # One compiled pass per slice, prefiltering only that slice; edges extend so
+    # Compiled passes per slice, prefiltering only that slice; edges extend so
     # rounding at an exact edge sample cannot turn it into fill, and the separable
     # mask applies the true boundary. Nearest and linear already hold the edge value
     # beyond the outer samples; a cubic spline would extrapolate, so target samples in
@@ -504,7 +550,9 @@ def _lattice_block(
         )
     output = np.empty((len(slices), *target_shape), dtype=plan.output_dtype)
     for index, volume in enumerate(slices):
-        filtered = _coefficients(plan, volume)
+        filtered, missing = (
+            _linear_inputs(volume) if plan.order == 1 else (_coefficients(plan, volume), None)
+        )
         plan.ndimage.affine_transform(
             filtered,
             lattice_map.linear,
@@ -515,6 +563,19 @@ def _lattice_block(
             mode="nearest",
             prefilter=False,
         )
+        if missing is not None:
+            weights = plan.ndimage.affine_transform(
+                missing,
+                lattice_map.linear,
+                offset=lattice_map.offset,
+                output_shape=target_shape,
+                output=plan.output_dtype,
+                order=plan.order,
+                mode="nearest",
+                prefilter=False,
+            )
+            _restore_missing(output[index], weights)
+            del weights
         output[index][outside] = plan.fill_value
         if shell is not None:
             output[index][shell] = plan.ndimage.map_coordinates(
@@ -525,6 +586,7 @@ def _lattice_block(
                 prefilter=False,
                 output=plan.output_dtype,
             )
+        del filtered, missing
     return output.reshape((*leading, *plan.target_shape))
 
 
@@ -537,24 +599,30 @@ def _general_block(
         (start, min(start + plan.block_points, plan.total))
         for start in range(0, plan.total, plan.block_points)
     ]
-    if plan.order <= 1:
+    needs_masks = plan.order == 1 and any(np.isnan(volume).any() for volume in slices)
+    if plan.order <= 1 and not needs_masks:
         # No coefficients to hold: locate each block once and reuse it for every slice.
         for start, stop in blocks:
             positions = _block_positions(plan, start, stop)
             for index, volume in enumerate(slices):
                 flat[index, start:stop] = _interpolate(plan, volume, positions, stop - start)
     else:
-        # Hold one slice's coefficients at a time; keep positions across slices only
+        # Hold one slice's coefficients or NaN buffers at a time; keep positions only
         # when they fit the cache budget, otherwise locate again per slice.
         cache = plan.total * len(plan.source_dims) * 8 <= POSITION_CACHE_BYTES
         cached = [_block_positions(plan, start, stop) for start, stop in blocks] if cache else None
         for index, volume in enumerate(slices):
-            filtered = _coefficients(plan, volume)
+            filtered, missing = (
+                _linear_inputs(volume) if plan.order == 1 else (_coefficients(plan, volume), None)
+            )
             for number, (start, stop) in enumerate(blocks):
                 positions = (
                     cached[number] if cached is not None else _block_positions(plan, start, stop)
                 )
-                flat[index, start:stop] = _interpolate(plan, filtered, positions, stop - start)
+                flat[index, start:stop] = _interpolate(
+                    plan, filtered, positions, stop - start, missing
+                )
+            del filtered, missing
     return flat.reshape((*leading, *plan.target_shape))
 
 
@@ -600,18 +668,28 @@ def resample(
     lie; a point-sampled axis has none and reaches no further than its samples. Interpolation
     between samples is the same in both domains.
 
+    Linear interpolation ignores NaN components whose interpolation weight is at most
+    ``1e-9`` (measured position roundoff), and propagates larger missing weights. Real and
+    imaginary components are handled independently, without renormalizing the finite
+    weights. The same allowance classifies integral signed-permutation maps for exact
+    gathering. It covers measured large-origin oblique grids, not arbitrary ill-scaled maps.
+    Cubic prefiltering can spread NaNs through spline coefficients; only same-grid gathering
+    retains original samples. Infinities retain SciPy's existing interpolation behavior.
+
     Empty targets return empty values without locating or interpolating samples. Empty sources
     with non-empty targets raise ValueError, regardless of the domain or ``fill_value``.
 
     Performance: when both arrays form regular lattices and every transform is affine, target
     positions map to source positions through one composed affine, and each non-geometry slice
-    is interpolated in a single compiled ``scipy.ndimage.affine_transform`` pass with a
+    is interpolated by ``scipy.ndimage.affine_transform`` with a
     separable outside mask; ``block_points`` does not apply. Otherwise target coordinates are
     mapped through the transforms and the source's exact inverse in blocks of ``block_points``
     samples, and ``scipy.ndimage.map_coordinates`` interpolates; for nearest and linear each
-    block's positions are reused for every slice. Cubic spline coefficients are computed for one
-    slice at a time. A Dask-backed source is processed lazily, one task per chunk of its
-    non-geometry dimensions; positions and masks are shared within a task, not across tasks.
+    block's positions are reused for every slice when no linear NaN handling is needed.
+    Linear NaN buffers and cubic spline coefficients are prepared for one source slice at a
+    time; positions are cached within a bounded budget or recomputed per slice. A Dask-backed
+    source is processed lazily, one task per chunk of its non-geometry dimensions; positions
+    and masks are shared within a task, not across tasks.
     Install the ``resample`` extra for scipy.
 
     Args:
