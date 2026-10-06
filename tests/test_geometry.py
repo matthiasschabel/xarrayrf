@@ -1,8 +1,7 @@
 """Public behavior of :class:`xarrayrf.Geometry`.
 
-Every test goes through the exported public API. Nothing here exercises a future accessor:
-a ``Geometry`` is constructed explicitly from an array and a transform, because that is the
-only thing this package offers.
+Every test goes through the exported public API with a standalone ``Geometry``.
+Native accessor and binding behavior is covered in ``test_native.py``.
 """
 
 from __future__ import annotations
@@ -475,6 +474,28 @@ def test_points_cover_every_sample_with_labelled_axes() -> None:
     )
 
 
+@pytest.mark.parametrize("lazy", [False, True])
+def test_points_custom_names_support_a_fully_selected_point(
+    volume: xr.DataArray, volume_transform: AffineTransform, lazy: bool
+) -> None:
+    if lazy:
+        volume = volume.chunk({"slice": 1})
+    with _recorded_tasks() as tasks:
+        selected = volume.isel(slice=1, row=1, column=3)
+        geometry = Geometry(selected, volume_transform, dims=())
+        default = geometry.points()
+        result = geometry.points(axis_dim="component", units_coord="component_units")
+    assert not tasks
+    assert default.dims == ("axis",)
+    assert result.dims == ("component",)
+    assert_array_equal(result.component, ["L", "P", "S"])
+    assert_array_equal(result.component_units, ["mm", "mm", "mm"])
+    assert_allclose(result.compute(), [11.5, 20.25, -3.0], rtol=0, atol=ATOL)
+    assert_allclose(default.compute(), [11.5, 20.25, -3.0], rtol=0, atol=ATOL)
+    if lazy:
+        assert isinstance(result.data, da.Array)
+
+
 def test_points_follow_the_array_chunks_lazily() -> None:
     geometry = _queries_geometry([0.0, 2.0, 5.0])
     lazy = Geometry(geometry.array.chunk({"k": 1}), geometry.transform, dims=("k", "j", "i"))
@@ -482,6 +503,108 @@ def test_points_follow_the_array_chunks_lazily() -> None:
     assert isinstance(points.data, da.Array)
     assert points.chunks is not None and points.chunks[0] == (1, 1, 1)
     assert_allclose(points.values, geometry.points().values, rtol=0, atol=ATOL)
+
+
+@pytest.mark.parametrize("dim", ["axis", "units", "__xarrayrf_source_axis__"])
+@pytest.mark.parametrize("lazy", [False, True])
+def test_points_output_names_preserve_geometry_labels(dim: str, lazy: bool) -> None:
+    frame = ReferenceFrame.local(CoordinateSystem(("position",), ("mm",)))
+    transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("x",), ("mm",)),
+        target=frame,
+        matrix=[[1.0]],
+        translation=[0.0],
+    )
+    array = xr.DataArray(
+        np.zeros(3), dims=dim, coords={dim: [10, 20, 30], "x": (dim, [0.0, 1.0, 2.0])}
+    )
+    if lazy:
+        array = array.chunk({dim: 2})
+        array = array.assign_coords(x=(dim, da.from_array([0.0, 1.0, 2.0], chunks=2)))  # type: ignore[no-untyped-call]
+    geometry = Geometry(array, transform, dims=(dim,))
+    with _recorded_tasks() as tasks:
+        if dim in {"axis", "units"}:
+            with pytest.raises(ValueError, match=r"collides.*axis_dim.*units_coord"):
+                geometry.points()
+        else:
+            default = geometry.points()
+            assert default.dims == (dim, "axis")
+        result = geometry.points(axis_dim="component", units_coord="component_units")
+    assert not tasks
+    assert result.dims == (dim, "component")
+    assert_array_equal(result.coords[dim], [10, 20, 30])
+    assert_array_equal(result.component, ["position"])
+    assert_array_equal(result.component_units, ["mm"])
+    assert_allclose(result.compute(), [[0.0], [1.0], [2.0]], rtol=0, atol=ATOL)
+    if lazy:
+        assert result.chunks == ((2, 1), (1,))
+
+
+@pytest.mark.parametrize(
+    ("options", "error", "message"),
+    [
+        ({"axis_dim": 1}, TypeError, "axis_dim must be a string"),
+        ({"units_coord": None}, TypeError, "units_coord must be a string"),
+        ({"axis_dim": ""}, ValueError, "axis_dim must be nonempty"),
+        ({"units_coord": ""}, ValueError, "units_coord must be nonempty"),
+        ({"axis_dim": "units"}, ValueError, "must be distinct"),
+        ({"axis_dim": "k"}, ValueError, "collides.*axis_dim.*units_coord"),
+        ({"units_coord": "i"}, ValueError, "collides.*axis_dim.*units_coord"),
+    ],
+)
+def test_points_reject_invalid_output_names_before_evaluation(
+    options: dict[str, Any], error: type[Exception], message: str
+) -> None:
+    geometry = _queries_geometry([0.0, 2.0, 5.0])
+    lazy = Geometry(geometry.array.chunk({"k": 1}), geometry.transform, dims=geometry.dims)
+    with _recorded_tasks() as tasks, pytest.raises(error, match=message):
+        lazy.points(**options)
+    assert not tasks
+
+
+def test_points_custom_names_support_nonseparable_lazy_coordinates() -> None:
+    frame = ReferenceFrame.local(CoordinateSystem(("second", "first"), ("mm", "mm")))
+    transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("u", "v"), ("mm", "mm")),
+        target=frame,
+        matrix=[[0.0, 2.0], [1.0, 0.0]],
+        translation=[0.0, 0.0],
+    )
+
+    # Pixel evaluation must remain impossible even when the coordinate result is computed.
+    def refuse_pixels(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        raise AssertionError("pixels evaluated")
+
+    pixels = da.zeros((2, 3), chunks=(1, 2)).map_blocks(
+        refuse_pixels, dtype=float, meta=np.empty((0, 0))
+    )
+    u = np.array([[0.0, 1.0, 2.0], [10.0, 11.0, 12.0]])
+    array = xr.DataArray(
+        pixels,
+        dims=("row", "column"),
+        coords={
+            "u": (("row", "column"), da.from_array(u, chunks=(1, 2))),  # type: ignore[no-untyped-call]
+            "v": ("column", [0.0, 0.5, 1.0]),
+            "row": [10, 20],
+            "column": [3, 4, 5],
+            "axis": "omitted",
+            "units": "omitted",
+        },
+    )
+    geometry = Geometry(array, transform, dims=("column", "row"))
+    with _recorded_tasks() as tasks:
+        default = geometry.points()
+        custom = geometry.points(axis_dim="component", units_coord="component_units")
+    assert not tasks
+    assert custom.dims == ("row", "column", "component")
+    assert custom.chunks == ((1, 1), (2, 1), (2,))
+    expected = np.stack([np.broadcast_to([0.0, 1.0, 2.0], u.shape), u], axis=-1)
+    assert_allclose(custom.compute(), expected, rtol=0, atol=ATOL)
+    xr.testing.assert_identical(
+        default.compute(), custom.rename(component="axis", component_units="units").compute()
+    )
+    point = geometry.point_at(row=1, column=2).rename(axis="component", units="component_units")
+    assert_allclose(custom.isel(row=1, column=2), point, rtol=0, atol=ATOL)
 
 
 def test_positions_at_inverts_nonuniform_offsets() -> None:

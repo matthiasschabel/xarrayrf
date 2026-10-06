@@ -35,8 +35,6 @@ from ._validation import REAL_KINDS, _check_str_sequence, check_names, real_floa
 AXIS_DIM: Final = "axis"
 """Dimension that labels a point's axes in results returned by :class:`Geometry`."""
 
-_SOURCE_AXIS: Final = "__xarrayrf_source_axis__"
-
 
 def adopt_frame(
     transform: SupportsPoints, other: ReferenceFrame | xr.DataArray, *, name: str = "other"
@@ -165,10 +163,10 @@ class Geometry:
 
     This is a query object, not an attachment. Constructing it binds nothing to the array
     and gives it no geometry an xarray operation could carry: a crop or a sum produces a
-    plain DataArray, and a view built on the original says nothing about the result. A
-    future ``.rf.geometry`` accessor can delegate here, but the snapshot ownership and
-    operation-lifecycle enforcement it needs live outside this object and do not exist yet.
-    Nothing here certifies what an array has been through.
+    plain DataArray, and a view built on the original says nothing about the result.
+    For an array framed through the native API, ``array.rf.geometry`` exposes this query
+    view over its attached binding. Binding ownership and operation-lifecycle enforcement
+    live in that native integration, outside this object.
 
     Pixels are never read, no dense mesh of points is built and no whole coordinate field is
     materialized. A chunked coordinate is validated on metadata at construction; only the
@@ -424,56 +422,75 @@ class Geometry:
     def _array_order(self) -> tuple[str, ...]:
         return tuple(str(dim) for dim in self._array.dims if dim in self._dims)
 
-    def points(self) -> xr.DataArray:
+    def points(self, *, axis_dim: str = AXIS_DIM, units_coord: str = "units") -> xr.DataArray:
         """Return every sample's point in the target frame.
 
-        The result has the geometry dimensions in the array's order followed by ``"axis"``,
-        labelled by the frame's axis names with a ``units`` coordinate, and carries the array's
+        The result has the geometry dimensions in the array's order followed by ``axis_dim``,
+        labelled by the frame's axis names with a ``units_coord`` coordinate, and carries the array's
         index coordinates along the geometry dimensions. Coordinates are broadcast and evaluated;
         pixels are never read. When the array is chunked with Dask the result is chunked the same
         way along the geometry dimensions and nothing is computed until it is requested.
+
+        Args:
+            axis_dim: Output component dimension, default ``"axis"``.
+            units_coord: Per-component units coordinate, default ``"units"``. Both names
+                must be nonempty, distinct and absent from the carried geometry dimensions
+                and index coordinates. These options affect only dense ``points()``;
+                use xarray ``rename`` to align a ``point_at()`` result with custom names.
 
         Returns:
             One point per sample of the geometry dimensions.
 
         Raises:
-            TypeError: If a coordinate's dtype or unit attribute is unacceptable.
-            ValueError: If the coordinate structure no longer matches the transform, or the
+            TypeError: If an output name is not a string, or a coordinate's dtype or unit
+                attribute is unacceptable.
+            ValueError: If output names are empty, equal or collide with carried geometry
+                names, the coordinate structure no longer matches the transform, or the
                 transform returns points of the wrong shape or non-finite values.
         """
+        for name, value in (("axis_dim", axis_dim), ("units_coord", units_coord)):
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a string")
+            if not value:
+                raise ValueError(f"{name} must be nonempty")
+        if axis_dim == units_coord:
+            raise ValueError("axis_dim and units_coord must be distinct")
         self._dependencies()
+        order = self._array_order()
+        for name in (axis_dim, units_coord):
+            if name in order:
+                raise ValueError(
+                    f"output name {name!r} collides with a carried geometry dimension or index "
+                    "coordinate; choose explicit alternatives with axis_dim and units_coord"
+                )
         transform = self._transform
         frame_axes = self._frame.axes
         coordinates = [
             xr.DataArray(self._array.coords[axis].variable.data, dims=self._array.coords[axis].dims)
             for axis in transform.source.axes
         ]
-        broadcast = list(xr.broadcast(*coordinates))
-        order = [dim for dim in self._array_order() if dim in broadcast[0].dims]
+        broadcast = [coordinate.transpose(*order) for coordinate in xr.broadcast(*coordinates)]
         if self._array.chunks is not None:
             chunks = {dim: self._array.chunksizes[dim] for dim in order}
             broadcast = [coordinate.chunk(chunks) for coordinate in broadcast]
-        stacked = xr.concat(broadcast, dim=_SOURCE_AXIS).transpose(*order, _SOURCE_AXIS)
-        if self._array.chunks is not None:
-            stacked = stacked.chunk({_SOURCE_AXIS: -1})
 
-        def evaluate(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-            return transform_points(transform, values)
+        def evaluate(*values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return transform_points(transform, np.stack(values, axis=-1))
 
         result: xr.DataArray = xr.apply_ufunc(
             evaluate,
-            stacked,
-            input_core_dims=[[_SOURCE_AXIS]],
-            output_core_dims=[[AXIS_DIM]],
+            *broadcast,
+            input_core_dims=[[] for _ in broadcast],
+            output_core_dims=[[axis_dim]],
             dask="parallelized",
             output_dtypes=[np.float64],
-            dask_gufunc_kwargs={"output_sizes": {AXIS_DIM: len(frame_axes)}},
+            dask_gufunc_kwargs={"output_sizes": {axis_dim: len(frame_axes)}},
         )
         index_coordinates = {
             dim: self._array.coords[dim].variable for dim in order if dim in self._array.xindexes
         }
         return result.assign_coords(
-            {AXIS_DIM: list(frame_axes), "units": (AXIS_DIM, list(self._frame.units))}
+            {axis_dim: list(frame_axes), units_coord: (axis_dim, list(self._frame.units))}
         ).assign_coords(index_coordinates)
 
     def _sampling(self) -> Sampling:
