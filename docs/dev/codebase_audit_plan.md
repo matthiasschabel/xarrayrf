@@ -86,6 +86,10 @@ failures; patched xarray 1,811 passed, with three existing dependency warnings i
 Ruff lint/format, mypy and whitespace pass. See
 [the stage 4 implementation record](stage4_implementation_review.md) and
 [internal changelog](changelog.md) for full review/verification evidence.
+The subsequent QAEngineer pass repeats both full lanes and static checks, passes 72 independent
+ordering/export probes and boundary replacement checks, and clarifies the retained-scalar
+assignment boundary with a public test. Final totals are stock 1,765 passed plus 47 expected
+failures and patched 1,812 passed. No production source correction was needed.
 
 Keep the architecture: frame identity, coordinate systems, transforms, sampling, and array
 binding form a coherent model. Preserve explicit registration between distinct frames,
@@ -232,8 +236,9 @@ recomputation; optional routing optimization awaits profiling.
   own coordinates/intervals and retains transforms by reference; composites depend on members.
   Unhashable extensions remain valid for querying, equality and binding. No generic freezer.
 - **F5, indexed assignment:** replaces destination-frame values when xarray's dimension-label
-  checks permit it; it neither adopts nor resamples the right operand's frame. Documentation
-  and public tests clarify the existing runtime behavior; no upstream guard was added.
+  checks permit it; it neither adopts nor resamples the right operand's frame. Retained scalar
+  coordinates are ignored by those checks, even when their values differ. Documentation and
+  public tests clarify the existing runtime behavior; no upstream guard was added.
 
 The direct public contracts and concise usage examples replace the earlier ambiguity.
 Focused public tests and full QA verify these deliberate API choices. No deprecation wrappers,

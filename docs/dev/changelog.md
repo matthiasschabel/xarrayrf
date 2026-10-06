@@ -2,6 +2,31 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-06] — Independent QA of stage 4 and scalar assignment clarification
+
+- **Problem**: Stage 4 needed fresh independent QA. The assignment documentation did not
+  explicitly distinguish shared dimension-coordinate checks from retained scalar coordinates.
+- **Resolution**: QA confirms declared ordering, conservative coordinate replacement and
+  extension-transform contracts. Clarified that xarray ignores retained scalar coordinates
+  during slice assignment, even when their values differ, while destination binding remains
+  intact. Added a public contract test; no production source correction was needed.
+- **Verification**: Original-source snapshot `a721688` fails all 15 selected regressions.
+  Initial focused suite: 490 passed, 41 expected stock failures. Independent probes pass
+  72 three-dimensional declaration/storage/eager-Dask permutations, checking all query views,
+  native encode/decode and NGFF/NIfTI physical mappings; eight empty/scalar/eager-Dask
+  replacement cases preserve caller indexes, pixels, context and intervals. Additional probes
+  verify time/heterogeneous-unit NGFF semantics, reverse frame-coordinate selection and
+  unhashable custom/composite querying and binding. The new scalar-assignment contract test
+  and existing varying-dimension rejection test pass. Final full suites: stock xarray 1,765
+  passed and 47 expected failures; patched xarray 1,812 passed, each with three existing
+  dependency warnings. Ruff lint/format, mypy (81 source files), links and whitespace pass.
+- **Files affected**: `tests/test_native.py`, `README.md`, `docs/core_interface.md`,
+  `CHANGELOG.md`, this changelog, the [audit plan](codebase_audit_plan.md) and
+  [stage 4 review record](stage4_implementation_review.md). Production source is unchanged;
+  the unrelated user documentation edits remain intact and outside these commits.
+- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); prior implementation
+  reviews by Claude Opus 5.5 (`claude-opus-5-5`). Stage 4 implemented by Codex gpt-6-astra.
+
 ## [2026-10-06] — Audit stage 4 API contracts and completed QA
 
 - **Problem**: Geometry queries disagreed on dimension order, Grid framing silently replaced

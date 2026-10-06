@@ -101,6 +101,35 @@ hashes, main branch and original empty index were verified before integration an
 Maintainer records add only the audit plan, internal changelog and this refinement record.
 
 
+### Subsequent QAEngineer review
+
+The fresh user-requested QA pass reviewed stage 4 at `826fe76` against original source
+`a721688`, preserving the checkout, index and user edits. It confirmed the root causes,
+focused scope, public error paths and documentation contracts. No production correction
+was required; one assignment documentation boundary was clarified and tested.
+
+| Check | Result |
+|---|---|
+| Selected new tests against original source snapshot | 15 failed, confirming original ordering/framing behavior. |
+| Initial focused Geometry/Grid/native/encoding/frame-coordinate/NGFF suite | 490 passed, 41 expected stock failures, two existing warnings. |
+| Independent 3-D order and export probes | 72 passed: all six declaration orders × six storage orders × eager/Dask; analytic shear/origin checks across points, inverse positions, lattices, fields, native round trips and NGFF/NIfTI exports. |
+| Independent boundary replacement probes | Eight passed: empty/scalar/eager-Dask combinations retain input indexes, shared pixels, context and intervals. |
+| Additional semantic probes | NGFF time/heterogeneous spatial units remain correct with different declaration/storage order; frame-coordinate reverse nearest selection agrees. Unhashable custom and composite transforms remain queryable/bindable and explicitly refuse hashing. |
+| Assignment clarification | New scalar-slice contract test and existing varying-dimension conflict test pass. |
+| Final stock/patched full suites | 1,765 passed and 47 expected failures / 1,812 passed; three existing warnings each. |
+| Ruff lint/format, mypy, links and whitespace | Passed; mypy checks 81 source files. |
+
+Xarray's installed `assert_coordinate_consistent` checks coordinates only for dimensions
+remaining on the indexed object. A scalar selection removes that dimension, so its retained
+scalar coordinate is ignored even if the right operand's position differs. Assignment still
+replaces destination-frame payload and keeps the destination binding. Public README/interface
+and release notes now state this boundary explicitly; the new public test verifies both
+changed pixel values and unchanged destination Grid. No assignment guard or compatibility
+mechanism was introduced.
+
+QA documentation and the public clarification/test are committed to main. The original
+user-owned documentation files remain byte-for-byte intact and excluded.
+
 ## Alternatives Considered
 
 Making current array order authoritative would require changing established Grid snapshots,
