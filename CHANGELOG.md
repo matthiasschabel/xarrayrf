@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Clarified that the cells domain extends the outer bounds while interpolating interior gaps,
+  with a concrete gap/edge example. Singleton coincidence and constant documentation now
+  describe the implemented float64 roundoff allowances; numerical behavior is unchanged.
 - Clarified indexed assignment checks: retained scalar coordinates on selected slices are
   ignored, while shared dimension coordinates must agree. Destination binding is preserved.
 - Geometry dense points, default lattice columns and frame-coordinate fields now follow declared

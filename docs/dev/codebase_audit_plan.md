@@ -1,6 +1,6 @@
 # Codebase audit and staged remediation plan
 
-**Status:** Active
+**Status:** Implemented
 **Last updated:** 2026-10-06
 **Scope:** xarrayrf correctness, public API consistency, adapters, resampling, and supporting tools
 
@@ -10,7 +10,8 @@ The user requested a thorough audit emphasizing material correctness, comprehens
 and the principle of least surprise, followed by critique from Claude Opus 5.5. This plan
 covers the checkout at `de48d8ab0097bf6196fdcbced0779de0ae155fea`. Stage 1 has been implemented, cross-reviewed, verified by QA and committed to main;
 stages 2–4 are also implemented, cross-reviewed, verified by QA and committed to main.
-Stage 5 remains the recommendation queue.
+Stage 5 is implemented, accepted by Opus 5.5 and independently verified; A4/A6 are deferred
+with concrete usage triggers. The audit remediation is complete within its agreed scope.
 
 The audit inspected the shipped modules, native xarray binding, sampling and resampling,
 format adapters and readers, public contracts, test coverage, and supporting tooling.
@@ -90,6 +91,19 @@ The subsequent QAEngineer pass repeats both full lanes and static checks, passes
 ordering/export probes and boundary replacement checks, and clarifies the retained-scalar
 assignment boundary with a public test. Final totals are stock 1,765 passed plus 47 expected
 failures and patched 1,812 passed. No production source correction was needed.
+
+
+**Stage 5 completed, 2026-10-06:** M2 preflights the complete DICOM batch, stages each series
+beside its final destination, cleans unpublished staging and reports partial failure without
+counting discarded files. Explicit metadata checks preserve narrow exception handling. A3
+and singleton documentation now agree with existing sampling behavior; A4/A6 retain reasoned
+deferrals. Opus reviewed the plan and accepted the implementation; all useful findings are
+resolved, with the publication-interruption reporting window explicitly documented.
+Independent QA passes 12 CLI scenarios, the gap/edge example, active-exception invocation and
+executable-AST checks confirming no geometry runtime changes. Full suites: stock 1,793 passed
+plus 47 existing expected failures; patched 1,840 passed; three existing warnings each. Ruff,
+formatting, mypy (82 files), whitespace and distribution payload checks pass. See
+[the Stage 5 refinement and QA record](stage5_implementation_review.md).
 
 Keep the architecture: frame identity, coordinate systems, transforms, sampling, and array
 binding form a coherent model. Preserve explicit registration between distinct frames,
@@ -246,18 +260,196 @@ legacy aliases, migration modes or encoding schema bump were introduced.
 
 ### Stage 5: Improve usability and tool reliability
 
-- **A3:** explain that the cells domain uses extended outer bounds, including interpolation
-  across internal gaps; it does not mean the union of isolated cell intervals. Start with
-  documentation rather than new modes or silent support changes.
-- **A4:** consider additive common grid accessors for adapter results and visible import
-  reports in ordinary reader workflows. Preserve provenance and existing return types;
-  require concrete examples of friction before adding API surface.
-- **A6:** consider reducing frame_array's nongeometric-coordinate requirements and supporting
-  cross-type Grid/Geometry coincidence checks. Keep these optional unless real usage justifies them.
-- **M2:** stage DICOM tool output in a sibling temporary directory and publish a completed
-  series atomically. Preflight destination collisions and report partial batch failures.
-  Distinguish per-series atomicity from a transaction across the entire batch; do not expand
-  this work into a general DICOM confidentiality framework.
+**Implemented scope, 2026-10-06:** M2 and A3 plus remaining singleton documentation are
+complete. A4/A6 are deferred with the evidence and reopening criteria below. This is the final
+audit stage; viewer, upstream and release work remain separate. The plan below was refined
+and implemented under the user's subsequent authorization; final evidence is in the Stage 5
+review record. No external publication is part of this work.
+
+#### Reconciled starting state
+
+The local untracked continuation handoff was read after the supplied core conventions,
+`CONTRIBUTING.md` and the project's design/interface guidance. It remains preserved outside
+the implementation commits. Root
+`AGENTS.md` remains absent. Read-only checks found:
+
+- Main remains `df385d3d762f3ef6cb11b83343b3e9db41c5ffb9`. Initially it was 16 commits ahead
+  of live `origin/main` at `de48d8ab0097bf6196fdcbced0779de0ae155fea`; a concurrent push during
+  planning advanced both live origin and the tracking ref to `df385d3`, confirmed on final
+  recheck. This agent performed no push. The index is empty; no stashes, conflicts or
+  additional xarrayrf worktrees are present.
+- The same user edits remain in `docs/dev/README.md` and
+  `docs/dev/architecture/relativity_notes.md`; the curved-spacetime review and handoff remain
+  untracked. Preserve them and leave the handoff unchanged.
+- All six xarray dependency/PR worktrees retain their recorded revisions and clean working
+  trees. Patched xarray remains `5db75d53f5515fabb3ca5ffc8419eb9c982cf4a2`; local PR #11621
+  remains behind its remote head. No shared xarray stashes are present.
+- GitHub reports no open xarrayrf PRs. Initially no Actions were queued/in progress; final
+  recheck after the concurrent push found checks run `37493729018` queued at `df385d3`.
+  Its result is pending, not local validation evidence. Upstream #11616 remains merged,
+  #11617 open, and #11621 open with changes requested at the recorded remote head.
+  These dependencies do not block the proposed Stage 5 scope.
+- Stock `.venv` imports xarray 2026.7.0 and pydicom 3.0.2; `.venv-patched` imports
+  2026.7.1.dev80+xarrayrf.patches.4. Stage 4's recorded full verification covers the unchanged
+  production revision: 1,765 stock passes plus 47 expected failures, and 1,812 patched passes.
+  Those full suites were not rerun for planning. Hosted checks on the older remote main
+  failed; they are not validation of the local audit commits.
+- Arbitrary OS jobs remain unknown because `ps` is sandbox-denied. No duplicate review,
+  external runner or long-running job was launched.
+
+#### M2: DICOM output reliability
+
+Temporary synthetic CLI probes established the failure before implementation:
+
+| Case | Original result |
+|---|---|
+| Dry run | Exit 0, no output created, summary present. |
+| Invalid second DICOM file | Exit 1 after publishing the first file in the final series directory; no batch summary. |
+| Injected second-file write failure | Uncaught `OSError`; final directory contains one completed file and one partial file; no batch summary. |
+| Two input names mapping to `series` | First series published before the second destination creation fails; no batch summary. |
+| A later destination already exists | Earlier series published before refusal; no batch summary. |
+
+All original probes left source bytes unchanged. The implementation now has 28 CLI regressions.
+
+Implemented in `tools/deidentify_dicom.py` with CLI tests in
+`tests/tools/test_deidentify_dicom.py`. Keep the existing UID remapping and tag policy.
+
+1. **Preflight the complete batch before any output writes.** Snapshot each input's sorted
+   immediate file list once; validate readable directory inputs and refuse empty series.
+   Keep the current output-name rule (suffix after the first hyphen), but refuse empty,
+   `.` or `..` names. Compare resolved destinations and casefolded output names; refuse duplicate
+   inputs/destinations, every existing target including dangling symlinks, and invalid
+   output-parent paths. Refuse overlap between the resolved output root and an input
+   directory in either direction. Preserve strict selection of every immediate regular
+   file, including dotfiles: a non-DICOM file causes a reported series failure.
+   A preflight failure rejects the whole batch before publishing any series. Dry run uses
+   the same plan and validations, prints every mapping/count, and creates no files or directories.
+   It validates paths and enumeration; reading/validating all DICOM payloads remains execution work.
+2. **Stage one series at a time.** Create a unique temporary directory next to its final
+   directory, write all numbered DICOM copies there, then rename only the completed directory
+   into place. Recheck destination absence immediately before publication. Use exception-safe
+   cleanup for every unpublished staging directory, including failed writes and interruptions.
+   Files must close before publication. Same-parent rename supplies per-series atomic visibility;
+   no whole-batch transaction or crash-durability guarantee is promised. A hard kill can leave
+   an unpublished temporary directory; a subsequent run must not mistake it for final output.
+   The output tree has one writer per run; concurrent writers require a separately scoped
+   no-replace publication mechanism rather than assuming directory rename cannot overwrite.
+3. **Make batch failure explicit.** After successful preflight, continue independent later
+   series after an expected read, de-identification, write or publication failure. Retain
+   earlier completed series. Catch `OSError`, `pydicom.errors.InvalidDicomError` and an explicit tool-local
+   invalid-dataset error after checking required metadata. Do not catch generic
+   `AttributeError`, `KeyError`, `TypeError` or `ValueError` around the whole operation;
+   unexpected programming errors still fail with their traceback.
+   Identify the source file, target and operation in diagnostics. Keep the existing batch UID mapping as a cache. Deterministic UID derivation
+   preserves shared identities even when only failed series are retried.
+4. **Report attempted and published work separately.** Emit from finalization, including
+   unexpected errors and interruptions before re-raising, a
+   stderr summary: input/output paths, planned/completed/failed/not-attempted series,
+   planned/published file counts, categorized failures and elapsed time. Stderr is the log
+   destination. Keep the JSON manifest limited to these outcomes, without a new schema API.
+   Dry-run counts mean planned work; staging files discarded on failure are never counted as
+   published. Return nonzero for any rejected or failed series. Emit a compact JSON run
+   manifest on stdout for redirection, with the same per-series outcomes and counts; keep
+   human diagnostics and tracebacks on stderr, identified as the log destination. This
+   satisfies batch auditing without creating sidecar files during dry run or adding a logging
+   subsystem. Do not include the original-to-remapped UID mapping in the manifest.
+
+Acceptance tests exercise the script entry point, using subprocesses for ordinary CLI behavior
+and the entry point with dependency failure injection for deterministic write/publication errors.
+Load the script by file path with `importlib.util.spec_from_file_location`; build small
+explicit-VR MR files in a local test fixture, without changing existing adapter fixtures:
+
+- Dry run leaves even an absent output root absent, with matching planned paths and counts.
+- Duplicate destination names and a later existing target refuse before any series publishes;
+  cover dangling links, invalid/empty output names, casefolded name collisions and
+  source/output overlap as boundary checks.
+- Failure on the second read or a write that creates partial bytes leaves no final failed
+  series and no staging directory; pre-existing output and all source bytes remain unchanged.
+- A successful series, failed series and later successful series produce two complete finals,
+  accurate published counts, contextual failure diagnostics and nonzero exit status.
+- Publication failure cleans staging without deleting an existing destination. Unexpected
+  errors/interruptions also clean staging and never report success.
+- A successful two-series run preserves geometry and pixel bytes, consistent shared study/frame
+  UID remapping, registered class/transfer-syntax UIDs and SOP/file-meta UID agreement. Check
+  representative tag replacement/private-tag removal through saved files, without broadening
+  the confidentiality policy. JSON stdout parses, stderr summaries agree and success exits 0.
+
+#### A3 and singleton documentation reconciliation
+
+The normative query/resampling sections already describe interpolation across cell gaps, and
+`test_gapped_and_overlapping_cells_grid_geometry_agree` already exercises gap lookup. The remaining
+discrepancies were documentation, corrected with existing behavior as the oracle:
+
+- Clarify the README's declared-cells paragraph and `Geometry.positions_at`/`Grid.positions_at`
+  help: cells extend the outer domain; interior gaps remain interpolated.
+- Add one concrete example: samples at 0 and 4 mm, intervals `[-0.5, 0.5]` and `[3.5, 4.5]`,
+  values 0 and 8. Querying 2 mm gives position 0.5 and linear value 4 despite the acquisition
+  gap; -0.25 mm is admitted only by the cells domain and holds the edge value 0. Prefer a
+  compact README explanation over another notebook or a new support mode.
+- Correct `Geometry.is_coincident`'s obsolete `1e-9 relative`/unimplemented-cell-width language.
+  Singleton sample coincidence uses float64 roundoff and is not widened by declared cells.
+- Also correct `docs/core_interface.md`'s **Exported names and constants** paragraph: it still
+  gives `SINGLE_SAMPLE_TOLERANCE` as `1e-9`, although the implementation and detailed singleton
+  section use `8 * eps` plus the implemented affine intermediate-term allowance. This is an
+  additional stale passage discovered on pickup, not a numerical-policy change.
+
+Validate the concrete example against queries and resampling and run existing interval and
+singleton regressions. Add a behavior test only if the example exposes an uncovered contract;
+do not add tests that merely repeat documentation wording. Completed review transcripts remain
+historical records, not another status queue.
+
+#### A4/A6: deferrals and reopening criteria
+
+**A4, adapter grids and reader reports:** metadata results already expose `dims`, `coords`,
+`transform` and reports; DICOM adds ordering/intervals, NGFF separates levels from multiscale
+reports/transforms, and GeoTIFF adds nodata. Ordinary readers discard those import result
+objects and return framed arrays whose Grid is already available as `array.rf.grid`.
+Inventory of README/examples/tour/real-data tooling found no consumer of `.report` needing a
+new channel. A common metadata Grid property would need to preserve format-specific nongeometry
+coordinates, DICOM source ordering and intervals, and NGFF level choice; it cannot replace
+those results indiscriminately. Defer new accessors/report storage until a concrete caller
+needs a metadata-only Grid or a report from an ordinary reader. At that point propose the
+smallest consistent contract preserving provenance, DataArray returns and pixel laziness;
+do not put an adapter report in core geometry merely to make it visible.
+
+**A6, construction and mixed coincidence:** a Dask `(channel, i)` array with no channel labels
+currently fails `frame_array(..., dims=("channel", "i"))` because no coordinate declares the
+channel size. The existing `xr.DataArray(data, dims=("channel", "i")).rf.frame(grid)` works,
+shares the original pixel object and computes no Dask tasks. Likewise
+`grid.is_coincident(array.rf.geometry)` refuses the concrete type, while
+`grid.is_coincident(array.rf.grid)` succeeds without computing pixels in the small separable
+probe. These are demonstrated convenience restrictions, not blocked correctness cases.
+Defer both changes until a caller needs the shorter construction door or comparison without
+snapshot materialization. A Geometry snapshot can materialize coordinates, so the latter is
+not a blanket laziness guarantee for field coordinates. Reopening requires a reviewed public
+example and focused validation of shapes, laziness, explicit failures, frame identity and
+existing step/singleton tolerances; no sampling-protocol hierarchy is implied.
+
+Planning verification passed 17 existing interval tests selected with
+`-k 'gapped_and_overlapping or singleton'` (72 deselected). The native
+`source.rf.resample_to(...)` example returned `[4, 0]` in the cells domain and `[4, -9]` in
+the samples domain with fill -9, checked at absolute tolerance `1e-12` for small synthetic
+affine/interpolation roundoff. Local document links and whitespace checks passed. These
+checks validate the proposed documentation against current behavior, not the unimplemented M2 fix.
+
+#### Completed execution order and acceptance gates
+
+1. Isolate implementation from the preserved user edits on a feature branch/worktree; add
+   CLI regressions and demonstrate the M2 failures against `df385d3` before fixing them.
+2. Implement preflight, staging, cleanup and outcome reporting; pass the focused CLI tests.
+3. Reconcile public docs, execute the gapped example and pass existing interval/singleton
+   coverage. Update `CHANGELOG.md`, the audit status and the internal QA changelog with actual
+   results; record A4/A6 as deferred rather than implemented.
+4. Run Ruff lint/format, mypy, whitespace checks and both full xarrayrf lanes once the final
+   diff is settled. Recheck the patched dependency SHA first. Use the handoff's commands;
+   add the new focused test path to the narrow run. Preserve all 47 existing stock expected
+   failures and require no new failures or unexplained warnings. No notebook/build rerun is
+   needed unless the resulting changes touch their behavior or inputs.
+
+Stage 5 satisfies these failure/success checks; public documentation agrees with sampling
+policy, A4/A6 have explicit dispositions, and final review/QA evidence is recorded. Independent model review/QA workflows run only when invoked; consult
+their current skills and available model selectors then. No schema bump, upstream worktree
+mutation or release publication follows from this plan.
 
 ### Verification and release discipline
 
@@ -278,15 +470,17 @@ cannot be represented safely.
 
 ## Deferred Work
 
-Stage 5 remains pending and contains optional usability/tool work. Stage 4 public contracts
+Stage 5 is implemented and independently verified. A4/A6 remain deferred unless their stated
+usage triggers arise. Stage 4 public contracts
 are settled and implemented without backward-compatibility scaffolding. Cubic path dependence with NaNs remains an explicit
 limitation unless a later interpolation policy change is justified. Stage 3's optional
 many-context-slice routing optimization awaits profiling above the position cache budget.
-Stages 1–4 are committed to main. No remote publication has been made, and the user's
-unrelated uncommitted work is preserved.
+Stages 1–4 are committed to main and now present on origin after the concurrent push observed
+during planning. This agent made no remote changes; the user's unrelated uncommitted work is preserved.
 
 ## Next Steps
 
-Stages 1–4 are complete. Stage 5 is next: prioritize concrete usability friction and DICOM
-batch output reliability before adding optional API surface. Continue direct clean-development
-changes with focused public coverage; revisit scope if a materially different cause emerges.
+Stages 1–5 are complete within the agreed audit scope. Retain the acceptance checks and
+review records as evidence; no further audit stage is queued. Resume A4/A6 only when their
+usage triggers arise. Viewer, upstream, minimum-dependency CI and release work need their
+own scope. Preserve the unrelated user documentation and the historical handoff.

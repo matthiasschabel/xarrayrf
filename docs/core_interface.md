@@ -148,8 +148,10 @@ schema, 1) and `INVERSE_CONDITION_LIMIT`. `xarrayrf.units.SYMBOLS` is the read-o
 `xarrayrf.ngff.NAMESPACE` (`"ome-zarr"`) is the identifier namespace of frames read from a store.
 The numerical thresholds are module constants, not parameters: `LATTICE_TOLERANCE` (1e-6 of a step,
 the default for `lattice`), `POSITION_SLACK` (1e-9 of a step, the edge slack when locating points),
-`SINGLE_SAMPLE_TOLERANCE` (1e-9 relative to the sample's magnitude, with an absolute floor of
-1e-9, matching a coordinate to a lone sample),
+`SINGLE_SAMPLE_TOLERANCE` (`8 * eps`, where `eps` is float64 machine epsilon; matching a
+coordinate to a lone sample uses this times `max(1, |sample|, |query|)`, or the affine
+inverse's allowance from absolute evaluation terms before cancellation, whichever is larger;
+declared cells do not widen sample coincidence),
 `EXACT_STEP_TOLERANCE` (1e-12 of a step, the exact-arithmetic inversion fast path) and
 `BLOCK_POINTS` (the default `resample(block_points=)`, 2**20 target samples per block). Each adapter
 package defines `__all__`; star imports expose only its public API.

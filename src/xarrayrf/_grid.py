@@ -256,6 +256,9 @@ class Grid:
         """Locate frame points (..., M) as fractional positions (..., D) in dims order.
 
         The exact transform inverse and piecewise-linear coordinate inverse are used.
+        The cells domain extends the outer sample bounds to declared interval edges, or to
+        sample-offset edges when no interval is declared. Interior gaps between declared
+        cells remain interpolated in both domains; outer-cell positions are returned unclipped.
         Outside points raise, become all-NaN rows, or extrapolate by the outer steps,
         according to outside ("raise", "nan", "extrapolate").
 

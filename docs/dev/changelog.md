@@ -2,6 +2,33 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-06] — Audit Stage 5 DICOM output reliability and documentation
+
+- **Problem**: The DICOM example-data tool wrote directly into final series directories;
+  read/write failures exposed partial copies, destination conflicts could occur after earlier
+  publication, and failures skipped the batch summary. Source/output overlap could modify a
+  source directory. Public cell-gap and singleton-tolerance explanations were inconsistent.
+- **Resolution**: Complete preflight refuses collisions, existing targets and overlapping
+  source/output trees. Sibling staging publishes only completed series; expected failures
+  clean staging and allow independent later series to finish. Narrow explicit metadata
+  validation separates caller errors from programming failures. Final stderr/JSON reporting
+  distinguishes planned and published work. Clarified existing continuous interpolation across
+  cell gaps and float64 singleton roundoff. A4/A6 remain deferred with usage triggers.
+- **Verification**: All 28 new tests fail against the original script; final 28 pass. Opus 5.5
+  reviewed plan and implementation, accepted the implementation without blockers, and useful
+  follow-ups strengthened tests/docs. Independent root QA passes 12 CLI probes, source-tree
+  preservation, deterministic retry UID checks, the gap/edge example and active-exception
+  invocation. Geometry/Grid executable AST is unchanged. Full suites: stock 1,793 passed
+  plus 47 existing expected failures; patched 1,840 passed; three existing warnings each.
+  Ruff lint/format, mypy (82 files), whitespace and distribution payload checks pass.
+  Existing hosted minimum-dependency failures are documented separately, not claimed fixed.
+- **Files affected**: `tools/deidentify_dicom.py`, `tests/tools/test_deidentify_dicom.py`,
+  Geometry/Grid docstrings, `README.md`, `docs/core_interface.md`, `CHANGELOG.md`, the
+  [audit plan](codebase_audit_plan.md), [Stage 5 refinement record](stage5_implementation_review.md)
+  and this changelog. User documentation edits and the handoff are preserved.
+- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); Claude Opus 5.5
+  (`claude-opus-5-5`) via collaborative-refinement. Implemented by Codex `gpt-6-astra`.
+
 ## [2026-10-06] — Independent QA of stage 4 and scalar assignment clarification
 
 - **Problem**: Stage 4 needed fresh independent QA. The assignment documentation did not

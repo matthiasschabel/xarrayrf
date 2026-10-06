@@ -256,8 +256,12 @@ other with `rf.resample_to`.
   (`rf.grid`, `rf.frame(grid)`, `frame_array`). `Grid.isel` and `Grid.sel` use xarray's own
   selection rules.
 - **Declared cells.** Samples can declare their extent as intervals (slice thickness, gaps,
-  overlap). They follow selection, must agree when arrays align, and set the reach of the
-  `domain="cells"` queries and resampling. DICOM import declares them from `SliceThickness`.
+  overlap). They follow selection, must agree when arrays align, and extend the outer bounds
+  of `domain="cells"` queries and resampling; interior gaps remain interpolated. For samples
+  at 0 and 4 mm with intervals `[-0.5, 0.5]` and `[3.5, 4.5]` and values 0 and 8, querying
+  2 mm gives position 0.5 and linear value 4 in either domain. At -0.25 mm, only the cells
+  domain admits the query and resampling holds the edge value 0 (the samples domain fills
+  outside points). DICOM import declares intervals from `SliceThickness`.
 - **Resampling.** `resample` and `rf.resample_to` move values onto another array's samples or
   onto a `Grid`. Conversions between coordinate systems of one frame, such as LPS to RAS, are
   applied automatically; moving between different frames requires an explicit transform.

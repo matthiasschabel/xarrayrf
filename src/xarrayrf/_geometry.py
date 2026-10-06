@@ -689,10 +689,12 @@ class Geometry:
                 beyond the domain by the outer coordinate steps.
             domain: ``"samples"`` admits points between the outer samples, as xarray's
                 ``interp`` does. ``"cells"`` also admits points in the outer samples' cells, as
-                ITK does, using each source axis's declared
-                :attr:`~xarrayrf.ArrayCoordinates.sample_offset`; a centred voxel reaches half
-                a step beyond its sample, and a point-sampled axis no further than its samples. Positions there lie outside ``[0, n - 1]``, such as
-                ``-0.5``, and are returned as they are.
+                ITK does, using declared interval bounds when present and otherwise each
+                source axis's :attr:`~xarrayrf.ArrayCoordinates.sample_offset`. A centred voxel
+                reaches half a step beyond its sample; a point-sampled axis no further than
+                its samples. Interior gaps between declared cells remain interpolated in both
+                domains. Outer-cell positions lie outside ``[0, n - 1]``, such as ``-0.5``,
+                and are returned as they are.
 
         Returns:
             Positions shaped ``(..., D)``, ordered as :attr:`dims`.
@@ -724,10 +726,10 @@ class Geometry:
         local spacing, so nonuniform slice offsets and mixed-unit frames compare the same way.
         When every transform is affine the check is exact and costs time linear in the samples
         per dimension, not in the samples; otherwise every sample is checked, in blocks. A
-        single-sample dimension has no step, so its coordinates must agree to rounding (1e-9
-        relative); a tolerance there needs a declared cell width, which is designed but not
-        implemented. This is a sample-location query: sample offsets, cells, non-geometry
-        dimensions and values are not compared.
+        single-sample dimension has no step, so its coordinates must agree within float64
+        roundoff, including affine inverse evaluation allowances. Declared cells do not widen
+        singleton sample coincidence. This is a sample-location query: sample offsets, cells,
+        non-geometry dimensions and values are not compared.
 
         Args:
             other: The geometry to compare with.
