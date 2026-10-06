@@ -745,7 +745,12 @@ def test_grid_frame_replaces_different_values_or_dtype_kind(existing: list[float
     grid = Grid(transform(), {"offset": ("i", [0, 2, 5])})
     plain = xr.DataArray(np.zeros(3), dims="i", coords={"offset": ("i", existing)})
     plain.coords["offset"].attrs["description"] = "old labels"
-    result = plain.rf.frame(grid)
+    before = plain.copy(deep=True)
+    with pytest.raises(ValueError, match=r"offset.*replace_coordinates=True"):
+        plain.rf.frame(grid)
+    xr.testing.assert_identical(plain, before)
+    result = plain.rf.frame(grid, replace_coordinates=True)
+    assert result.data is plain.data
     assert result.rf.grid == grid
     assert result.coords["offset"].dtype == np.int64
     assert result.coords["offset"].attrs == {"units": "mm"}
@@ -942,5 +947,114 @@ def test_grid_frame_validates_units_on_preserved_coordinates() -> None:
     grid = Grid(transform(), {"offset": ("i", [0, 2])})
     plain = xr.DataArray(np.zeros(2), dims="i", coords=dict(grid.coordinates))
     plain.coords["offset"].attrs["units"] = "m"
-    with pytest.raises(ValueError, match="declares"):
+    with pytest.raises(ValueError, match=r"offset.*declares.*'m'.*'mm'.*replace_coordinates=True"):
         plain.rf.frame(grid)
+
+
+@pytest.mark.parametrize("unit", ["m", 123])
+def test_grid_frame_unit_conflicts_require_explicit_replacement(unit: object) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 2])})
+    plain = xr.DataArray(np.zeros(2), dims="i", coords=dict(grid.coordinates))
+    plain.coords["offset"].attrs = {"units": unit, "description": "stale"}
+    before = plain.copy(deep=True)
+    error = TypeError if isinstance(unit, int) else ValueError
+    with pytest.raises(error, match=r"offset.*replace_coordinates=True") as caught:
+        plain.rf.frame(grid)
+    if error is TypeError:
+        assert isinstance(caught.value.__cause__, TypeError)
+    xr.testing.assert_identical(plain, before)
+    result = plain.rf.frame(grid, replace_coordinates=True)
+    assert result.rf.grid == grid
+    assert result.coords["offset"].attrs == {"units": "mm"}
+    assert result.data is plain.data
+
+
+@pytest.mark.parametrize(
+    ("dims", "values", "reason"),
+    [
+        ("time", [0, 2], r"dims.*time.*i"),
+        ("i", [0.0, 2.0], r"dtype kind 'f'.*'i'"),
+        ("i", [0, 3], "values differ"),
+    ],
+)
+def test_grid_frame_reports_coordinate_conflict_reason(
+    dims: str, values: list[int] | list[float], reason: str
+) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 2])})
+    plain = xr.DataArray(np.zeros((2, 2)), dims=("i", "time"), coords={"offset": (dims, values)})
+    with pytest.raises(ValueError, match=rf"offset.*{reason}.*replace_coordinates=True"):
+        plain.rf.frame(grid)
+
+
+def test_grid_frame_replaces_conflicting_indexed_dimension_coordinate() -> None:
+    grid = Grid(transform(("i",)), {"i": ("i", [0, 2])})
+    plain = xr.DataArray(np.zeros(2), dims="i", coords={"i": [0, 3]})
+    before = plain.copy(deep=True)
+    original_index = plain.xindexes["i"]
+    with pytest.raises(ValueError, match=r"i.*values differ.*replace_coordinates=True"):
+        plain.rf.frame(grid)
+    xr.testing.assert_identical(plain, before)
+    assert plain.xindexes["i"] is original_index
+
+    result = plain.rf.frame(grid, replace_coordinates=True)
+    assert result.rf.grid == grid
+    assert result.xindexes["i"] is not original_index
+    assert result.data is plain.data
+    xr.testing.assert_identical(plain, before)
+    assert plain.xindexes["i"] is original_index
+
+
+def test_grid_frame_replaces_scalar_and_dimension_conflicts_without_computing_pixels() -> None:
+    grid = Grid(
+        transform(("u", "v")), {"u": ("i", [0, 2]), "v": 3}, intervals={"u": [[-1, 1], [1, 3]]}
+    )
+    pixels = da.zeros((2, 2), chunks=1)
+    plain = xr.DataArray(
+        pixels,
+        dims=("i", "time"),
+        coords={"u": ("time", [0, 2]), "v": 99, "time": [4, 5], "label": "untouched"},
+        attrs={"description": "image"},
+    )
+    before = plain.copy(deep=True)
+    indexes = dict(plain.xindexes)
+    tasks: list[object] = []
+    with Callback(pretask=lambda key, *args: tasks.append(key)):  # type: ignore[no-untyped-call]
+        with pytest.raises(ValueError, match=r"u.*v.*replace_coordinates=True"):
+            plain.rf.frame(grid)
+        result = plain.rf.frame(grid, replace_coordinates=True)
+    assert not tasks
+    xr.testing.assert_identical(plain, before)
+    assert dict(plain.xindexes) == indexes
+    assert result.data is pixels
+    assert result.data.__dask_graph__() is pixels.__dask_graph__()
+    assert result.rf.grid == grid
+    assert result.time.variable.identical(plain.time.variable)
+    assert result.label.item() == "untouched"
+    assert result.attrs == plain.attrs
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_grid_frame_supplies_missing_coordinates_and_preserves_compatible_attrs(
+    replace: bool,
+) -> None:
+    grid = Grid(transform(("u", "v")), {"u": ("i", [0, 2]), "v": 3})
+    plain = xr.DataArray(np.zeros(2), dims="i", coords={"u": ("i", [0, 2])})
+    plain.u.attrs["description"] = "no explicit unit"
+    result = plain.rf.frame(grid, replace_coordinates=replace)
+    assert result.u.attrs == plain.u.attrs
+    assert result.v.item() == 3
+    assert result.rf.grid == grid
+
+
+@pytest.mark.parametrize("flag", [None, 0, 1, "yes", np.bool_(True)])
+def test_grid_frame_requires_boolean_replacement_flag(flag: Any) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 2])})
+    with pytest.raises(TypeError, match="replace_coordinates must be a bool"):
+        xr.DataArray(np.zeros(2), dims="i").rf.frame(grid, replace_coordinates=flag)
+
+
+def test_transform_frame_refuses_coordinate_replacement() -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 2])})
+    plain = xr.DataArray(np.zeros(2), dims="i", coords=dict(grid.coordinates))
+    with pytest.raises(ValueError, match="requires a Grid"):
+        plain.rf.frame(grid.transform, dims=grid.dims, replace_coordinates=True)

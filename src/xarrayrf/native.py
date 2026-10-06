@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
-from typing import Any, Protocol, cast, overload
+from typing import Any, Literal, Protocol, cast, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -17,7 +17,7 @@ from ._binding import BindingIndex, grid_from_binding, grid_variables
 from ._encoding import Decoder, MalformedDataError, decode_intervals, encode
 from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
-from ._geometry import Geometry, adopt_frame
+from ._geometry import Geometry, adopt_frame, check_coordinate_unit
 from ._grid import Coordinate, Grid
 from ._resample import Method, resample
 from ._sampling import Domain
@@ -273,7 +273,9 @@ class _ReferenceFrameAccessor:
         return index
 
     @overload
-    def frame(self, coordinate_transform: Grid) -> xr.DataArray: ...
+    def frame(
+        self, coordinate_transform: Grid, *, replace_coordinates: bool = False
+    ) -> xr.DataArray: ...
 
     @overload
     def frame(
@@ -282,6 +284,7 @@ class _ReferenceFrameAccessor:
         *,
         dims: Sequence[str],
         intervals: Mapping[str, npt.ArrayLike] | None = None,
+        replace_coordinates: Literal[False] = False,
     ) -> xr.DataArray: ...
 
     def frame(
@@ -290,6 +293,7 @@ class _ReferenceFrameAccessor:
         *,
         dims: object = _DIMS_UNSET,
         intervals: Mapping[str, npt.ArrayLike] | None = None,
+        replace_coordinates: bool = False,
     ) -> xr.DataArray:
         """Frame this array with a Grid or an ArrayCoordinates-to-ReferenceFrame transform.
 
@@ -298,6 +302,10 @@ class _ReferenceFrameAccessor:
                 ``ArrayCoordinates`` source) to its target ``ReferenceFrame``.
             dims: Required with a transform; forbidden with a Grid.
             intervals: Optional declared cell bounds for a transform; supplied by a Grid.
+            replace_coordinates: With a Grid, replace conflicting source coordinates using
+                its declarations. Matching coordinates retain their attrs; missing ones are
+                supplied. This changes labels, never pixels, with no unit conversion or
+                resampling. Must be False with a transform.
 
         Returns:
             A DataArray sharing the original pixel data and carrying a private binding index.
@@ -305,8 +313,15 @@ class _ReferenceFrameAccessor:
         Raises:
             TypeError: If geometry inputs have invalid types.
             ValueError: If the array is already framed, still carries an encoded binding
-                attribute, or a source coordinate is invalid.
+                attribute, a source coordinate is invalid or conflicts with the Grid without
+                replacement opt-in, or replacement is requested with a transform.
         """
+        if not isinstance(replace_coordinates, bool):
+            raise TypeError("replace_coordinates must be a bool")
+        if replace_coordinates and not isinstance(coordinate_transform, Grid):
+            raise ValueError(
+                "replace_coordinates=True requires a Grid; a transform cannot replace coordinates"
+            )
         array = self._array
         if _binding(array) is not None:
             raise ValueError("array is already framed; call rf.unframe() before binding again")
@@ -330,18 +345,42 @@ class _ReferenceFrameAccessor:
                     )
             coords = grid_coordinates(grid)
             variables = {str(name): variable for name, variable in coords.variables.items()}
-            replaced = []
+            conflicts: dict[str, str] = {}
+            units = dict(zip(grid.transform.source.axes, grid.transform.source.units, strict=True))
             for name, variable in variables.items():
                 if name in array.coords:
                     current = array.coords[name].variable
-                    if (
-                        current.dims == variable.dims
-                        and current.dtype.kind == variable.dtype.kind
-                        and np.array_equal(current.data, variable.data)
-                    ):
-                        variables[name] = current
+                    reason = ""
+                    try:
+                        check_coordinate_unit(current, name=name, declared=units[name])
+                    except TypeError as error:
+                        if not replace_coordinates:
+                            raise TypeError(
+                                f"{error}; use replace_coordinates=True to use the Grid declaration"
+                            ) from error
+                        reason = str(error)
+                    except ValueError as error:
+                        reason = str(error)
+                    if not reason:
+                        if current.dims != variable.dims:
+                            reason = f"dims {current.dims!r} differ from {variable.dims!r}"
+                        elif current.dtype.kind != variable.dtype.kind:
+                            reason = (
+                                f"dtype kind {current.dtype.kind!r} differs from "
+                                f"{variable.dtype.kind!r}"
+                            )
+                        elif not np.array_equal(current.data, variable.data):
+                            reason = "values differ"
+                    if reason:
+                        conflicts[name] = reason
                     else:
-                        replaced.append(name)
+                        variables[name] = current
+            if conflicts and not replace_coordinates:
+                details = "; ".join(f"{name!r}: {reason}" for name, reason in conflicts.items())
+                raise ValueError(
+                    f"source coordinates conflict with the Grid declarations ({details}); "
+                    "use replace_coordinates=True to replace them"
+                )
             Geometry(
                 array.assign_coords(variables),
                 grid.transform,
@@ -351,7 +390,7 @@ class _ReferenceFrameAccessor:
             coords = _binding_coordinates(variables, grid.transform, grid.dims, grid.intervals)
             names = grid.transform.source.axes
             stripped = array.drop_indexes([name for name in names if name in array.xindexes])
-            return _assign_binding(stripped.drop_vars(replaced), coords)
+            return _assign_binding(stripped.drop_vars(list(conflicts)), coords)
         if dims is _DIMS_UNSET:
             raise TypeError("dims is required with a coordinate transform")
         geometry = Geometry(
@@ -466,7 +505,7 @@ class _ReferenceFrameAccessor:
 
     @property
     def grid(self) -> Grid:
-        """An immutable snapshot of this array's current binding coordinates."""
+        """A frozen coordinate snapshot retaining this array's transform by reference."""
         self._require_binding()
         return grid_from_binding(self._array.coords)
 
