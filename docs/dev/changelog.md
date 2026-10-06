@@ -2,6 +2,33 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-05] — Independent QA of audit stage 3
+
+- **Problem**: The committed NGFF semantics and linear NaN fixes needed a fresh QAEngineer
+  review independent of the implementation and earlier cross-review.
+- **Resolution**: QA confirms that contributing physical rows determine intrinsic metadata,
+  unsupported mixtures fail explicitly, and matching value/missing-weight kernels exclude
+  zero-weight NaN neighbours. Complex components remain independent; outside fill, cells,
+  source context, lazy output and cropped reads retain their contracts. No additional source
+  correction was needed. Updated the audit status and stage 3 verification record.
+- **Verification**: Original source `7724d41`, extracted into a separate snapshot without
+  changing the checkout, fails 34 of 39 selected new regressions. The current focused suite
+  passes 340 tests with 41 expected stock failures. An independent corner-weight oracle
+  passes 32 cases across float32/float64/complex64/complex128, eager/Dask, affine/general,
+  samples/cells, finite/missing slices and finite outside fill (seed 731). Two scalar complex
+  accessor probes preserve binding, source name/attributes and context. Three independent
+  NGFF cases preserve axis semantics and physical corners for a negative spatial permutation,
+  a canonical-unit shear and a four-dimensional time/spatial map. Invalid physical ordering
+  retains its upstream cause and corrective guidance. Full suites: stock xarray 1,739 passed
+  and 47 expected failures; patched xarray 1,786 passed. Both retain three existing dependency
+  warnings. Ruff lint/format, mypy (81 source files), documentation links and whitespace pass.
+- **Files affected**: Review covers `src/xarrayrf/ngff/_export.py`, `src/xarrayrf/_resample.py`,
+  their public tests, `docs/core_interface.md` and `CHANGELOG.md`. This QA commit updates only
+  this changelog, the [audit plan](codebase_audit_plan.md) and
+  [stage 3 review record](stage3_implementation_review.md).
+- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); prior implementation
+  reviews by Claude Opus 5.5 (`claude-opus-5-5`). Implemented by Codex gpt-6-astra.
+
 ## [2026-10-05] — Audit stage 3 export semantics and linear missing weights
 
 - **Problem**: Non-diagonal NGFF export assigned every intrinsic axis a spatial type and

@@ -101,6 +101,37 @@ Both retain the three existing dependency warnings. Ruff lint, formatting (127 f
 files enter the commits; the user's original file hashes and empty index were checked before
 integration and before committing.
 
+### Subsequent QAEngineer review
+
+A fresh user-requested QAEngineer pass reviewed committed stage 3 at
+`e3fcefa` against the original source at `7724d41`. The checkout, branch and index were
+preserved throughout review; the original source was extracted into a temporary snapshot.
+No additional source correction was needed. Root causes, scope, regressions, edge cases,
+error context, reproducibility, public tests and documented behavior were checked.
+
+| Check | Result |
+|---|---|
+| New regressions against original source | 34 failed, 5 passed; expected failures reproduce the defects. |
+| NGFF export/import, resampling and native focused suite | 340 passed, 41 expected stock failures. |
+| Independent multilinear corner-weight oracle | 32 passed; four real/complex dtypes, eager/Dask, affine/general, samples/cells and mixed finite/missing context slices; seed 731. |
+| Scalar complex accessor integration | Two eager/Dask probes preserve values, target binding, source name/attributes and context. |
+| Independent NGFF semantic/numeric probes | Three valid negative-permutation/shear/4-D maps preserve metadata and physical corners; one invalid physical-frame layout retains cause and corrective guidance. |
+| Full stock xarray suite | 1,739 passed, 47 expected failures, three existing dependency warnings. |
+| Full patched xarray suite | 1,786 passed, three existing dependency warnings. |
+| Ruff lint/format, mypy and whitespace | Passed; mypy checks 81 source files. |
+
+The oracle explicitly declares cell support and calculates finite contributions and missing
+weights per component without using SciPy or the private interpolation helpers. It also
+checks that source buffers remain unchanged. Standalone `resample` drops array attributes;
+`rf.resample_to` preserves name/attributes and binds target geometry, as documented. The
+accessor probes check that distinction rather than imposing a new contract.
+
+The existing cubic and infinity limitations remain deferred. On a general-path task, any
+NaN-bearing slice selects the bounded per-slice route for the whole task; positions are
+cached within the budget or recomputed per slice. This disclosed optional performance issue
+has no new measured evidence requiring a code change. QA documentation is committed to main,
+with the user's unrelated documentation edits preserved and excluded.
+
 ## Alternatives Considered
 
 Gather-only restoration cannot fix partially integral queries. Duplicating the NGFF validator

@@ -67,6 +67,10 @@ Independent verification: stock xarray 1,739 passed and 47 expected failures; pa
 remain in each lane. Public regressions fail 33 selected cases against the original source.
 See [the stage 3 implementation record](stage3_implementation_review.md) for complete reviewer
 reports, decisions, measured bounds and QA evidence.
+The subsequent QAEngineer pass reproduces 34 failures against the original source, verifies
+32 independent interpolation-oracle cases, scalar complex accessor behavior and NGFF semantic
+round trips, and repeats both full suites and static checks. It finds no additional defect;
+the [internal changelog](changelog.md) and stage 3 review record retain the fresh evidence.
 
 Keep the architecture: frame identity, coordinate systems, transforms, sampling, and array
 binding form a coherent model. Preserve explicit registration between distinct frames,
