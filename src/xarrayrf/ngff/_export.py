@@ -9,11 +9,12 @@ import numpy as np
 import numpy.typing as npt
 from ome_zarr_models.v06 import coordinate_transforms as ct
 from ome_zarr_models.v06.multiscales import Dataset, Multiscale
+from pydantic import ValidationError
 
 from xarrayrf import AffineTransform, ArrayCoordinates, Geometry, ReferenceFrame
 from xarrayrf.anatomy import VOCABULARY
 from xarrayrf.native import Report
-from xarrayrf.units import udunits_name
+from xarrayrf.units import canonical, udunits_name
 
 from ._metadata import NAMESPACE, _join, _location
 
@@ -108,6 +109,38 @@ def to_transform(
     return result, tuple(report)
 
 
+def _intrinsic_axes(
+    matrix: npt.NDArray[np.float64], dims: tuple[str, ...], frame: ReferenceFrame
+) -> tuple[tuple[ct.Axis, ...], npt.NDArray[np.float64]]:
+    """Derive column spacing only where the contributing row quantities can be combined."""
+    axes = []
+    spacing = np.empty(len(dims), dtype=np.float64)
+    for column, dim in enumerate(dims):
+        rows = np.flatnonzero(matrix[:, column])
+        assert rows.size, "validated lattices have no zero columns"
+        kinds = [frame.coordinate_system.axis_types[row] for row in rows]
+        units = [canonical(frame.units[row]) for row in rows]
+        if len(rows) > 1 and (
+            any(kind != "space" for kind in kinds)
+            or any(unit is None for unit in units)
+            or len(set(units)) != 1
+        ):
+            contributors = ", ".join(
+                f"{frame.axes[row]!r} (type={frame.coordinate_system.axis_types[row]!r}, "
+                f"unit={frame.units[row]!r})"
+                for row in rows
+            )
+            raise ValueError(
+                f"array axis {dim!r} mixes frame axes {contributors}; "
+                "mixed columns require explicitly declared space axes with the same unit"
+            )
+        spacing[column] = (
+            abs(matrix[rows[0], column]) if len(rows) == 1 else np.linalg.norm(matrix[rows, column])
+        )
+        axes.append(ct.Axis(name=dim, type=kinds[0], unit=udunits_name(units[0])))
+    return tuple(axes), spacing
+
+
 def to_multiscale_level(
     geometry: Geometry,
     *,
@@ -117,6 +150,12 @@ def to_multiscale_level(
     store: str | None = None,
 ) -> tuple[Multiscale, Report]:
     """Export one regular affine level as validated OME-Zarr 0.6 multiscale metadata.
+
+    Non-diagonal columns inherit the type and unit of their contributing frame row.
+    Mixing rows is supported only for declared space axes with the same unit (spelling
+    aliases are accepted, numeric unit conversion is not performed). Every nonzero
+    coefficient contributes, however small; an intended permutation needs actual zeros.
+    Both coordinate systems must satisfy v06 axis ordering and count constraints.
 
     Args:
         geometry: Array samples mapped into a reference frame.
@@ -176,8 +215,9 @@ def to_multiscale_level(
     input_id = ct.CoordinateSystemIdentifier(path=path)
     output_id = ct.CoordinateSystemIdentifier(name=name)
     additional: tuple[ct.Affine, ...] | None = None
-    systems: tuple[ct.CoordinateSystem, ...] = (_system(frame, name),)
+    systems: tuple[ct.CoordinateSystem, ...]
     if diagonal:
+        systems = (_system(frame, name),)
         members: tuple[ct.AnyTransform, ...] = (
             ct.Scale(scale=tuple(float(value) for value in np.diag(matrix))),
             ct.Translation(translation=tuple(float(value) for value in origin)),
@@ -185,19 +225,13 @@ def to_multiscale_level(
     else:
         if frame_name == name:
             raise ValueError("frame_name must differ from name for a non-diagonal lattice")
-        spacing = np.linalg.norm(matrix, axis=0)
+        axes, spacing = _intrinsic_axes(matrix, lattice.dims, frame)
         members = (
             ct.Scale(scale=tuple(float(value) for value in spacing)),
             ct.Translation(translation=(0.0,) * matrix.shape[1]),
         )
         systems = (
-            ct.CoordinateSystem(
-                name=name,
-                axes=tuple(
-                    ct.Axis(name=dim, unit=udunits_name(unit), type="space")
-                    for dim, unit in zip(lattice.dims, frame.units, strict=True)
-                ),
-            ),
+            ct.CoordinateSystem(name=name, axes=axes),
             _system(frame, frame_name),
         )
         additional = (
@@ -215,7 +249,22 @@ def to_multiscale_level(
         )
     level = ct.Sequence(input=input_id, output=output_id, transformations=members)
     dataset = Dataset(path=path, coordinateTransformations=(level,))
-    metadata = Multiscale(
-        coordinateSystems=systems, datasets=(dataset,), coordinateTransformations=additional
-    )
+    try:
+        metadata = Multiscale(
+            coordinateSystems=systems, datasets=(dataset,), coordinateTransformations=additional
+        )
+    except ValidationError as error:
+        declarations = {
+            system.name: [(axis.name, axis.type) for axis in system.axes] for system in systems
+        }
+        detail = "; ".join(item["msg"] for item in error.errors())
+        raise ValueError(
+            f"NGFF v06 cannot represent intrinsic array dimensions {lattice.dims!r} "
+            f"with coordinate-system axes/types {declarations!r}: {detail}. "
+            "For intrinsic-array ordering failures, transpose the array and its geometry to put "
+            "time first and space last; for physical-frame ordering failures, reorder the "
+            "declared physical frame axes. For unsupported type counts, provide explicit "
+            "axis declarations "
+            "supported by v06. Export does not reorder pixels."
+        ) from error
     return metadata, tuple(report)

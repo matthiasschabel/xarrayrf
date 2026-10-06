@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 import xarray as xr
 from ome_zarr_models.v06 import coordinate_transforms as ct
 from ome_zarr_models.v06.multiscales import Multiscale
+from pydantic import ValidationError
 
 from xarrayrf import (
     AffineTransform,
@@ -407,3 +409,155 @@ def test_orientation_on_a_non_space_axis_is_reported_not_written() -> None:
         "orientation",
         "frame 'physical': orientation of non-space axis 't' is not represented",
     ) in report
+
+
+def _semantic_geometry(
+    matrix: npt.NDArray[np.generic],
+    types: tuple[str | None, ...],
+    units: tuple[str | None, ...],
+) -> Geometry:
+    dims = tuple(f"d{i}" for i in range(len(types)))
+    frame = ReferenceFrame.local(
+        CoordinateSystem(tuple(f"f{i}" for i in range(len(types))), units, axis_types=types)
+    )
+    array = xr.DataArray(
+        np.zeros((2,) * len(dims)), dims=dims, coords={dim: [0, 1] for dim in dims}
+    )
+    return Geometry(
+        array,
+        AffineTransform.from_matrix(
+            source=ArrayCoordinates(dims, ("1",) * len(dims)),
+            target=frame,
+            matrix=matrix,
+            translation=np.arange(len(dims)),
+        ),
+        dims=dims,
+    )
+
+
+@pytest.mark.parametrize("units", [("s", "mm", "um"), (None, "mm", None)])
+def test_intrinsic_axes_inherit_contributing_rows(units: tuple[str | None, ...]) -> None:
+    geometry = _semantic_geometry(
+        np.array([[1, 0, 0], [0, 0, 2], [0, 3, 0]]), ("time", "space", "space"), units
+    )
+    metadata, _ = to_multiscale_level(geometry, path="0")
+    axes = metadata.coordinateSystems[0].axes
+    assert tuple(axis.type for axis in axes) == ("time", "space", "space")
+    expected = ("second", "micrometer", "millimeter") if units[0] else (None, None, "millimeter")
+    assert tuple(axis.unit for axis in axes) == expected
+    imported = from_multiscale(metadata, shapes={"0": (2, 2, 2)})
+    points = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0]])
+    np.testing.assert_allclose(
+        imported.transforms[0].transform_point(
+            imported.levels["0"].transform.transform_point(points)
+        ),
+        geometry.lattice().transform_point(points),
+        rtol=0,
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize(
+    "types,units",
+    [
+        (("time", "space", "space"), ("s", "mm", "mm")),
+        (("time", "time", "space"), ("s", "s", "mm")),
+        ((None, "space", "space"), ("mm", "mm", "mm")),
+        (("space", "space", "space"), (None, "mm", "mm")),
+        (("space", "space", "space"), ("um", "mm", "mm")),
+    ],
+)
+def test_intrinsic_axis_refuses_undefined_mixed_semantics(
+    types: tuple[str | None, ...], units: tuple[str | None, ...]
+) -> None:
+    # Structural support includes tiny nonzero cross terms, not only visible rotations.
+    geometry = _semantic_geometry(np.array([[1.0, 0, 0], [1e-17, 1, 0], [0, 0, 1]]), types, units)
+    with pytest.raises(ValueError, match=r"array axis 'd0'.*f0.*f1"):
+        to_multiscale_level(geometry, path="0")
+
+
+@pytest.mark.parametrize(
+    "types,matrix",
+    [
+        (("time", "space", "space"), [[0, 1, 0], [1, 0, 0], [0, 0, 1]]),
+        ((None, "space"), [[0, 1], [1, 0]]),
+        (("time", "time", "space", "space"), np.eye(4)),
+    ],
+)
+def test_invalid_ngff_axis_layout_has_actionable_error(
+    types: tuple[str | None, ...], matrix: npt.ArrayLike
+) -> None:
+    geometry = _semantic_geometry(np.asarray(matrix), types, (None,) * len(types))
+    with pytest.raises(ValueError, match=r"intrinsic.*d0.*transpose.*explicit") as caught:
+        to_multiscale_level(geometry, path="0")
+    assert isinstance(caught.value.__cause__, ValidationError)
+
+
+def test_invalid_physical_frame_order_has_actionable_error() -> None:
+    matrix = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]])
+    geometry = _semantic_geometry(matrix, ("space", "time", "space"), (None,) * 3)
+    with pytest.raises(
+        ValueError, match=r"physical-frame.*reorder the declared physical frame axes"
+    ) as caught:
+        to_multiscale_level(geometry, path="0")
+    assert isinstance(caught.value.__cause__, ValidationError)
+    assert "['space', 'time', 'space']" in str(caught.value.__cause__)
+
+    reordered = _semantic_geometry(matrix[[1, 0, 2]], ("time", "space", "space"), (None,) * 3)
+    metadata, _ = to_multiscale_level(reordered, path="0")
+    assert tuple(axis.type for axis in metadata.coordinateSystems[0].axes) == (
+        "time",
+        "space",
+        "space",
+    )
+
+
+def test_zero_intrinsic_column_is_refused_before_normalization() -> None:
+    geometry = _semantic_geometry(np.array([[0.0, 1], [0, 1]]), ("space", "space"), ("mm", "mm"))
+    with pytest.raises(ValueError, match=r"d0.*no displacement"):
+        to_multiscale_level(geometry, path="0")
+
+
+@pytest.mark.parametrize("angle", [0.3, np.pi / 2])
+def test_spatial_mixing_accepts_unit_spelling_aliases(angle: float) -> None:
+    matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    geometry = _semantic_geometry(matrix, ("space", "space"), ("mm", "millimeter"))
+    metadata, _ = to_multiscale_level(geometry, path="0")
+    assert tuple(axis.unit for axis in metadata.coordinateSystems[0].axes) == ("millimeter",) * 2
+
+
+def test_unmixed_unknown_axis_and_spatial_rotation_preserve_lazy_pixels() -> None:
+    import dask.array as da
+    from dask.delayed import delayed
+
+    @delayed  # type: ignore[untyped-decorator]
+    def forbidden() -> None:
+        raise AssertionError("export read pixels")
+
+    matrix = np.array([[1.0, 0, 0], [0, 2, -1], [0, 1, 2]])
+    geometry = _semantic_geometry(matrix, (None, "space", "space"), (None, "mm", "mm"))
+    lazy = da.from_delayed(forbidden(), shape=(2, 2, 2), dtype=float)  # type: ignore[no-untyped-call]
+    geometry = Geometry(geometry.array.copy(data=lazy), geometry.transform, dims=geometry.dims)
+    metadata, report = to_multiscale_level(geometry, path="0")
+    assert tuple(axis.type for axis in metadata.coordinateSystems[0].axes) == (
+        None,
+        "space",
+        "space",
+    )
+    assert tuple(axis.unit for axis in metadata.coordinateSystems[0].axes) == (
+        None,
+        "millimeter",
+        "millimeter",
+    )
+    assert tuple(axis.name for axis in metadata.coordinateSystems[1].axes) == geometry.frame.axes
+    assert "intrinsic-synthesized" in {code for code, _ in report}
+    imported = from_multiscale(metadata, shapes={"0": (2, 2, 2)})
+    points = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 1.0]])
+    np.testing.assert_allclose(
+        imported.transforms[0].transform_point(
+            imported.levels["0"].transform.transform_point(points)
+        ),
+        geometry.lattice().transform_point(points),
+        rtol=0,
+        atol=1e-12,
+    )
