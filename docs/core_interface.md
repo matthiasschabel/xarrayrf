@@ -43,8 +43,9 @@ indexes. The binding has no declaration coordinate.
 
 Indexed assignment from another framed array replaces destination values. It does not register
 or resample the right operand and does not adopt its frame. Shared dimension coordinates must
-agree with the indexed destination or xarray raises `IndexError`. For two arrays bound to
-distinct frames with matching dimension labels:
+agree with the indexed destination or xarray raises `IndexError`. Retained scalar coordinates
+on a selected slice are ignored by this check, even when they differ from the destination's.
+For two arrays bound to distinct frames with matching dimension labels:
 
 ```python
 destination[{"y": slice(0, 2)}] = source.isel(y=slice(0, 2))

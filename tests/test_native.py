@@ -1396,3 +1396,22 @@ def test_indexed_assignment_replaces_values_and_preserves_destination_frame(
     with pytest.raises(IndexError, match="coordinate"):
         destination[{"y": slice(0, 2)}] = source.isel(y=slice(1, 3))
     assert destination.rf.grid == original_grid
+
+
+def test_scalar_slice_assignment_ignores_retained_coordinate_conflicts(
+    image: xr.DataArray, transform: AffineTransform
+) -> None:
+    destination = image.copy().rf.frame(transform, dims=("y", "x"))
+    assert isinstance(transform.target, ReferenceFrame)
+    other_frame = ReferenceFrame.local(transform.target.coordinate_system)
+    source = (image + 100).rf.frame(transform.with_endpoints(target=other_frame), dims=("y", "x"))
+    original_grid = destination.rf.grid
+    replacement = source.isel(y=2)
+    assert replacement.y.item() != image.y.values[1]
+    expected = image.data.copy()
+    expected[1] = replacement.data
+
+    destination[{"y": 1}] = replacement
+
+    assert_array_equal(destination.data, expected)
+    assert destination.rf.grid == original_grid

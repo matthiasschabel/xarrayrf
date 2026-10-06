@@ -89,6 +89,8 @@ lattice = geometry.lattice(dims=order)
 Indexed assignment replaces destination pixel values and preserves the destination binding,
 even when the right operand has a distinct frame. It does not register or resample that operand.
 Shared dimension labels must match the indexed destination or xarray raises `IndexError`.
+Only dimension coordinates are checked; retained scalar coordinates on a selected slice
+are ignored, even when their values differ from the destination's.
 
 ## Architecture
 

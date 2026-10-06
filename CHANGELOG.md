@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Clarified indexed assignment checks: retained scalar coordinates on selected slices are
+  ignored, while shared dimension coordinates must agree. Destination binding is preserved.
 - Geometry dense points, default lattice columns and frame-coordinate fields now follow declared
   `dims` order, agreeing with positional queries and Grid snapshots after pixel transposition.
   Use `points().transpose(*order, "axis")` and `lattice(dims=order)` for pixel storage order.
