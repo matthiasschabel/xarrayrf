@@ -17,7 +17,15 @@ from numpy.testing import assert_allclose, assert_array_equal
 from xarray.indexes import PandasIndex
 
 import xarrayrf.native  # register the DataArray accessor
-from xarrayrf import AffineTransform, ArrayCoordinates, CoordinateSystem, Geometry, ReferenceFrame
+from xarrayrf import (
+    AffineTransform,
+    ArrayCoordinates,
+    CompositeTransform,
+    CoordinateSystem,
+    Geometry,
+    Grid,
+    ReferenceFrame,
+)
 from xarrayrf._binding import BindingIndex
 
 
@@ -123,6 +131,62 @@ def test_resample_to_is_lazy_and_validates_frames(
         framed.rf.resample_to(image)
     with pytest.raises(TypeError, match="target must be"):
         framed.rf.resample_to(3)
+
+
+@pytest.mark.parametrize("target_kind", ["grid", "array", "geometry", "general"])
+@pytest.mark.parametrize("echo_size", [None, 2, 0])
+@pytest.mark.parametrize("lazy", [False, True])
+def test_resample_to_scalar_target_preserves_binding_and_context(
+    target_kind: str, echo_size: int | None, lazy: bool
+) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
+    frame = ReferenceFrame.local(CoordinateSystem(("position",), ("mm",)))
+    transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("x",), ("mm",)),
+        target=frame,
+        matrix=[[1.0]],
+        translation=[0.0],
+    )
+    source = xr.DataArray(
+        [0.0, 10.0, 20.0],
+        dims="x",
+        coords={"x": [0.0, 1.0, 2.0], "context": "scan"},
+        name="signal",
+        attrs={"kind": "synthetic"},
+    )
+    if echo_size is not None:
+        source = source.expand_dims(echo=np.arange(echo_size))
+    if lazy:
+        source = source.chunk({"x": -1, **({"echo": 1} if echo_size else {})})
+    source = source.rf.frame(transform, dims=("x",))
+    selected = source.isel(x=1)
+    target = {
+        "grid": Grid(transform, {"x": 0.5}),
+        "array": selected,
+        "geometry": selected.rf.geometry,
+        "general": Grid(CompositeTransform(transform), {"x": 0.5}),
+    }[target_kind]
+    with pixel_tasks() as tasks:
+        result = source.rf.resample_to(target)
+    assert not tasks
+    assert result.dims == (() if echo_size is None else ("echo",))
+    assert result.rf.is_framed
+    assert result.rf.geometry_dims == ()
+    assert result.rf.coordinate_transform == (
+        target.transform if isinstance(target, Grid | Geometry) else target.rf.coordinate_transform
+    )
+    assert result.name == "signal"
+    assert result.attrs == {"kind": "synthetic"}
+    assert result.context.item() == "scan"
+    position = 0.5 if target_kind in {"grid", "general"} else 1.0
+    assert_allclose(result.x, position, rtol=0, atol=1e-12)
+    if echo_size is not None:
+        xr.testing.assert_identical(result.echo.variable, source.echo.variable)
+    if lazy:
+        assert isinstance(result.data, da.Array)
+        assert result.chunks == (() if echo_size is None else (source.chunksizes["echo"],))
+    expected = np.full(() if echo_size is None else (echo_size,), 10 * position)
+    assert_allclose(result.compute(), expected, rtol=0, atol=1e-12)
 
 
 def test_resample_to_accepts_transform_across_frames(framed: xr.DataArray) -> None:

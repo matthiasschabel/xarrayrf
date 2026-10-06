@@ -148,9 +148,7 @@ def _crop_window(
     The map is affine, so the extreme source positions over the target index box occur at its
     corners; adding the interpolation margin bounds every sample the target touches.
     """
-    corners = np.array(
-        list(product(*((0, n - 1) for n in target_shape))), dtype=np.float64
-    ).T.reshape(len(target_shape), -1)
+    corners = np.array(list(product(*((0, n - 1) for n in target_shape))), dtype=np.float64).T
     positions = lattice_map.linear @ corners + lattice_map.offset[:, None]
     margin = CROP_MARGIN[order]
     start = np.clip(np.floor(positions.min(axis=1)) - margin, 0, np.array(sizes) - 1)
@@ -457,9 +455,11 @@ def _interpolate(
 def _block_positions(plan: _Plan, start: int, stop: int) -> npt.NDArray[np.float64]:
     """Locate a flattened block of target samples in the source."""
     assert plan.position_map is not None
-    target_positions = np.array(
-        np.unravel_index(np.arange(start, stop), plan.target_shape), dtype=np.float64
-    ).reshape(len(plan.target_shape), stop - start)
+    target_positions = (
+        np.array(np.unravel_index(np.arange(start, stop), plan.target_shape), dtype=np.float64)
+        if plan.target_shape
+        else np.empty((0, stop - start), dtype=np.float64)
+    )
     return plan.position_map(target_positions)
 
 
@@ -469,37 +469,47 @@ def _lattice_block(
     """Resample slices through the composed affine or integral-grid gather."""
     lattice_map = plan.lattice_map
     assert lattice_map is not None
+    target_shape = plan.target_shape
+    if not target_shape:
+        # SciPy requires positive output rank; the dummy column never varies.
+        target_shape = (1,)
+        lattice_map = _LatticeMap(
+            np.zeros((len(plan.source_dims), 1)),
+            lattice_map.offset,
+            lattice_map.lowest,
+            lattice_map.highest,
+        )
     # One compiled pass per slice, prefiltering only that slice; edges extend so
     # rounding at an exact edge sample cannot turn it into fill, and the separable
     # mask applies the true boundary. Nearest and linear already hold the edge value
     # beyond the outer samples; a cubic spline would extrapolate, so target samples in
     # the outer cells are evaluated again at clamped positions.
-    outside = lattice_map.outside(plan.target_shape)
+    outside = lattice_map.outside(target_shape)
     if plan.same_grid is not None:
         indices, axis_order = plan.same_grid
-        output = np.empty((len(slices), *plan.target_shape), dtype=plan.output_dtype)
+        output = np.empty((len(slices), *target_shape), dtype=plan.output_dtype)
         for index, volume in enumerate(slices):
             output[index] = volume[np.ix_(*indices)].transpose(axis_order)
             output[index][outside] = plan.fill_value
-        return output.reshape(*leading, *plan.target_shape)
+        return output.reshape((*leading, *plan.target_shape))
     last = plan.source_last[:, 0]
     shell = None
     if plan.order > 1 and ((lattice_map.lowest < 0.0).any() or (lattice_map.highest > last).any()):
-        beyond = lattice_map.outside(plan.target_shape, np.zeros_like(last), last)
+        beyond = lattice_map.outside(target_shape, np.zeros_like(last), last)
         shell = np.nonzero(beyond & ~outside)
         shell_positions = np.clip(
             lattice_map.linear @ np.array(shell, dtype=np.float64) + lattice_map.offset[:, None],
             0.0,
             plan.source_last,
         )
-    output = np.empty((len(slices), *plan.target_shape), dtype=plan.output_dtype)
+    output = np.empty((len(slices), *target_shape), dtype=plan.output_dtype)
     for index, volume in enumerate(slices):
         filtered = _coefficients(plan, volume)
         plan.ndimage.affine_transform(
             filtered,
             lattice_map.linear,
             offset=lattice_map.offset,
-            output_shape=plan.target_shape,
+            output_shape=target_shape,
             output=output[index],
             order=plan.order,
             mode="nearest",
@@ -515,7 +525,7 @@ def _lattice_block(
                 prefilter=False,
                 output=plan.output_dtype,
             )
-    return output.reshape(*leading, *plan.target_shape)
+    return output.reshape((*leading, *plan.target_shape))
 
 
 def _general_block(
@@ -545,7 +555,7 @@ def _general_block(
                     cached[number] if cached is not None else _block_positions(plan, start, stop)
                 )
                 flat[index, start:stop] = _interpolate(plan, filtered, positions, stop - start)
-    return flat.reshape(*leading, *plan.target_shape)
+    return flat.reshape((*leading, *plan.target_shape))
 
 
 def _resample_block(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.generic]:
@@ -574,6 +584,8 @@ def resample(
     For each target sample, its point in the target frame is mapped into the source frame and
     located among the source samples, and the source values are interpolated there.
     Non-geometry dimensions of the source (time, echo, channel) are carried through unchanged.
+    A fully scalar target represents one point and adds no dimensions to the result; its
+    scalar geometry coordinates are retained. Retained scalar source axes remain unsupported.
 
     Frames: equal frames need nothing; equivalent frames in different coordinate systems (LPS
     and RAS) use the derived coordinate-system change; different frames need ``transform``, from

@@ -644,6 +644,65 @@ def test_a_small_target_reads_only_the_source_chunks_it_touches() -> None:
     assert 0 < len(reads) <= 4  # of 16 chunks: the target and its margin fit in one or two
 
 
+@pytest.mark.parametrize("method", ["nearest", "linear", "cubic"])
+@pytest.mark.parametrize(
+    ("position", "domain"),
+    [(2.25, "samples"), (2.0, "samples"), (-0.25, "samples"), (-0.25, "cells"), (-0.75, "cells")],
+)
+def test_scalar_volume_target_matches_singleton_target(
+    method: xrf.Method, position: float, domain: xrf.Domain
+) -> None:
+    source = centred(volume(ramp()))
+    lazy = xrf.Geometry(source.array.chunk({"k": 2}), source.transform, dims=source.dims)
+    for transform in (source.transform, xrf.CompositeTransform(source.transform)):
+        scalar = xrf.Grid(transform, {"i": position, "j": 1.0, "k": 1.0})
+        singleton = xrf.Grid(
+            transform, {"i": ("i", [position]), "j": ("j", [1.0]), "k": ("k", [1.0])}
+        )
+        result = xrf.resample(source, scalar, method=method, domain=domain, fill_value=-9)
+        expected = xrf.resample(source, singleton, method=method, domain=domain, fill_value=-9)
+        assert result.dims == ()
+        assert_allclose(result, expected.values.item(), rtol=0, atol=ATOL)
+        assert_allclose(result.i, position, rtol=0, atol=ATOL)
+        chunked = xrf.resample(lazy, scalar, method=method, domain=domain, fill_value=-9)
+        assert chunked.chunks == ()
+        assert_allclose(chunked.compute(), result, rtol=0, atol=ATOL)
+        if position < 0:
+            edge = xrf.Grid(transform, {"i": ("i", [0.0]), "j": ("j", [1.0]), "k": ("k", [1.0])})
+            held = xrf.resample(source, edge, method=method).values.item()
+            value = held if domain == "cells" and position > -0.5 else -9
+            assert_allclose(result, value, rtol=0, atol=ATOL)
+
+
+def test_scalar_affine_target_reads_only_nearby_source_chunks() -> None:
+    recording = _RecordingArray()
+    lazy = da.from_array(recording, chunks=(8, 16, 16))  # type: ignore[no-untyped-call]
+    source = volume(np.zeros(recording.shape))
+    source = xrf.Geometry(source.array.copy(data=lazy), source.transform, dims=source.dims)
+    target = xrf.Grid(source.transform, {"i": 2.5, "j": 3.5, "k": 2.5})
+    recording.reads.clear()
+    result = xrf.resample(source, target)
+    assert not recording.reads
+    assert result.chunks == ()
+    assert_allclose(result.compute(), 1.0, rtol=0, atol=ATOL)
+    assert len(recording.reads) == 1
+
+
+@pytest.mark.parametrize("domain", ["samples", "cells"])
+def test_scalar_target_does_not_enable_scalar_source_inversion(domain: xrf.Domain) -> None:
+    source = volume(ramp())
+    target = xrf.Grid(source.transform, {"i": 1.0, "j": 1.0, "k": 1.0})
+    for selection in ({"i": 1}, {"i": 1, "j": 1, "k": 1}):
+        selected = source.array.isel(selection)
+        geometry = xrf.Geometry(
+            selected,
+            source.transform,
+            dims=tuple(dim for dim in source.dims if dim not in selection),
+        )
+        with pytest.raises(ValueError, match=r"retained scalar.*projection policy"):
+            xrf.resample(geometry, target, domain=domain)
+
+
 def test_a_transform_applies_only_to_the_frames_it_was_computed_between() -> None:
     other = xrf.ReferenceFrame.declared(("test", "other patient"), LPS.coordinate_system)
     source = volume(ramp(), frame=other)
