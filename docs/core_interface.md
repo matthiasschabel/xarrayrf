@@ -550,13 +550,22 @@ Non-geometry coordinates along a grid dimension must have that dimension's grid 
 coordinates. A plain view has no intervals by default; explicit intervals follow the Grid
 validation rules, and `Geometry.intervals` exposes their read-only views. Declared coordinates
 are read to validate offset agreement; sampling queries recheck agreement against current values.
-`array.rf.geometry` passes its binding's intervals. `grid()` snapshots them. Beyond `point_at`:
+Constructing a standalone `Geometry` does not attach a binding or enforce xarray operation
+lifecycles. Native `array.rf.geometry` exposes this query view over the attached binding and
+passes its intervals. `grid()` snapshots them. Beyond `point_at`:
 
 - `grid()`: an immutable `Grid` snapshot of the current coordinates, in `Geometry.dims` order.
   Coordinate values are read, pixels are never read. Multidimensional coordinates and multiple
   source axes along one dimension are refused because they cannot form a grid.
-- `points()`: every sample's point as a `DataArray` over the geometry dimensions and `axis`,
-  labelled with units; lazy and chunked like the array when it is Dask-backed.
+- `points(*, axis_dim="axis", units_coord="units")`: every sample's point as a `DataArray`
+  over the geometry dimensions in storage order and the component dimension `axis_dim`,
+  labelled in the frame's axis order with per-component `units_coord`; lazy and chunked like
+  the array when it is Dask-backed. Both names must be nonempty strings, distinct and absent
+  from the carried geometry dimensions/index coordinates. For a dimension named `axis` or
+  `units`, use `points(axis_dim="component", units_coord="component_units")`. Unrelated
+  coordinates omitted from the result do not restrict these names. `point_at` keeps its
+  fixed `axis` and `units` names; use `.rename(axis="component", units="component_units")`
+  to align an individual point with customized dense output. `Grid.points()` stays NumPy-only.
 - `lattice(dims=None, *, tolerance=...)`: a `Lattice` (origin, spacing, direction, matrix and
   `affine`, the homogeneous index-to-frame matrix such as a NIfTI 4x4) when the transform is affine and every source axis is a retained
   scalar or a uniformly spaced one-dimensional coordinate. `dims` orders the columns, for
@@ -671,6 +680,13 @@ matching points with different bindings or support still require resampling. Und
 systems and non-affine mappings name the reason and request an explicit transform, without
 suggesting an assumption that would fail. Existing refusals for two complete frames remain
 unchanged.
+
+A fully scalar Grid or selected Geometry/DataArray target has shape `()` and represents one
+point. Resampling retains its scalar geometry coordinates and the source's non-geometry
+dimensions and context; `rf.resample_to` also preserves the source name and attributes and
+binds the target geometry. Dask output stays lazy, with no dummy dimension. Scalar affine
+queries still crop source reads to the interpolation neighborhood. Retained scalar source
+axes remain unsupported: this does not introduce projection or scalar-source inversion.
 
 An empty target returns an empty result with the target geometry and the source's non-geometry
 dimensions and coordinates; `rf.resample_to` binds it as usual. This also works with an empty

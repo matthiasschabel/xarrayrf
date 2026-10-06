@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- Resampling accepts fully scalar Grid and selected Geometry/DataArray targets, preserving
+  scalar coordinates, source context and lazy Dask output. Affine queries retain cropped
+  source reads, including for cubic interpolation and cells-domain edge holding.
+- `Geometry.points` accepts `axis_dim` and `units_coord` to avoid collisions with carried
+  geometry names, and rejects conflicting names before evaluation. Geometry dimensions named
+  `__xarrayrf_source_axis__` now work without overrides. Defaults remain `axis` and `units`;
+  `point_at` and NumPy-returning `Grid.points` are unchanged.
+- Geometry documentation now distinguishes the standalone query view from the existing
+  native accessor and binding lifecycle.
 - Local `ngff.open` paths now derive frame identity from the resolved absolute path,
   including symlinks. Relative and absolute openings of one store agree, and identical
   basenames in different directories no longer share a frame. Metadata-only `store=`

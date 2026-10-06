@@ -2,6 +2,53 @@
 
 Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
 
+## [2026-10-05] — QA of audit stage 2
+
+- **Problem**: Scalar-target resampling and dense point-output naming needed independent
+  verification before committing the stage 2 implementation.
+- **Resolution**: QA confirms the fixes address rank-zero planning/interpolation and output
+  name collisions directly, preserve cropped lazy reads and metadata, and reject invalid
+  output names early. No additional source correction was needed.
+- **Verification**: An isolated original-source snapshot fails all 40 selected scalar-target
+  regressions. The current focused suite passes 297 tests with 41 expected stock failures.
+  Four independent probes pass for eager/Dask nonlinear registration, ramp values, outside
+  fill and target binding. Coordinate-only Dask fields also work with matching and differing
+  chunk layouts. Full suites: stock xarray 1,696 passed and 47 expected failures; patched
+  xarray 1,743 passed. Both retain three existing dependency warnings. Ruff lint/format,
+  mypy (81 source files), documentation links and whitespace pass.
+- **Files affected**: `src/xarrayrf/_resample.py`, `src/xarrayrf/_geometry.py`, their public
+  tests in `tests/test_resample.py`, `tests/test_geometry.py`, `tests/test_native.py`, and
+  the public docs/changelog and [stage 2 review record](stage2_implementation_review.md).
+- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); prior implementation
+  reviews by Claude Opus 5.5 (`claude-opus-5-5`). Implemented by Codex gpt-6-astra.
+
+## [2026-10-05] — Scalar resampling and labelled point-output collisions
+
+- **Problem**: Valid scalar targets failed in crop planning, general indexing and block
+  reshaping. Dense point output failed on an `axis` dimension or its private stacking name,
+  and an indexed `units` dimension silently replaced component-unit metadata.
+- **Resolution**: Scalar output retains shape `()` while the affine kernel uses one internal
+  sample, preserving cropped reads, domain masks and cubic edge holding. General mapping
+  supports zero varying target dimensions. `Geometry.points` accepts explicit `axis_dim`
+  and `units_coord`, validates carried-name collisions and stacks broadcast coordinates only
+  within the evaluation callback. Updated Geometry/accessor documentation. No source
+  projection or later-stage interpolation policy was introduced.
+- **Verification**: gpt-6-astra implemented the agreed plan; Opus 5.5 accepted the plan and
+  final implementation with all findings resolved. After byte-for-byte integration, independent
+  full suites pass: stock xarray 1,696 passed and 47 expected failures; patched xarray
+  1,743 passed. Both retain three existing dependency warnings. Ruff lint/format, mypy
+  (81 source files) and whitespace pass. Public regressions cover scalar binding/context,
+  eager/Dask and empty extra dimensions, volumetric interpolation, crop-limited reads,
+  output naming, scalar points and lazy nonseparable fields.
+- **Files affected**: `src/xarrayrf/_resample.py`, `src/xarrayrf/_geometry.py`;
+  `tests/test_resample.py`, `tests/test_geometry.py`, `tests/test_native.py`;
+  `docs/core_interface.md`, `CHANGELOG.md` and the
+  [audit plan](codebase_audit_plan.md). Complete decisions and reports are in the
+  [stage 2 refinement record](stage2_implementation_review.md).
+- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`); independent checks and orchestration
+  by Codex GPT-6 (exact serving model ID not exposed). Implemented by Codex gpt-6-astra
+  (initial CLI invocation used high reasoning effort).
+
 ## [2026-10-05] — QA of audit stage 1 identity, singleton support and DICOM cardinality
 
 - **Problem**: Local NGFF reader identities depended on path spelling, allowing different

@@ -9,7 +9,7 @@
 The user requested a thorough audit emphasizing material correctness, comprehensible APIs,
 and the principle of least surprise, followed by critique from Claude Opus 5.5. This plan
 covers the checkout at `de48d8ab0097bf6196fdcbced0779de0ae155fea`. Stage 1 has been implemented, cross-reviewed, verified by QA and committed to main;
-stages 2–5 remain recommendations.
+stage 2 is also implemented, cross-reviewed, verified by QA and committed to main. Stages 3–5 remain recommendations.
 
 The audit inspected the shipped modules, native xarray binding, sampling and resampling,
 format adapters and readers, public contracts, test coverage, and supporting tooling.
@@ -45,6 +45,17 @@ The subsequent QAEngineer pass reproduced the original failures independently, e
 mixed-axis boundaries and repeated both full suites and static checks without finding an
 additional defect. The [internal changelog](changelog.md) records that verification.
 
+**Stage 2 completed, 2026-10-05:** Opus 5.5 accepted the expanded F6/F7/M1 plan, gpt-6-astra
+implemented it in an isolated worktree, and Opus accepted the implementation after its three
+optional follow-ups were resolved. The reviewed diff is integrated, verified by QA and committed to main. Final
+independent verification: stock xarray 1,696 passed and 47 expected failures; patched xarray
+1,743 passed; Ruff lint/format, mypy and whitespace passed. Both lanes retain three existing
+dependency warnings. See [the stage 2 implementation record](stage2_implementation_review.md)
+for decisions, complete reviewer reports and verification.
+The subsequent QAEngineer pass reproduced 40 original scalar-target failures, checked
+nonlinear registration and coordinate-only Dask fields, and repeated both full suites and
+static checks without finding an additional defect.
+
 Keep the architecture: frame identity, coordinate systems, transforms, sampling, and array
 binding form a coherent model. Preserve explicit registration between distinct frames,
 separation of identity from numerical coincidence, and coordinate values that survive
@@ -58,8 +69,8 @@ global frame registry, or replacement of native xarray binding is not justified.
 | F1 | Relative NGFF paths can identify different stores as the same frame, while absolute and relative openings of one store disagree. | Confirmed identity defect; first priority. |
 | F2 | A singleton at 1,800,000,000 seconds accepts a query one second later as the same sample. | Confirmed faulty tolerance contract; first priority. |
 | F8 | A classic DICOM geometry for two slices accepts three pixel slices and silently discards the third. | Confirmed cardinality defect; preserve enhanced subset selection. |
-| F6 | Resampling onto a valid scalar Grid or selected scalar DataArray fails in reshape logic. | Confirmed valid-input failure. |
-| F7 | Geometry.points fails when a varying input dimension is named axis. | Confirmed dimension-name collision. |
+| F6 | Resampling onto a valid scalar Grid or selected scalar DataArray fails in reshape logic. | Confirmed valid-input failure; fixed in stage 2. |
+| F7 | Geometry.points collides with axis/units output names and its private stacking dimension. | Confirmed name collisions and units-metadata loss; fixed in stage 2. |
 | F3 | Non-diagonal NGFF export labels an unmixed time axis as spatial and pairs column axes with row units by index. | Confirmed metadata defect; use conservative representability rules. |
 | F4 | Equivalent resampling paths disagree on NaNs at exact sample locations. | Linear exact-sample behavior needs correction; cubic prefilter behavior needs an explicit contract. |
 | F5 | Indexed assignment accepts another frame's labelled payload while preserving the destination frame. | Intentional payload replacement; documentation, not a runtime bug fix. |
@@ -122,15 +133,20 @@ array shapes without computing pixels. Document the dataclass field and equality
 dimensions in crop-window construction, outside masks, block positions, and result reshaping.
 The output contains one sampled value, retaining unrelated source dimensions. Do not patch
 only the first reshape error or conflate scalar targets with unsupported scalar-source inversion.
+The implementation preserves affine crop planning and promotes scalar output to one internal
+sample only within the numerical kernel, reusing outside/cubic-shell handling. The general
+path constructs zero-row position arrays; public output keeps shape `()`.
 
 Acceptance checks: scalar Grid and scalar framed DataArray targets, eager and Dask outputs,
 representative affine and general mappings, outside fill, and unrelated leading dimensions.
 
-**F7: Disambiguate labelled point-result dimensions.** Keep valid input dimensions such as
-`axis`. Use collision-safe internal dimensions and a deliberate output naming rule. Recommend
-an explicit `axis_dim="axis"` keyword for dense labelled point output, exposed through the
-accessor, with an actionable conflict error suggesting another name. Preserve the existing
-result for callers without a conflict. Confirm this small signature choice before coding.
+**F7: Disambiguate labelled point-result dimensions and units.** Keep valid input dimensions
+such as `axis` and `units`. Dense output now accepts
+`points(*, axis_dim="axis", units_coord="units")` through the existing geometry accessor,
+with actionable conflict errors. The private stacking dimension is removed; broadcast inputs
+are stacked within the evaluation callback. Preserve ordinary default output, labels, units
+and lazy field support. `point_at` retains its fixed names and unrestricted dimension indexers;
+use xarray `rename` to align a selected point with customized dense output.
 `Grid.points` returns a NumPy array and has no reusable labelled-dimension naming mechanism.
 Do not convert through Grid eagerly and lose Dask or nonseparable coordinate support.
 
@@ -138,8 +154,8 @@ Acceptance checks: a geometry varying over a dimension named `axis` can produce 
 labelled points using the documented disambiguation; ordinary outputs retain their labels,
 units, ordering, and lazy evaluation.
 
-Schedule **M1**, the stale Geometry/accessor documentation, as a small documentation follow-up
-in these early stages. This planning task does not authorize an unsolicited code edit or commit.
+**M1** is completed in stage 2: Geometry documentation now distinguishes a standalone query
+view from the existing native accessor and binding lifecycle.
 
 ### Stage 3: Correct export semantics and narrow interpolation behavior
 
@@ -224,13 +240,15 @@ cannot be represented safely.
 
 ## Deferred Work
 
-Stages 2–5 remain pending. Stage 4 needs deliberate public-contract choices;
+Stages 3–5 remain pending. Stage 4 needs deliberate public-contract choices;
 Stage 5 contains optional usability work. Cubic path dependence with NaNs remains an explicit
-limitation unless a later interpolation policy change is justified. No upstream submissions or commits have been made, and the user's unrelated uncommitted work
-was preserved.
+limitation unless a later interpolation policy change is justified. Stages 1 and 2 are committed
+to main. No remote publication has been made,
+and the user's unrelated uncommitted work is preserved.
 
 ## Next Steps
 
-Stage 1 is complete. Stage 2 begins with F6 scalar resampling targets and F7 point-output
-dimension naming. Follow their acceptance checks when implementation is requested; revisit
-this plan if a fix reveals a materially different cause or requires wider API changes.
+Stages 1 and 2 are complete. Stage 3 is the next independent task: F3 NGFF axis semantics and
+F4 linear exact-sample NaN behavior. Follow their acceptance checks when implementation is
+requested; revisit this plan if a fix reveals a materially different cause or requires wider
+API changes.
