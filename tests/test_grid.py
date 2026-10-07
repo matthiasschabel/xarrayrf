@@ -7,7 +7,7 @@ import json
 import pickle
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import dask.array as da
 import numpy as np
@@ -198,7 +198,11 @@ def test_geometry_grid_refuses_coordinate_fields_and_shared_dimensions() -> None
         ({"offset": ("", [1, 2])}, ValueError, "empty"),
         ({"offset": (1, [1, 2])}, TypeError, "string"),
         ({"offset": ("i", [True, False])}, TypeError, "real"),
-        ({"offset": ("i", np.ma.array([0, 1], mask=[False, True]))}, TypeError, "masked"),
+        (
+            {"offset": ("i", cast(Any, np.ma.array)([0, 1], mask=[False, True]))},
+            TypeError,
+            "masked",
+        ),
         ({"offset": ("i", [[0, 1], [2]])}, ValueError, "rectangular"),
         ({"offset": ("i", [0, np.nan])}, ValueError, "finite"),
     ],
@@ -366,7 +370,7 @@ def test_grid_coordinate_storage_stays_immutable(duplicate: Any) -> None:
         # that a caller who still does it cannot reach the grid's storage.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            values.dtype = np.uint8  # type: ignore[misc]
+            cast(Any, values).dtype = np.dtype(np.uint8)
             values.shape = (values.size, 1)
         np.testing.assert_array_equal(grid.points(), expected)
         assert hash(grid) == expected_hash
@@ -822,6 +826,7 @@ def test_resampling_to_grid_equals_framed_array_target(nonuniform: bool, method:
         mapping, {"y": ("row", [1.0, 3.0, 5.0]), "x": ("col", [0.5, 1.5])}
     ).transpose()
     target = frame_array(np.zeros((2, 3)), target_grid)
+    pytest.importorskip("scipy", minversion="1.18")
     by_grid = source.rf.resample_to(target_grid, method=method)
     by_array = source.rf.resample_to(target, method=method)
     xr.testing.assert_identical(by_grid, by_array)
@@ -918,6 +923,7 @@ def test_resampling_to_grid_keeps_pixels_lazy_and_context_coords_exact() -> None
     target_grid = Grid(grid.transform, {"offset": ("j", [1.0, 3.0, 5.0])})
     target = frame_array(da.zeros(3, chunks=1), target_grid)
     tasks: list[object] = []
+    pytest.importorskip("scipy", minversion="1.18")
     with Callback(pretask=lambda key, *args: tasks.append(key)):  # type: ignore[no-untyped-call]
         result = source.rf.resample_to(target_grid)
         equivalent = source.rf.resample_to(target)

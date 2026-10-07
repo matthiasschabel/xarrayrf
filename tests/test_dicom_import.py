@@ -90,6 +90,7 @@ def test_oblique_dicom_cardinal_grid_resamples_linear_data_and_masks_outside() -
     coefficients = np.array([2.0, -3.0, 0.5])
     source = to_dataarray(geometry, 7 + points @ coefficients)
     target = cardinal_grid(source.rf.grid, "axial", spacing=1)
+    pytest.importorskip("scipy", minversion="1.18")
     result = source.rf.resample_to(target)
     target_points = target.points()
     displacement = target_points - ORIGIN
@@ -115,6 +116,7 @@ def test_thick_dicom_slice_cardinal_resampling_keeps_intervals_and_cell_mask() -
     values = 7 + 2 * (10 + 3 * i) - 3 * (20 + 2 * j)
     source = to_dataarray(geometry, values)
     target = cardinal_grid(source.rf.grid, "axial", spacing=(10, 1.3, 1.3))
+    pytest.importorskip("scipy", minversion="1.18")
     result = source.rf.resample_to(target, domain="cells")
     points = target.points()
     positions = (points - [10, 20, 37]) / [3, 2, 1]

@@ -22,6 +22,8 @@
 
 ### Fixed
 
+- Resampling validates inputs and frame compatibility before loading optional SciPy, so
+  invalid requests receive their validation errors even without the resampling extra.
 - The DICOM example-data tool preflights the complete batch before writing, refusing duplicate
   inputs/output names (including equivalent Unicode spellings and case variants), invalid
   paths, existing targets and source/output overlap. Each series publishes only after all files

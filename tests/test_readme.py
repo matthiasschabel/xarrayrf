@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,15 @@ def _examples() -> list[str]:
         indent = min(len(line) - len(line.lstrip()) for line in lines if line.strip())
         dedented.append("\n".join(line[indent:] for line in lines))
     return [block for block in dedented if NEEDS_FILES not in block]
+
+
+def test_readme_first_example_runs_with_core_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "scipy", None)
+    namespace: dict[str, Any] = {}
+    exec(compile(_examples()[0], str(README), "exec"), namespace)
+    crop = namespace["crop"]
+    assert crop.rf.is_framed
+    np.testing.assert_allclose(crop.rf.geometry.point_at(j=0, i=0).values, [10.5, 20.0])
 
 
 def test_readme_examples_run_and_match_their_comments() -> None:

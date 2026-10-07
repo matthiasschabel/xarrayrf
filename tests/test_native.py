@@ -1110,6 +1110,7 @@ def test_core_grid_resampling_does_not_register_accessor() -> None:
     import subprocess
     import sys
 
+    pytest.importorskip("scipy", minversion="1.18")
     script = """
 import numpy as np
 import xarray as xr
@@ -1129,6 +1130,21 @@ assert not hasattr(result, "rf")
         [sys.executable, "-c", script], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_resampling_without_scipy_validates_frames_before_loading_extra(
+    framed: xr.DataArray, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    other = framed.rf.assume_frame(
+        ReferenceFrame.local(framed.rf.reference_frame.coordinate_system)
+    )
+    monkeypatch.setitem(sys.modules, "scipy", None)
+    with pytest.raises(ValueError, match="different frames"):
+        framed.rf.resample_to(other)
+    with pytest.raises(ImportError, match=r"resample needs scipy.*xarrayrf\[resample\]"):
+        framed.rf.resample_to(framed)
 
 
 def test_anonymous_adoption_keeps_different_grids_and_names_resampling(
@@ -1156,6 +1172,7 @@ def test_anonymous_adoption_keeps_different_grids_and_names_resampling(
     adopted = second.rf.assume_frame(first)
     with pytest.raises(ValueError, match=r"same frame on different grids.*rf.resample_to"):
         _ = first + adopted
+    pytest.importorskip("scipy", minversion="1.18")
     onto_first = adopted.rf.resample_to(first)
     onto_second = first.rf.resample_to(adopted)
     assert onto_first.rf.grid == first.rf.grid
@@ -1216,6 +1233,7 @@ def test_resample_to_empty_target(
         source = source.isel(x=slice(0, 0))
     if lazy:
         source = source.chunk({"echo": 1, "y": 2, "x": 2})
+    pytest.importorskip("scipy", minversion="1.18")
     with pixel_tasks() as tasks:
         result = source.rf.resample_to(target, method=method, domain=domain)
         assert not tasks
@@ -1285,6 +1303,7 @@ def test_numerically_matching_points_do_not_bypass_binding_checks(framed: xr.Dat
     assumed = second.rf.assume_frame(first)
     with pytest.raises(ValueError, match="different grids"):
         _ = first + assumed
+    pytest.importorskip("scipy", minversion="1.18")
     assert_allclose(assumed.rf.resample_to(first), first, rtol=0, atol=1e-12)
 
 
@@ -1363,6 +1382,7 @@ def test_anonymous_adoption_retains_declared_support_checks(framed: xr.DataArray
     assert "y" in adopted.rf.grid.intervals
     with pytest.raises(ValueError, match="incompatible declared intervals"):
         _ = first + adopted
+    pytest.importorskip("scipy", minversion="1.18")
     onto_first = adopted.rf.resample_to(first)
     assert onto_first.rf.grid == first.rf.grid
     assert_allclose(onto_first, first, rtol=0, atol=1e-12)

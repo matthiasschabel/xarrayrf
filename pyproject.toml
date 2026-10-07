@@ -27,7 +27,7 @@ Repository = "https://github.com/matthiasschabel/xarrayrf"
 Issues = "https://github.com/matthiasschabel/xarrayrf/issues"
 
 [project.optional-dependencies]
-# scipy.ndimage interpolates values for resample(); the core never imports it.
+# resample() loads scipy.ndimage lazily; importing the core does not load SciPy.
 resample = ["scipy>=1.18"]
 # nibabel parses NIfTI headers for xarrayrf.nifti; 5.4 is the release tested.
 nifti = ["nibabel>=5.4", "dask[array]>=2025.1"]

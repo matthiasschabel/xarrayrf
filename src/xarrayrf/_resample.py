@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import partial
 from itertools import product
 from types import ModuleType
-from typing import Final, Literal
+from typing import Any, Final, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -312,11 +312,6 @@ def _plan(
     block_points: int,
 ) -> tuple[_Plan, xr.DataArray]:
     """Validate resampling and prepare the source region and block inputs."""
-    try:
-        from scipy import ndimage
-    except ImportError as error:  # pragma: no cover - exercised only without the extra
-        raise ImportError("resample needs scipy; install xarrayrf[resample]") from error
-
     if not isinstance(source, Geometry) or not isinstance(target, Geometry | Grid):
         raise TypeError("source must be Geometry and target must be Geometry or Grid")
     if method not in _SPLINE_ORDER:
@@ -405,6 +400,11 @@ def _plan(
         [source_values.sizes[dim] - 1 for dim in source_dims], dtype=np.float64
     ).reshape(-1, 1)
 
+    try:
+        from scipy import ndimage
+    except ImportError as error:
+        raise ImportError("resample needs scipy; install xarrayrf[resample]") from error
+
     return (
         _Plan(
             order=order,
@@ -442,7 +442,7 @@ def _linear_inputs(
     """Zero missing components and encode their weights once for one source slice."""
     if not np.isnan(volume).any():
         return volume, None
-    values = volume.copy()
+    values = cast(npt.NDArray[np.number[Any]], volume.copy())
     missing = np.zeros(volume.shape, dtype=np.complex128 if np.iscomplexobj(volume) else np.float64)
     if np.iscomplexobj(volume):
         for component, mask in ((values.real, missing.real), (values.imag, missing.imag)):
@@ -458,9 +458,11 @@ def _linear_inputs(
 
 def _restore_missing(values: npt.NDArray[np.generic], weights: npt.NDArray[np.generic]) -> None:
     """Propagate positive missing weight, allowing measured position roundoff."""
-    values.real[weights.real > ROUNDING_ALLOWANCE] = np.nan
+    numeric_values = cast(npt.NDArray[np.number[Any]], values)
+    numeric_weights = cast(npt.NDArray[np.number[Any]], weights)
+    numeric_values.real[numeric_weights.real > ROUNDING_ALLOWANCE] = np.nan
     if np.iscomplexobj(values):
-        values.imag[weights.imag > ROUNDING_ALLOWANCE] = np.nan
+        numeric_values.imag[numeric_weights.imag > ROUNDING_ALLOWANCE] = np.nan
 
 
 def _interpolate(
@@ -720,7 +722,7 @@ def resample(
             non-monotonic coordinates), or a target geometry dimension name is used by a
             non-geometry dimension of the source, or a target geometry coordinate name
             collides with a source non-geometry coordinate.
-        ImportError: If scipy is not installed.
+        ImportError: If scipy is not installed, after input and frame validation.
     """
     plan, source_values = _plan(
         source,

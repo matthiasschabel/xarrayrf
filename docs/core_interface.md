@@ -698,6 +698,9 @@ The target contributes only coordinates named by its transform's source axes. Un
 coordinates, including scalar context, are ignored; non-geometry coordinates come from the
 source. If a target geometry coordinate name collides with a source non-geometry coordinate,
 resampling raises `ValueError` naming that coordinate instead of replacing it.
+Input, frame and empty-source validation runs before loading optional SciPy. Valid sampling
+requests require the `resample` extra, including empty-target requests; without it they raise
+`ImportError` with an installation hint.
 The result retains the source's name, ordinary attributes and non-geometry coordinates; a
 reserved `xarrayrf_binding` attribute is not carried, and `rf.frame` refuses an array that still
 has one (decode it or drop it first). `rf.unframe()` drops it as stale. The core

@@ -30,6 +30,10 @@ medical imaging, microscopy, brain atlases, remote sensing and physics simulatio
 
 ## A first example
 
+Install the core from a [source checkout](#installation) to run this example. Resampling
+requires the optional `resample` extra; complete native-operation support requires the
+[patched xarray](#status).
+
 ```python
 import numpy as np
 import xarray as xr
@@ -54,7 +58,12 @@ framed = image.rf.frame(pixel_to_stage, dims=("j", "i"))
 
 crop = (framed * 2).isel(i=slice(1, 3))  # ordinary xarray operations
 crop.rf.geometry.point_at(j=0, i=0)  # x=10.5, y=20.0: the crop's first sample
-crop.rf.resample_to(framed)  # back onto the full grid, still framed
+```
+
+With `python -m pip install '.[resample]'`, resample the crop back onto the full grid:
+
+```python
+crop.rf.resample_to(framed)  # still framed
 ```
 
 Each named vector says how the frame coordinates change for a unit increase in that source
@@ -70,27 +79,9 @@ the two are known to be the same space.
 For a longer introduction on real data from microscopy, medical imaging, brain atlases and
 satellite imagery, see [the xarrayrf tour](https://github.com/matthiasschabel/xarrayrf/blob/main/examples/xarrayrf_tour.ipynb).
 
-`array.rf.frame(grid)` supplies missing coordinates and refuses conflicts. Use
-`array.rf.frame(grid, replace_coordinates=True)` to replace conflicting labels, dtypes or unit
-attrs with the Grid declaration; pixels are shared, with no resampling or unit conversion.
-Matching coordinates retain their metadata.
-
-Geometry queries use declared `dims` order even after pixel transposition: dense points,
-default lattice columns and frame-coordinate fields agree with positional queries and Grid
-snapshots. To match pixel layout explicitly:
-
-```python
-geometry = framed.transpose("i", "j").rf.geometry
-order = tuple(d for d in geometry.array.dims if d in geometry.dims)
-points = geometry.points().transpose(*order, "axis")
-lattice = geometry.lattice(dims=order)
-```
-
-Indexed assignment replaces destination pixel values and preserves the destination binding,
-even when the right operand has a distinct frame. It does not register or resample that operand.
-Shared dimension labels must match the indexed destination or xarray raises `IndexError`.
-Only dimension coordinates are checked; retained scalar coordinates on a selected slice
-are ignored, even when their values differ from the destination's.
+The [interface specification](https://github.com/matthiasschabel/xarrayrf/blob/main/docs/core_interface.md)
+describes explicit Grid coordinate replacement, declared geometry order after transposition,
+and indexed assignment's destination-frame and coordinate checks.
 
 ## Architecture
 

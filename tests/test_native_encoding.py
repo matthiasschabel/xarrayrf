@@ -202,6 +202,7 @@ def test_netcdf_round_trip(tmp_path: Path, framed: xr.DataArray) -> None:
 
 @pytest.mark.parametrize("anonymous", [True, False])
 def test_netcdf_round_trip_combines_with_original(anonymous: bool) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     from xarrayrf import nifti
 
     nib = pytest.importorskip("nibabel")

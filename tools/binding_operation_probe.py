@@ -16,6 +16,7 @@ from pathlib import Path
 
 import dask.array as da
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
 from numpy.testing import assert_allclose
 
@@ -42,7 +43,9 @@ def _correct(original: xr.DataArray, result: xr.DataArray) -> bool:
         source = original.rf.coordinate_transform.source.axes
         result_source = result.rf.coordinate_transform.source.axes
 
-        def inputs(array: xr.DataArray, points: xr.DataArray, names: tuple[str, ...]) -> np.ndarray:
+        def inputs(
+            array: xr.DataArray, points: xr.DataArray, names: tuple[str, ...]
+        ) -> npt.NDArray[np.generic]:
             grid = points.isel(axis=0, drop=True)
             components = [
                 xr.DataArray(array.coords[name].data, dims=array.coords[name].dims)

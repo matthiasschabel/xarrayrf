@@ -382,6 +382,7 @@ def test_cardinal_grid_resamples_ambiguous_orientation_with_explicit_spacing_and
     assert orientation_codes(target) == "RAS"
     coefficients = np.array([2.0, -3.0, 0.5])
     source = frame_array(7 + grid.points() @ coefficients, grid=grid)
+    pytest.importorskip("scipy", minversion="1.18")
     result = source.rf.resample_to(target)
     transform = grid.transform
     assert isinstance(transform, AffineTransform)
@@ -418,6 +419,7 @@ def test_explicit_cardinal_grid_still_requires_rank_three_anatomical_directions(
 def test_cardinal_self_orientation_resamples_by_exact_gather(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     from scipy import ndimage
 
     from xarrayrf.native import frame_array

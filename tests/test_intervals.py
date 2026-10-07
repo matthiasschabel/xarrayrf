@@ -183,6 +183,7 @@ def test_singleton_at_epoch_scale_rejects_a_one_second_mismatch() -> None:
             query.positions_at(later.points())
     assert not original.is_coincident(later)
     assert not array.rf.geometry.is_coincident(frame_array(np.array([0.0]), later).rf.geometry)
+    pytest.importorskip("scipy", minversion="1.18")
     assert np.isnan(resample(array.rf.geometry, later).values).all()
 
 
@@ -211,6 +212,7 @@ def test_singleton_round_trip_survives_large_translation(composite: bool, sample
     for query in (value, array.rf.geometry):
         assert_allclose(query.positions_at(value.points()), [[0]], rtol=0, atol=ATOL)
     assert value.is_coincident(value)
+    pytest.importorskip("scipy", minversion="1.18")
     assert_allclose(resample(array.rf.geometry, value), [7.0], rtol=0, atol=ATOL)
 
 
@@ -242,6 +244,7 @@ def test_singleton_non_affine_provider_uses_coordinate_roundoff() -> None:
         )
         assert np.isnan(query.positions_at([[sample + 1]], outside="nan")).all()
     assert value.is_coincident(value)
+    pytest.importorskip("scipy", minversion="1.18")
     assert_allclose(resample(array.rf.geometry, value), [42.0], rtol=0, atol=ATOL)
 
 
@@ -573,6 +576,7 @@ def test_empty_intervals_round_trip(origin: str, native: bool) -> None:
 def test_resample_slab_uses_source_support_and_retains_only_target_intervals(method: Any) -> None:
     source = frame_array(np.array([7.0]), grid([0], width=4))
     target = grid([-2, 0, 2, 3], width=0.5)
+    pytest.importorskip("scipy", minversion="1.18")
     for operand in (
         target,
         frame_array(np.zeros(4), target),
