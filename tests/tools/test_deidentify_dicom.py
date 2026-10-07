@@ -123,6 +123,7 @@ def test_dry_run_snapshots_files_without_creating_output(
     [
         "duplicate-name",
         "casefold-name",
+        "unicode-name",
         "duplicate-input",
         "symlink-input",
         "existing",
@@ -150,6 +151,9 @@ def test_preflight_rejects_batch_before_writing(
         second = series_factory("003-first", 1)
     elif case == "casefold-name":
         second = series_factory("003-FIRST", 1)
+    elif case == "unicode-name":
+        first = first.rename(first.with_name("001-\u00e9p"))
+        second = second.rename(second.with_name("002-e\u0301p"))
     elif case == "duplicate-input":
         second = first
     elif case == "symlink-input":
@@ -194,6 +198,8 @@ def test_preflight_rejects_batch_before_writing(
     assert manifest["counts"]["completed_series"] == 0
     assert manifest["counts"]["published_files"] == 0
     assert manifest["failures"][0]["category"] == "preflight"
+    if case in {"duplicate-name", "casefold-name", "unicode-name"}:
+        assert "duplicate output name" in manifest["failures"][0]["message"]
     assert "Summary" in result.stderr
 
 

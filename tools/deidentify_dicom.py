@@ -12,7 +12,8 @@ Usage: python tools/deidentify_dicom.py OUTPUT SERIES_DIR [SERIES_DIR ...] [--ex
 Without --execute the script validates the batch paths, reports the planned work and writes
 nothing. Every immediate regular file, including dotfiles, is selected; a non-DICOM file fails
 its series. Input directories must be nonempty, distinct and disjoint from the output root.
-Output names are the suffix after the first hyphen and must be distinct even ignoring case.
+Output names are the suffix after the first hyphen and must be distinct after Unicode
+normalization and case folding. Output paths retain their supplied spelling.
 Existing targets (including dangling links) are refused before any output is written.
 
 Each completed series is published by a same-parent directory rename. Expected input or I/O
@@ -38,6 +39,7 @@ import sys
 import tempfile
 import time
 import traceback
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -214,10 +216,13 @@ def _preflight(output: Path, runs: list[SeriesRun], failures: list[Failure]) -> 
                 raise PreflightError(
                     f"input and output directories overlap: {run.source}, {output}"
                 )
-            if target in targets or name.casefold() in names:
-                raise PreflightError(f"duplicate output name (case-insensitive): {run.target}")
+            name_key = unicodedata.normalize("NFC", name).casefold()
+            if target in targets or name_key in names:
+                raise PreflightError(
+                    f"duplicate output name (Unicode/case-insensitive): {run.target}"
+                )
             targets.add(target)
-            names.add(name.casefold())
+            names.add(name_key)
             if os.path.lexists(run.target):
                 raise PreflightError(f"output target already exists: {run.target}")
         except (OSError, PreflightError) as error:

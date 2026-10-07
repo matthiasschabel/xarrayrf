@@ -23,8 +23,9 @@
 ### Fixed
 
 - The DICOM example-data tool preflights the complete batch before writing, refusing duplicate
-  inputs/output names (including case variants), invalid paths, existing targets and source/output
-  overlap. Each series publishes only after all files are saved in sibling staging; expected
+  inputs/output names (including equivalent Unicode spellings and case variants), invalid
+  paths, existing targets and source/output overlap. Each series publishes only after all files
+  are saved in sibling staging; expected
   failures discard staging and allow independent later series to finish. Final stderr summaries
   and JSON stdout manifests report planned and published work even after failure or interruption.
   Dry runs create nothing; output requires a single writer.
