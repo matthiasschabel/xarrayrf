@@ -1,9 +1,9 @@
 # Upstream xarray bug-fix pull requests
 
 **Status:** Active
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-06
 **Scope:** The five independent bug-fix PRs split from the local patch series: #11613 and #11615
-merged, #11616, #11617 and #11621 open. No hook API is proposed here.
+and #11616 merged, #11617 and #11621 open. No hook API is proposed here.
 
 ## Context
 
@@ -15,8 +15,14 @@ see [xarray_patches.md](xarray_patches.md).
 Each PR is one commit from a `pr/<name>` branch on the fork, in its own worktree
 `~/GitHub/xarray-pr-<name>` cut from upstream `main`. PR bodies on GitHub are the record of the
 posted text. Reproducers are in `tools/upstream_reproducers/pr_<number>.py`, built on the
-`RasterIndex` from xarray's custom-index guide; run them with `tools/xrpr <base|number|main>`
-([docs/upstream.md](../../upstream.md)). `base` is `dfd25c72`.
+`RasterIndex` from xarray's custom-index guide; run them with `tools/xrpr PATH_TO_XARRAY`
+([docs/upstream.md](../../upstream.md)). Historical bug-fix base: `dfd25c72`.
+
+PR status and remote heads below were checked through the GitHub API on 2026-10-06.
+Local worktrees can lag those heads. The descriptions below explain the local fixes; consult
+the posted PR for its newest implementation and review threads. No containing released-xarray
+version has been verified;
+merged fixes must not be presented as available in stock 2026.7.0.
 
 xarray's AI policy (`doc/contribute/ai-policy.md`): the submitter reviews every line, and PR
 descriptions and replies are in the submitter's own words. Nothing is posted or pushed without
@@ -35,7 +41,7 @@ xr.DataArray([], dims="x").roll(x=1)  # ZeroDivisionError before the fix
 ```
 
 Merged 2026-09-28 as `b335cea0`. Local patch 8 retired in series 3; branch, worktree and fork
-branch removed. Reproducer runs on `tools/xrpr main`.
+branch removed. Reproducer runs against an upstream checkout containing the merge.
 
 ### #11615 Broadcast with an index spanning several dimensions (merged)
 
@@ -50,10 +56,12 @@ worktree pruned. Stock 2026.7.0 still lacks the fix; verify on a release before 
 stock contract passes. Preserving the custom index itself through `broadcast` is a separate
 change (local patch 4).
 
-### #11616 Drop a multi-coordinate index whole in Dataset reductions (open)
+### #11616 Drop a multi-coordinate index whole in Dataset reductions (merged)
 
-https://github.com/pydata/xarray/pull/11616, head `d0ac815b248a7da3d2b3f142dc858a39124df3ee` on
-`dfd25c72`, pushed without history rewrite, mergeable. Local patch 6.
+https://github.com/pydata/xarray/pull/11616 merged 2026-10-01 as
+`23c9dd138605ef46e59a7341a1c8e07821bf416f`, final head
+`2c14a3595f731370668be4cc7bfcec81a9ea2726`. Series 4 still contains local patch 6 because its
+immutable base predates this merge; retire it when a new series rebases onto the merged fix.
 
 `Dataset.reduce`, `Dataset.quantile` and `Dataset._integrate_one` filter indexes by coordinate
 name, so reducing away one dimension of a multi-coordinate index leaves it attached to the
@@ -102,8 +110,9 @@ Review notes:
 
 ### #11621 Raise when Dataset.update would replace an index with another type (open)
 
-https://github.com/pydata/xarray/pull/11621, head `ed905e351c2370213e8e428bbb11346b5d303092` on
-`dfd25c72`. Local patch 7; local patch 7b stays after merge.
+https://github.com/pydata/xarray/pull/11621, remote head
+`78074ee2f9d776ffc77df9fac635dedd7aeafcae`. Series 4 patch 7 reflects an earlier revision;
+refresh from the posted diff in the next series. Local patch 7b stays after merge.
 
 `Dataset.update`, `ds[name] = value` and `assign` align the incoming object and then give it
 merge priority, so when labels are equal its default `PandasIndex` silently replaces the
@@ -157,7 +166,7 @@ retains unaffected indexes) join this stream once split; see
 
 ## Next Steps
 
-1. Respond to maintainer review on #11616, #11617 and #11621, in the author's own words.
+1. Respond to maintainer review on #11617 and #11621, in the author's own words.
 2. On each merge, record it in [xarray_patches.md](xarray_patches.md) and retire the local patch
    in the next numbered series. Raise the stock floor only after a release is verified.
 3. Open PRs for the split fix halves of patches 4 and 9, one per fix, with a reproducer script.

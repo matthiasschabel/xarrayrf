@@ -1,218 +1,70 @@
 # Changelog
 
-Maintainer record of fixes found in review. User-facing changes are in `CHANGELOG.md`.
+## [2026-10-07] — Independent QA before committing repository cleanup
 
-## [2026-10-06] — Audit Stage 5 DICOM output reliability and documentation
+- **Problem**: Verify that the dependency-floor corrections, publishing smoke and documentation
+  consolidation preserve public behavior, optional-dependency coverage and unique audit evidence.
+- **Resolution**: No functional correction was needed. Clarified the metadata comment about
+  lazy SciPy loading and rewrapped the touched Grid rationale. Kept the separate curved-spacetime
+  assessment and its links outside the commit scope.
+- **Verification**: Fresh full suites pass: stock 1,796 plus 47 xfailed; patched 1,843;
+  minimum-core 1,559 plus 86 skipped/47 xfailed; minimum-resample 1,796 plus 47 xfailed;
+  current Python 3.13/xarray 2026.9.0 1,800 plus 43 xfailed. Original source reproduces all
+  three selected regressions and eight NumPy-floor mypy errors. Nine independent missing-extra
+  probes verify validation, exception causes and zero Dask pixel tasks; interpolation kernels
+  are unchanged after removing typing-only casts/aliases. Stock/floor/current mypy, Ruff,
+  dependency consistency, helper/quoted-path checks and scoped Markdown paths/anchors pass.
+  Distribution build/payload, strict metadata, sdist wheel rebuild and exact clean-wheel
+  publishing smoke pass without SciPy. The original publishing block fails on its removed
+  constructor keyword. Hosted CI and upload are separate from this local QA.
+- **Files affected**: Cleanup changes in core resampling, tests, maintainer commands, publishing
+  workflow and documentation; QA wording in `pyproject.toml` and Grid rationale.
+- **Reviewed by**: Codex GPT-6 applying QAEngineer (exact serving model ID not exposed).
+  Implementation review attribution remains Claude Opus 5.5 (`claude-opus-5-5`), as recorded
+  in the preceding entry; no additional external review was required for wording-only changes.
 
-- **Problem**: The DICOM example-data tool wrote directly into final series directories;
-  read/write failures exposed partial copies, destination conflicts could occur after earlier
-  publication, and failures skipped the batch summary. Source/output overlap could modify a
-  source directory. Public cell-gap and singleton-tolerance explanations were inconsistent.
-- **Resolution**: Complete preflight refuses collisions, existing targets and overlapping
-  source/output trees. Sibling staging publishes only completed series; expected failures
-  clean staging and allow independent later series to finish. Narrow explicit metadata
-  validation separates caller errors from programming failures. Final stderr/JSON reporting
-  distinguishes planned and published work. Clarified existing continuous interpolation across
-  cell gaps and float64 singleton roundoff. A4/A6 remain deferred with usage triggers.
-- **Verification**: All 28 new tests fail against the original script; final 28 pass. Opus 5.5
-  reviewed plan and implementation, accepted the implementation without blockers, and useful
-  follow-ups strengthened tests/docs. Independent root QA passes 12 CLI probes, source-tree
-  preservation, deterministic retry UID checks, the gap/edge example and active-exception
-  invocation. Geometry/Grid executable AST is unchanged. Full suites: stock 1,793 passed
-  plus 47 existing expected failures; patched 1,840 passed; three existing warnings each.
-  Ruff lint/format, mypy (82 files), whitespace and distribution payload checks pass.
-  Existing hosted minimum-dependency failures are documented separately, not claimed fixed.
-- **Files affected**: `tools/deidentify_dicom.py`, `tests/tools/test_deidentify_dicom.py`,
-  Geometry/Grid docstrings, `README.md`, `docs/core_interface.md`, `CHANGELOG.md`, the
-  [audit plan](codebase_audit_plan.md), [Stage 5 refinement record](stage5_implementation_review.md)
-  and this changelog. User documentation edits and the handoff are preserved.
-- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); Claude Opus 5.5
-  (`claude-opus-5-5`) via collaborative-refinement. Implemented by Codex `gpt-6-astra`.
+Maintainer QA and validation provenance. User-visible behavior belongs in `CHANGELOG.md`;
+completed audit decisions and per-stage evidence are in [the audit record](codebase_audit_review.md).
 
-## [2026-10-06] — Independent QA of stage 4 and scalar assignment clarification
+## [2026-10-06] — Repository documentation, dependency floors and publishing smoke
 
-- **Problem**: Stage 4 needed fresh independent QA. The assignment documentation did not
-  explicitly distinguish shared dimension-coordinate checks from retained scalar coordinates.
-- **Resolution**: QA confirms declared ordering, conservative coordinate replacement and
-  extension-transform contracts. Clarified that xarray ignores retained scalar coordinates
-  during slice assignment, even when their values differ, while destination binding remains
-  intact. Added a public contract test; no production source correction was needed.
-- **Verification**: Original-source snapshot `a721688` fails all 15 selected regressions.
-  Initial focused suite: 490 passed, 41 expected stock failures. Independent probes pass
-  72 three-dimensional declaration/storage/eager-Dask permutations, checking all query views,
-  native encode/decode and NGFF/NIfTI physical mappings; eight empty/scalar/eager-Dask
-  replacement cases preserve caller indexes, pixels, context and intervals. Additional probes
-  verify time/heterogeneous-unit NGFF semantics, reverse frame-coordinate selection and
-  unhashable custom/composite querying and binding. The new scalar-assignment contract test
-  and existing varying-dimension rejection test pass. Final full suites: stock xarray 1,765
-  passed and 47 expected failures; patched xarray 1,812 passed, each with three existing
-  dependency warnings. Ruff lint/format, mypy (81 source files), links and whitespace pass.
-- **Files affected**: `tests/test_native.py`, `README.md`, `docs/core_interface.md`,
-  `CHANGELOG.md`, this changelog, the [audit plan](codebase_audit_plan.md) and
-  [stage 4 review record](stage4_implementation_review.md). Production source is unchanged;
-  the unrelated user documentation edits remain intact and outside these commits.
-- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); prior implementation
-  reviews by Claude Opus 5.5 (`claude-opus-5-5`). Stage 4 implemented by Codex gpt-6-astra.
+- **Problem**: The publishing smoke used a removed affine constructor; minimum-core tests
+  loaded an absent optional dependency before validation; NumPy-floor stubs exposed eight
+  typing errors. Completed audit transcripts and status snapshots contradicted current code.
+- **Resolution**: Use the named-basis smoke declaration, load SciPy after resampling validation,
+  guard actual sampling/NetCDF tests, and retain core-only frame/adoption assertions. Narrow
+  numeric annotations without changing interpolation; consolidate completed audit history,
+  refresh source-of-truth links and current/deferred status, and make local source paths explicit.
+  `xrpr` defaults to the repository environment with an `XARRAY_PYTHON` override.
+- **Verification**: The missing-extra validation regression fails before the import-order fix
+  and passes after it. Exact floor environments reproduce the original 60 test failures/eight
+  mypy errors and now pass: core 1,559 passed/86 skipped/47 xfailed; resample 1,796 passed/47 xfailed.
+  Stock 1,796 passed/47 xfailed; patched 1,843 passed. Stock and floor mypy pass 82 files; Ruff
+  lint/format and whitespace pass. Current Python 3.13/xarray 2026.9.0 passes 1,800 tests with
+  43 xfailed and current mypy passes 82 files. Distribution build/payload and the exact
+  clean-wheel publishing smoke pass on Python 3.12 without SciPy. Local helper and Markdown
+  link/anchor checks pass. Opus accepted correctness convergence and documentation, with useful
+  test/wording follow-ups resolved. Hosted CI has not rerun these unpushed changes; TestPyPI
+  was not dispatched. Supported-floor warning totals remain in the test logs; none failed checks.
+- **Files affected**: `src/xarrayrf/_resample.py`; optional-dependency/README/grid tests;
+  `.github/workflows/publish.yml`; Makefile, `tools/xrpr`, binding probe; contributor/user docs
+  and the maintainer documentation tree.
+- **Reviewed by**: Codex GPT-6 applying QAEngineer; Claude Opus 5.5 (`claude-opus-5-5`) through
+  collaborative-refinement. Model selection is recorded by invocation; the CLI did not announce
+  its serving model separately.
 
-## [2026-10-06] — Audit stage 4 API contracts and completed QA
+## [2026-10-05–06] — Completed five-stage audit
 
-- **Problem**: Geometry queries disagreed on dimension order, Grid framing silently replaced
-  conflicting coordinates, and extension-transform value requirements were overstated.
-  Indexed assignment semantics needed an explicit destination-frame contract.
-- **Resolution**: Declared sampling order is canonical across queries; NGFF extracts storage
-  columns explicitly. Grid framing requires `replace_coordinates=True` for conflicts and gives
-  per-coordinate diagnostic reasons. Compatible metadata/pixels remain intact; opt-in adopts
-  Grid declarations, including malformed unit replacement. Documented stable extension
-  transforms, conditional hashing and assignment under xarray's label checks. No compatibility
-  aliases, deprecation machinery, generic freezer or new assignment API was added.
-- **Verification**: Opus accepted the plan and two implementation passes. gpt-6-astra implemented
-  the work and diagnostic/index-coverage followups. Independent QA reproduces 15 failures against
-  original source, passes the 486-test initial focused suite with 41 expected stock failures,
-  and checks eager/Dask query parity, native encode/decode, NGFF storage-axis mapping, replacement
-  pixel identity and metadata, custom values and distinct-frame assignment. Followup Grid tests:
-  199 passed on patched xarray. Final independent full suites on main: stock xarray 1,764 passed
-  and 47 expected failures; patched xarray 1,811 passed. Both retain three existing dependency
-  warnings. Ruff lint/format, mypy (81 source files), links and whitespace pass. Reviewed source
-  bytes and unrelated user edits were preserved through integration and commit.
-- **Files affected**: `src/xarrayrf/_geometry.py`, `src/xarrayrf/native.py`,
-  `src/xarrayrf/ngff/_export.py`, `src/xarrayrf/_grid.py`, `src/xarrayrf/_transform.py`;
-  their public tests in `tests/test_geometry.py`, `tests/test_grid.py`, `tests/test_native.py`,
-  `tests/test_frame_coordinates.py`, `tests/test_ngff_export.py`; `README.md`,
-  `docs/core_interface.md`, `CHANGELOG.md`, the [audit plan](codebase_audit_plan.md) and
-  [stage 4 refinement record](stage4_implementation_review.md).
-- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`); independent QA and orchestration by
-  Codex GPT-6 (exact serving model ID not exposed). Implemented by Codex gpt-6-astra
-  (initial CLI used high reasoning effort).
-
-## [2026-10-05] — Independent QA of audit stage 3
-
-- **Problem**: The committed NGFF semantics and linear NaN fixes needed a fresh QAEngineer
-  review independent of the implementation and earlier cross-review.
-- **Resolution**: QA confirms that contributing physical rows determine intrinsic metadata,
-  unsupported mixtures fail explicitly, and matching value/missing-weight kernels exclude
-  zero-weight NaN neighbours. Complex components remain independent; outside fill, cells,
-  source context, lazy output and cropped reads retain their contracts. No additional source
-  correction was needed. Updated the audit status and stage 3 verification record.
-- **Verification**: Original source `7724d41`, extracted into a separate snapshot without
-  changing the checkout, fails 34 of 39 selected new regressions. The current focused suite
-  passes 340 tests with 41 expected stock failures. An independent corner-weight oracle
-  passes 32 cases across float32/float64/complex64/complex128, eager/Dask, affine/general,
-  samples/cells, finite/missing slices and finite outside fill (seed 731). Two scalar complex
-  accessor probes preserve binding, source name/attributes and context. Three independent
-  NGFF cases preserve axis semantics and physical corners for a negative spatial permutation,
-  a canonical-unit shear and a four-dimensional time/spatial map. Invalid physical ordering
-  retains its upstream cause and corrective guidance. Full suites: stock xarray 1,739 passed
-  and 47 expected failures; patched xarray 1,786 passed. Both retain three existing dependency
-  warnings. Ruff lint/format, mypy (81 source files), documentation links and whitespace pass.
-- **Files affected**: Review covers `src/xarrayrf/ngff/_export.py`, `src/xarrayrf/_resample.py`,
-  their public tests, `docs/core_interface.md` and `CHANGELOG.md`. This QA commit updates only
-  this changelog, the [audit plan](codebase_audit_plan.md) and
-  [stage 3 review record](stage3_implementation_review.md).
-- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); prior implementation
-  reviews by Claude Opus 5.5 (`claude-opus-5-5`). Implemented by Codex gpt-6-astra.
-
-## [2026-10-05] — Audit stage 3 export semantics and linear missing weights
-
-- **Problem**: Non-diagonal NGFF export assigned every intrinsic axis a spatial type and
-  paired units with row indices rather than contributing quantities. Linear interpolation
-  let zero-weight NaN neighbours contaminate exact and partially integral samples.
-- **Resolution**: Intrinsic axes inherit contributing-row semantics; mixed rows require
-  explicitly spatial quantities with one canonical declared unit. Upstream layout errors
-  retain their cause and name caller actions for array and physical-frame ordering. Linear
-  resampling uses component-wise missing-weight masks and a shared measured `1e-9` allowance,
-  with one slice's buffers retained at a time. Public contracts and release notes are updated.
-- **Verification**: gpt-6-astra implemented the fixes; Claude Opus 5.5 accepted both
-  implementation review passes. Independent QA reproduces 33 failures against the original
-  source, checks four additional eager/Dask affine/general partial-integral queries and
-  physical-frame ordering, and verifies byte-for-byte integration. Full suites: stock xarray
-  1,739 passed and 47 expected failures; patched xarray 1,786 passed. Both retain three existing
-  dependency warnings. Ruff lint/format, mypy (81 source files) and whitespace pass. Original
-  user-owned documentation edits remain intact and outside the commits.
-- **Files affected**: `src/xarrayrf/ngff/_export.py`, `src/xarrayrf/_resample.py`,
-  `tests/test_ngff_export.py`, `tests/test_resample.py`, `docs/core_interface.md`,
-  `CHANGELOG.md`, the [audit plan](codebase_audit_plan.md) and
-  [stage 3 refinement record](stage3_implementation_review.md).
-- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`); independent QA and orchestration by
-  Codex GPT-6 (exact serving model ID not exposed). Implemented by Codex gpt-6-astra
-  (initial CLI used high reasoning effort).
-- **Deferred**: Cubic coefficient NaN spreading and existing SciPy infinity behavior remain
-  documented limitations; optional per-task slice routing awaits measured performance need.
-
-## [2026-10-05] — QA of audit stage 2
-
-- **Problem**: Scalar-target resampling and dense point-output naming needed independent
-  verification before committing the stage 2 implementation.
-- **Resolution**: QA confirms the fixes address rank-zero planning/interpolation and output
-  name collisions directly, preserve cropped lazy reads and metadata, and reject invalid
-  output names early. No additional source correction was needed.
-- **Verification**: An isolated original-source snapshot fails all 40 selected scalar-target
-  regressions. The current focused suite passes 297 tests with 41 expected stock failures.
-  Four independent probes pass for eager/Dask nonlinear registration, ramp values, outside
-  fill and target binding. Coordinate-only Dask fields also work with matching and differing
-  chunk layouts. Full suites: stock xarray 1,696 passed and 47 expected failures; patched
-  xarray 1,743 passed. Both retain three existing dependency warnings. Ruff lint/format,
-  mypy (81 source files), documentation links and whitespace pass.
-- **Files affected**: `src/xarrayrf/_resample.py`, `src/xarrayrf/_geometry.py`, their public
-  tests in `tests/test_resample.py`, `tests/test_geometry.py`, `tests/test_native.py`, and
-  the public docs/changelog and [stage 2 review record](stage2_implementation_review.md).
-- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); prior implementation
-  reviews by Claude Opus 5.5 (`claude-opus-5-5`). Implemented by Codex gpt-6-astra.
-
-## [2026-10-05] — Scalar resampling and labelled point-output collisions
-
-- **Problem**: Valid scalar targets failed in crop planning, general indexing and block
-  reshaping. Dense point output failed on an `axis` dimension or its private stacking name,
-  and an indexed `units` dimension silently replaced component-unit metadata.
-- **Resolution**: Scalar output retains shape `()` while the affine kernel uses one internal
-  sample, preserving cropped reads, domain masks and cubic edge holding. General mapping
-  supports zero varying target dimensions. `Geometry.points` accepts explicit `axis_dim`
-  and `units_coord`, validates carried-name collisions and stacks broadcast coordinates only
-  within the evaluation callback. Updated Geometry/accessor documentation. No source
-  projection or later-stage interpolation policy was introduced.
-- **Verification**: gpt-6-astra implemented the agreed plan; Opus 5.5 accepted the plan and
-  final implementation with all findings resolved. After byte-for-byte integration, independent
-  full suites pass: stock xarray 1,696 passed and 47 expected failures; patched xarray
-  1,743 passed. Both retain three existing dependency warnings. Ruff lint/format, mypy
-  (81 source files) and whitespace pass. Public regressions cover scalar binding/context,
-  eager/Dask and empty extra dimensions, volumetric interpolation, crop-limited reads,
-  output naming, scalar points and lazy nonseparable fields.
-- **Files affected**: `src/xarrayrf/_resample.py`, `src/xarrayrf/_geometry.py`;
-  `tests/test_resample.py`, `tests/test_geometry.py`, `tests/test_native.py`;
-  `docs/core_interface.md`, `CHANGELOG.md` and the
-  [audit plan](codebase_audit_plan.md). Complete decisions and reports are in the
-  [stage 2 refinement record](stage2_implementation_review.md).
-- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`); independent checks and orchestration
-  by Codex GPT-6 (exact serving model ID not exposed). Implemented by Codex gpt-6-astra
-  (initial CLI invocation used high reasoning effort).
-
-## [2026-10-05] — QA of audit stage 1 identity, singleton support and DICOM cardinality
-
-- **Problem**: Local NGFF reader identities depended on path spelling, allowing different
-  stores to share a frame. Singleton matching admitted a one-second mismatch at epoch-scale
-  coordinates. DICOM binding silently discarded surplus source slices and could accept an
-  incomplete original enhanced stack when all selected indices were present.
-- **Resolution**: Readers use resolved absolute local paths, including symlinks; metadata-only
-  identities remain caller-resolved. Singleton matching uses float64 rounding allowances,
-  with affine cancellation and built-in composite propagation accounted for. DICOM importers
-  preserve the original source count and validate pixel-stack shape before gathering slices.
-  Manual geometries with unknown count retain their existing index-based contract. QA found
-  no additional functional defect. The non-affine inverse allowance limitation is documented;
-  audit stages 2–5 remain pending.
-- **Verification**: The original source snapshot fails eight selected regression cases
-  (including the tightened DICOM shape-error contract), while six protective cases pass.
-  The current focused suite has 178 passing tests and five expected stock-xarray failures.
-  Four independent mixed-axis probes cover affine/composite singleton round trips, sign
-  changes, empty lookup, coincidence, resampling and outside fill. Full suites: stock xarray
-  1,638 passed and 47 expected failures; patched xarray 1,685 passed. Both retain three existing
-  dependency warnings. Ruff lint/format, mypy (81 source files) and whitespace checks pass.
-- **Files affected**: `src/xarrayrf/ngff/_reader.py`, `src/xarrayrf/ngff/__init__.py`,
-  `src/xarrayrf/_sampling.py`, `src/xarrayrf/_positions.py`, `src/xarrayrf/_coincidence.py`,
-  `src/xarrayrf/dicom/__init__.py`; `tests/test_ngff_open.py`, `tests/test_intervals.py`,
-  `tests/test_dicom_import.py`; `CHANGELOG.md`, `docs/core_interface.md`, and the
-  [audit plan](codebase_audit_plan.md), [plan refinement](codebase_audit_refinement.md) and
-  [implementation review](stage1_implementation_review.md) records.
-- **Reviewed by**: Codex GPT-6 (exact serving model ID not exposed); prior implementation
-  reviews by Claude Opus 5.5 (`claude-opus-5-5`).
+- **Problem**: Incorrect identity/support/cardinality, valid-input failures, export/interpolation
+  semantics, ambiguous public declarations and partial DICOM output were confirmed through
+  public interfaces.
+- **Resolution**: Five independently reviewable stages, including fresh Unicode-destination QA,
+  are summarized in [codebase_audit_review.md](codebase_audit_review.md). That record preserves
+  numerical calibration, commit provenance, original-source failures, independent probes and
+  the uncommitted Stage 5 correction evidence. Original committed transcripts remain in Git.
+- **Files affected**: Core geometry/sampling/native code, adapters, DICOM tool, public regression
+  tests and normative docs; see the audit stage/commit table for scope.
+- **Reviewed by**: Codex GPT-6 applying QAEngineer; Claude Opus 5.5 (`claude-opus-5-5`).
 
 ## [2026-10-04] — QA of named-basis affine construction
 

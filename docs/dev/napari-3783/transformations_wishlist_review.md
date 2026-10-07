@@ -1,7 +1,7 @@
 # napari #3783: transformations wish-list coverage
 
-**Status:** Active
-**Last updated:** 2026-09-29
+**Status:** Implemented
+**Last updated:** 2026-10-06
 **Scope:** How far xarrayrf covers the model side of napari/napari#3783 ("Transformations
 Architecture") and the requests raised in its thread, and which parts belong to the viewer.
 The work list that follows from it is the [viewer boundary plan](../architecture/viewer_boundary_plan.md).

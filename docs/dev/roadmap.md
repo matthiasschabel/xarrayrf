@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-06
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -12,6 +12,8 @@ xarrayrf provides reference frames for native xarray objects: frames and transfo
 The core, the `.rf` binding, freestanding `Grid` values with declared cell intervals,
 anatomical reformatting, complete and anonymous frames, persistence schema 1 and the NIfTI,
 DICOM, OME-NGFF and GeoTIFF adapters are implemented. No package has been published.
+The [five-stage codebase audit](codebase_audit_review.md) is complete; no further audit stage
+is queued. Deferred conveniences and release/viewer work below are separate.
 
 A release requires the invariant in [the design](../design.md): no native operation may return
 a valid-looking incorrect binding. On the patched xarray lane all 93 probed operations are
@@ -28,13 +30,19 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
    a valid-looking incorrect binding.
 3. Persistence schema 1 frozen ([persistence design](architecture/persistence_design.md)).
    Freezing is an explicit maintainer decision.
-4. The TestPyPI rehearsal completed ([release notes](architecture/release_and_repository_notes.md),
+4. All supported dependency-floor CI lanes pass. The latest hosted run on `a0b7e6f` failed
+   minimum-core and minimum-resample; local corrections and validation are recorded in the
+   [repository notes](architecture/release_and_repository_notes.md). A fresh hosted run remains.
+5. The TestPyPI rehearsal completed ([release notes](architecture/release_and_repository_notes.md),
    [releasing.md](../releasing.md)).
 
 ### Planned work, in rough priority order
 
-- **xarray upstream.** Respond to review on the open bug-fix PRs, retire each local patch as a
-  release ships it, and reduce the lifecycle hook patches to two `Index` methods before
+- **Validation and publishing rehearsal.** Confirm the corrected minimum-dependency jobs on
+  hosted CI after the next push; run the TestPyPI procedure only when publishing is authorized.
+- **xarray upstream.** Respond to review on the open bug-fix PRs, retire duplicate patches when
+  a new series baseline includes their merged fixes, verify released-xarray support when fixes
+  ship, and reduce the lifecycle hook patches to two `Index` methods before
   proposing them ([index hook design](xarray-upstream/index_hook_design.md)).
 - **Viewer support.** Selection overhead, backend neutrality, source footprints for `Grid`
   targets and checked on-plane inversion
@@ -47,14 +55,17 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   registration, then angular coordinate systems with a minimal CF reader (rectilinear GCM and
   celestial grids), then curvilinear coordinate fields, then provider adapters (pyproj, Astropy).
   Angular systems change core value objects and need their own reviewed plan.
-- **Small follow-ups.** `xarrayrf.native` imports the private
-  `xarray.namedarray._typing.duckarray` for its `DuckArray` alias; DICOM localizer
-  (mixed-orientation) splitting; a NIfTI writer on top of `nifti.to_header`.
+- **Small follow-ups.** DICOM localizer (mixed-orientation) splitting and a NIfTI writer on top
+  of `nifti.to_header`, when a consumer needs them. `DuckArray` already uses a local protocol.
 
 ### Parked, with what would bring each item back
 
 | Item | Returns when |
 |---|---|
+| A4: common metadata Grid/report convenience | A concrete metadata-only Grid or ordinary-reader report consumer ([audit rationale](codebase_audit_review.md#deferred-work)) |
+| A6: unlabeled nongeometry construction and mixed Grid/Geometry coincidence | Existing DataArray framing or Grid snapshot comparison blocks a real workflow ([audit rationale](codebase_audit_review.md#deferred-work)) |
+| Grid snapshot RangeIndex step parity | Rounded coordinate snapshots block a measured workflow |
+| Cubic missing-data policy; general-path many-context routing optimization | A concrete NaN case or profiling shows a material limitation |
 | Dataset `.rf` accessor and Dataset persistence | A consumer needs Dataset save and load |
 | Product spacetime frames (shared spatial template with a private clock) | A consumer combines template-registered time series across runs |
 | GeoTIFF export; NGFF `omero` metadata and labels; NGFF RFC-3 relaxed axes | A consumer needs them, or RFC-3 is adopted |
@@ -73,8 +84,9 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   contract) are the only overrides; there is no global switch and no value-based frame
   matching. Sources that
   name no space give anonymous frames, never a guessed identity (content hashes, path
-  fingerprints and a shared default world were rejected; [grid plan](architecture/grid_plan.md)
-  section 5). Unnamed NIfTI MNI152 and Talairach files share one frame; every other NIfTI frame
+  fingerprints and a shared default world were rejected; see the
+  [anonymous-frame rationale](architecture/grid_plan.md#5-complete-and-anonymous-frames-implemented)).
+  Unnamed NIfTI MNI152 and Talairach files share one frame; every other NIfTI frame
   (scanner, aligned, other-template, time-bearing) is anonymous ([adapters design](adapters/adapters_design.md)).
 - **Orientation letters** are accepted only by `xarrayrf.anatomy`, with one convention (the
   direction an index increases toward, as nibabel's `aff2axcodes`); coordinate systems keep

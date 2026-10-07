@@ -1,7 +1,7 @@
 # Reference frames as an xarray extension
 
 **Status:** Active
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-06
 **Scope:** Independent reference-frame semantics for xarray; DICOM and other scientific-image
 producers; geometry-aware downstream algorithms. The value objects, the `Grid` sampling value and
 the `Geometry` view, declared cell intervals, anatomical grid operations, complete and anonymous
@@ -166,19 +166,19 @@ instead gives B+s*(i+0.5). The latter assumes a uniformly sampled cell-centred g
 half-voxel correction is applied. Crop/stride retains original coordinate values; cell bounds,
 thickness and support require separate geometry when needed.
 
-Refinement (2026-09-23): the sample's place in its cell is declared, not inferred.
+The sample's place in its cell is declared, not inferred.
 `ArrayCoordinates.sample_offset` records it per axis (`None` for point samples, a fraction in
 `[0, 1]` measured toward higher coordinate values, `0.5` for centred voxels). It never moves a sample, since coordinates already locate
-samples; it places the cells, which tile the axis between neighbouring samples. Resampling uses
+samples; it defines default cells from neighbouring sample spacing. Resampling uses
 it only when asked for `domain="cells"`; the default domain stays the samples, as in xarray.
-Physical slice thickness and gaps between cells remain separate and are not described; when a
-consumer needs them, CF bounds variables on a Dataset are the intended representation. A cell is
-the region an element stands for; the dense default, derived from spacing, is a declared tiling
-convention and not acquisition support. Multislice 2D MRI routinely has thickness below the
-spacing (gaps) or above it (overlap), so such stacks need declared cells, and a cell width from
-spacing never stands in for slice thickness. For the same reason a single slice gets no cell
-width from a step or spacing; it waits for declared cells. See
-`docs/dev/architecture/geometry_and_resampling_design.md`.
+Declared `Grid.intervals` give each sample's bounds in its source coordinate values, describing
+physical thickness, gaps and overlap; the binding carries them through supported operations.
+DICOM import declares intervals from `SliceThickness`. The spacing-derived default is a declared
+tiling convention, not acquisition support, and a single slice needs declared bounds to have
+cell width. The cells domain reaches the outer bounds and interpolates interior gaps; it is
+not a union of isolated supports. See the normative
+[sampling contract](core_interface.md#geometry-queries) and the
+[geometry rationale](dev/architecture/geometry_and_resampling_design.md).
 
 **What a binding is, and what it is not.** The binding is exactly one thing: a mapping from an
 array's own coordinate values to points in one declared reference frame, `world = F(c)`. Crop,

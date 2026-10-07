@@ -1,7 +1,7 @@
 # Freestanding grids
 
 **Status:** Implemented
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-06
 **Scope:** A NumPy-only `Grid` value describing an array's sampling without pixels; the doors that
 bind, snapshot, resample onto and persist it; declared intervals carried by grids and bindings;
 anatomical grid operations; and complete versus anonymous frames.
@@ -9,11 +9,12 @@ anatomical grid operations; and complete versus anonymous frames.
 ## Context
 
 Applications use sampling geometry without pixels: regions of interest drawn on an image, a
-viewer's target plane, a registration's fixed domain, a file format's grid block. Today xarrayrf
-has a freestanding `ReferenceFrame` (a world identity), but sampling exists only as a binding
-on a `DataArray` (`Geometry` re-reads the array; `Lattice` is regular-only and not encodable).
-An application therefore keeps its own grid type beside xarrayrf, which duplicates the model and
-invites drift. The viewer plan's "pixel-free target domain" (item 3) is the same need.
+viewer's target plane, a registration's fixed domain, a file format's grid block. Before `Grid`,
+sampling existed only as a binding on a `DataArray`; `Geometry` re-reads the array and `Lattice`
+is regular-only. Applications needed their own sampling types, duplicating the model. `Grid`
+provides the immutable sampling snapshot alongside the live Geometry view. The
+[interface specification](../../core_interface.md) defines its current contract. The viewer
+plan's "pixel-free target domain" (item 3) is the same need.
 
 Constraints: the core stays NumPy-only; identity is explicit (no value-based frame matching);
 the binding stays the only authority on a framed array; no valid-looking incorrect geometry.
@@ -34,17 +35,20 @@ the binding stays the only authority on a framed array; no valid-looking incorre
 - `dims` (in coordinate order) and `sizes` are derived. A grid describes the geometry
   dimensions only: no pixels, no pixel dtype, no non-geometry dimensions (time, channel, echo).
 - `==` is exact (frame identity, transform, coordinate values and dtype kind, intervals);
-  hashable. Integer and float declarations differ.
+  hashable when the retained transform has a stable, equality-consistent hash. Unhashable
+  extension transforms remain usable. Integer and float declarations differ.
 
-`Geometry` stays the live, lazy view of an array; `Grid` is the immutable snapshot. They share
-one private sampling module, so neither can disagree with the other. `Geometry.grid()` returns
-the snapshot of a bindable geometry.
+`Geometry` stays the live, lazy view of an array; `Grid` freezes its coordinates and intervals
+and retains its transform by reference. Extensions must keep that transform stable. Both share
+sampling validation and lookup. Snapshots materialize coordinate values and can lose exact
+RangeIndex step metadata; the [geometry design](geometry_and_resampling_design.md) records that
+parity limitation. `Geometry.grid()` returns the snapshot of a bindable geometry.
 
 Queries, the same names and semantics on both:
 
 - `frame`, `dims`, `sizes`, `point_at(**positions)`, `points()`, `lattice()` (when uniform),
   `is_coincident(other, tolerance=)`.
-- **`points_at(positions, *, domain="samples", outside="raise")`: new.** Batched fractional
+- **`points_at(positions, *, domain="samples", outside="raise")`.** Batched fractional
   positions to frame points, the forward partner of `positions_at`. Positions map to coordinate
   values linearly on uniform axes and piecewise linearly on nonuniform ones; beyond the outer
   samples they extend by the outer step, the rule default cells already use. `domain` bounds
@@ -62,8 +66,8 @@ points equal the corresponding selection of the original's points.
 | From | Call | Notes |
 |---|---|---|
 | framed `DataArray` | `da.rf.grid` | Snapshot of the binding; property, like `rf.geometry` |
-| existing `DataArray` | `da.rf.frame(grid)` | Overload: the grid's dims must be dims of the array with equal sizes; assigns the grid's coordinate values, frames, and leaves other dims and coords untouched. The `(transform, dims=)` form stays. |
-| raw pixels (NumPy, Dask, duck array) | `xarrayrf.native.frame_array(data, grid, *, dims=None, coords=None, attrs=None)` | Replaces `frame_dataarray` (removed). `dims` names every array dimension (default: the grid's); `coords` supplies non-geometry coordinates (a NIfTI time axis, channels). Never evaluates `data`. Adapters use it. |
+| existing `DataArray` | `da.rf.frame(grid)` | Overload: the grid's dims must be dims of the array with equal sizes; supplies missing coordinates and refuses conflicts unless `replace_coordinates=True`; leaves pixels and unrelated coordinates intact. The `(transform, dims=)` form stays. |
+| raw pixels (NumPy, Dask, duck array) | `xarrayrf.native.frame_array(data, grid, *, dims=None, coords=None, attrs=None)` | `dims` names every array dimension (default: the grid's); `coords` supplies non-geometry coordinates (a NIfTI time axis, channels). Never evaluates `data`. Adapters use it. |
 | framed source | `da.rf.resample_to(grid)`, core `resample(source, grid)` | `Grid` joins `DataArray | Geometry` as a target; non-geometry dims are carried as today |
 | xarray coordinates | `xarrayrf.native.grid_coordinates(grid) -> xr.Coordinates` | Carries the binding index, so `assign_coords` binds natively |
 
@@ -78,7 +82,7 @@ scalars, so no second index is needed. `domain="cells"` uses declared intervals 
 the sample-offset default otherwise; an axis declaring both must agree. DICOM import declares
 intervals from `SliceThickness`, which fixes the single-slice case.
 
-Approved lifecycle (implemented in stage 3):
+Interval lifecycle:
 
 | Path | Intervals |
 |---|---|
@@ -166,7 +170,7 @@ explicit act, made at the point where it matters.
 - **Construction.** `ReferenceFrame.anonymous(coordinate_system, *, definition=None, ...)` mints a
   distinct identity in its own namespace, and `frame.is_anonymous` reports it. Adapters use it
   wherever their source declares no identity; `ReferenceFrame.local` stays the constructor for
-  frames created on purpose. Each adapter call site is classified in stage 5.
+  frames created on purpose. The [adapter design](../adapters/adapters_design.md) records each source identity policy.
 - **Alone, an anonymous frame is fully usable.** Viewing, geometry queries, `rf.grid`, resampling
   onto its own grids and every array derived from it work, because nothing is being related to
   anything else. Derived arrays share its identity through the binding.
@@ -176,7 +180,7 @@ explicit act, made at the point where it matters.
   two remedies have one contract, implemented once: adopt the other frame's identity, and when
   the coordinate systems differ apply the exact derivable change between them
   (`coordinate_system_change`, e.g. RAS to LPS), as NIfTI's `frame=` already does. `assume_frame`
-  is extended accordingly; it refuses only an underivable change (different units or axis
+  refuses only an underivable change (different units or axis
   meanings) or a non-affine mapping, as `frame=` does.
 - **Asserting a world is not matching a grid.** Adopting an identity never bypasses the binding's
   grid checks. Arrays sharing a frame align and combine in arithmetic only when their bindings
@@ -198,7 +202,7 @@ explicit act, made at the point where it matters.
 
 ### 6. Persistence
 
-Schema 1 (not frozen) gains a `grid` kind: transform, an explicit `dims` order, coordinates
+Schema 1 (not frozen) includes a `grid` kind: transform, an explicit `dims` order, coordinates
 (dim, values) and intervals,
 plus intervals in the native binding encoding. Decoding rebuilds through constructors.
 
@@ -226,36 +230,6 @@ plus intervals in the native binding encoding. Decoding rebuilds through constru
 
 ## Next Steps
 
-All stages are implemented; each was reviewed and given a QA pass
-([maintainer changelog](../changelog.md)). Each stage updates `core_interface.md` (normative) and its design note in the same change, and is
-reviewed separately.
-
-1. **Done.** `Grid` value, shared sampling module with `Geometry`, `Geometry.grid()`,
-   `points_at` and extrapolating `positions_at`, `isel`/`transpose`, `is_coincident`, `grid`
-   encoding. Accept: Grid and Geometry answers agree; `isel` commutes with points; nonuniform
-   forward/inverse round trip including extrapolation; encode/decode round trip; refusals.
-2. **Done.** Doors: `rf.grid`, `rf.frame(grid)`, `frame_array` (adapters migrated), `grid_coordinates`,
-   `resample`/`resample_to` onto a grid. Accept: every door yields the same points; a lazy 4-D
-   NIfTI and a multichannel array keep their non-geometry dims and coords; pixels unread.
-   Stage 1 amendment: integer snapshots and materialized coordinates stay int64, including
-   exact JSON round trips; floating coordinates stay float64. All adapter outputs remain unchanged.
-3. **Done.** Declared intervals: `Grid`, `BindingIndex`, shared cells domain, all doors,
-   native/grid persistence and DICOM `SliceThickness`. Public lifecycle tests cover selection,
-   scalars, roll, rename, `swap_dims`, support conflicts, joins, missing-label refusals, concat
-   refusal and target support. Existing xarray hook limitations remain on the stock lane;
-   mixed-index subsets and `swap_dims` are exercised against the local patched lane.
-4. **Done.** Anatomy functions, patient-letter/token notation and DICOM display planes. Public
-   tests cover LPS/RAS and DICOM grids, oblique volumes, all 48 signed permutations (including
-   singleton reflection), exact projected coverage, thick slices in their own and perpendicular
-   planes, nonuniform spacing, assignment collisions/ambiguity, and exact same-grid resampling.
-5. **Done.** Anonymous frames: `ReferenceFrame.anonymous` and `is_anonymous`; adapter call sites
-   classified (anonymous versus deliberate local); `frame=` accepting a framed array where it
-   does not yet; `assume_frame` applying derivable coordinate-system changes through the same
-   implementation as `frame=`; refusal messages naming the applicable remedy; `repr` marking;
-   persistence round trip. Accept: two anonymous opens of equal grids refuse, then combine after
-   either `frame=t1` or `assume_frame(t1)`; an anonymous RAS array adopts an LPS frame through
-   both remedies with identical points; shared-identity arrays with different grids still refuse
-   arithmetic and resample onto each other; an underivable change refuses with its reason; a
-   reloaded anonymous array still combines with its partners.
-6. **Done.** Design, viewer plan, roadmap, README architecture overview and examples, and a
-   tour section on reformatting; README examples are executed by `tests/test_readme.py`.
+The Grid implementation and its public regression tests are complete. Current follow-ups live
+in [the roadmap](../roadmap.md); numerical queries and doors follow the normative interface.
+The [maintainer changelog](../changelog.md) retains the unique QA corrections from Grid work.

@@ -8,14 +8,16 @@ reasons. The stable documents are [the design](../design.md),
 - [roadmap.md](roadmap.md): release criteria, planned and parked work, and the decisions most
   likely to be revisited. Start here.
 - [changelog.md](changelog.md): maintainer record of fixes found in review.
+- [codebase_audit_review.md](codebase_audit_review.md): completed audit decisions, validation
+  provenance and the deferred A4/A6 convenience questions. No further audit stage is queued.
 
 ## architecture/
 
 - [core_model_design.md](architecture/core_model_design.md): frames and coordinate systems,
   identity and equivalence, roles, orientation, the `Transform` protocol, units, affine classes.
 - [geometry_and_resampling_design.md](architecture/geometry_and_resampling_design.md): the
-  `Geometry` view, sample offsets and cells, declared intervals (open), resampling.
-- [grid_plan.md](architecture/grid_plan.md): the freestanding `Grid` sampling value, its doors,
+  `Geometry` view, sample offsets and cells, declared intervals, resampling.
+- [grid_plan.md](architecture/grid_plan.md): implemented freestanding `Grid` rationale, its doors,
   declared intervals, anatomy on grids, and complete versus anonymous frames.
 - [nonlinear_geometry_plan.md](architecture/nonlinear_geometry_plan.md): draft staging for
   nonlinear geometry and the plan for displacement-field transforms.
@@ -42,7 +44,7 @@ reasons. The stable documents are [the design](../design.md),
 ## xarray-upstream/
 
 - [xarray_patches.md](xarray-upstream/xarray_patches.md): the patch manifest (base, series,
-  validation, pin, upstream status).
+  validation and pin).
 - [upstream_prs.md](xarray-upstream/upstream_prs.md): the independent bug-fix pull requests and
   what remains open on each.
 - [index_hook_design.md](xarray-upstream/index_hook_design.md): reducing the lifecycle hook

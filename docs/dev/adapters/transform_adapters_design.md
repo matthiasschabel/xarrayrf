@@ -1,7 +1,7 @@
 # Transform adapters
 
-**Status:** Active
-**Last updated:** 2026-09-29
+**Status:** Deferred
+**Last updated:** 2026-10-06
 **Scope:** A proposed family of optional adapters that turn registration results from external
 engines (CASTalign, ITK/SimpleITK, ANTs, elastix, and later voxel-space fields such as
 VoxelMorph's) into xarrayrf transforms. Nothing is implemented. CASTalign specifics come from

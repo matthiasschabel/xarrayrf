@@ -1,7 +1,7 @@
 # Release, packaging and repository notes
 
 **Status:** Active
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-06
 **Scope:** Package metadata, CI lanes, dependency floors, the manual TestPyPI workflow and the
 hosted steps still outstanding. The maintainer procedure is [releasing.md](../../releasing.md).
 
@@ -50,10 +50,19 @@ was raised rather than loosening tolerances.
 
 Non-locked lanes resolve the full editable extra in a clean environment (downgrading only NumPy
 had left SciPy and Zarr versions requiring NumPy 2) and every lane runs `uv pip check`.
-minimum-core asserts SciPy is absent; only resampling tests and three tests using the SciPy
-NetCDF backend skip there. All four jobs have passed on hosted CI. The Makefile also has
-`test-upstream`, `test-patched` and `test-pinned` targets for local xarray builds; they are not
-hosted lanes.
+minimum-core asserts SciPy is absent. Actual sampling and SciPy-NetCDF tests skip there;
+frame/adoption refusals validate before loading SciPy and remain covered by core-only tests.
+Local worktree targets have overrideable source paths; `make test-pinned` uses an isolated
+pinned environment. These are local commands, not hosted lanes.
+
+**Validation checked 2026-10-06:** [hosted run 37538303719](https://github.com/matthiasschabel/xarrayrf/actions/runs/37538303719)
+on `a0b7e6f` passes locked/current but fails minimum-core (60 missing-SciPy test failures) and
+minimum-resample (eight NumPy-floor typing errors in three files). The corrections pass locally
+in the workflow's exact floor environments: core 1,559 passed, 86 skipped and 47 xfailed;
+resample 1,796 passed and 47 xfailed, with floor mypy passing all 82 files. Stock and patched
+full suites pass 1,796 and 1,843 tests respectively. The current Python 3.13/xarray 2026.9.0
+lane passes 1,800 tests and 43 xfailed, plus mypy. A fresh hosted run after the next push is
+still required; local success does not rewrite the historical hosted result.
 
 ### Publishing workflow (`.github/workflows/publish.yml`)
 
@@ -65,8 +74,12 @@ Publishing avoids storing an API token. The manual installation check in releasi
 core dependencies from PyPI and the exact xarrayrf version from TestPyPI with `--no-deps`, then
 runs `pip check`, so a mixed index cannot select the wrong source.
 
-Verified hosted state: the `testpypi` environment exists with a deployment branch policy allowing
-only `main`. Pending publishers for `xarrayrf` were reported added on PyPI and TestPyPI; their
+The wheel smoke uses the current named-basis affine constructor; its older `matrix=` call
+failed after that constructor was replaced. Local wheel validation is recorded in the
+[maintainer changelog](../changelog.md). Procedures remain in releasing.md.
+
+Hosted setup observed 2026-09-28: the `testpypi` environment exists with a deployment branch
+policy allowing only `main`. Pending publishers for `xarrayrf` were reported added on PyPI and TestPyPI; their
 field values have not been independently checked.
 
 ## Alternatives Considered
@@ -87,6 +100,7 @@ field values have not been independently checked.
 
 ## Next Steps
 
-1. Run the TestPyPI rehearsal one hosted step at a time, following
+1. Confirm the repaired dependency-floor jobs on a new hosted run.
+2. Run the TestPyPI rehearsal one hosted step at a time, following
    [releasing.md](../../releasing.md).
    Publishing requires the maintainer's explicit go-ahead.

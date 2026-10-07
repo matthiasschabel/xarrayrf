@@ -1,7 +1,7 @@
 # Viewer boundary: what xarrayrf owes napari
 
 **Status:** Active
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-06
 **Scope:** Core (`Geometry`, `resample`, units, endpoints) and the NGFF reader, as needed by a
 napari integration. napari's own work is listed only to fix the boundary.
 
@@ -27,12 +27,14 @@ geometry questions a viewer can ask cheaply. Work, highest priority first:
 2. **Show the core is backend-neutral.** The binding owns coordinates, not pixels, and the core
    imports no Dask. Unproven: the binding lifecycle over a lazily indexed non-Dask array (xarray's
    zarr engine with `chunks=None`) and over one array-API duck array. Add those test lanes.
-   `resample` on a non-Dask lazy source currently reads the whole source.
+   Affine lattice resampling crops before pixel materialization; the general transform path
+   still reads the whole source. Verify non-Dask backend reads independently of Dask chunk tests.
 3. **Pixel-free target domain and source footprint.** The target domain is done: `Grid` is
    constructible without an array, `rf.resample_to(grid)` resamples onto it, and
    `anatomy.cardinal_grid` builds axis-aligned planes and volumes
-   ([grid plan](grid_plan.md)). Still open: a query for the source index box a target needs, so
-   `resample` reads only that box. This enables oblique and out-of-core reslicing: napari picks
+   ([grid rationale](grid_plan.md)). Still open: a public query for the source index box a target
+   needs, exposing the affine footprint calculation already used internally. This enables oblique
+   and out-of-core reslicing: napari picks
    the plane and fetches chunks; xarrayrf says which and can evaluate values on the CPU.
 4. **Checked inversion on an embedded plane.** `positions_at` refuses to invert a plane embedded
    in a volume. A pick ray intersected with that plane needs the on-plane point mapped back to

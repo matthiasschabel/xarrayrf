@@ -1,7 +1,7 @@
 # Native `.rf` binding design
 
 **Status:** Implemented
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-06
 **Scope:** The runtime binding behind the `DataArray.rf` accessor (`src/xarrayrf/_binding.py`,
 `src/xarrayrf/native.py`): its carrier, ownership rules, Dataset rule, native-operation outcomes,
 operand checks and the local xarray hooks it relies on. Per-operation results are in the
@@ -97,17 +97,10 @@ the fix, a validated patch, or a recorded contract decision. Each xarray change 
 generic bug fix or an opt-in hook with a no-op default, so xarray behaviour is unchanged for
 indexes that do not implement it; no domain rule lives in xarray.
 
-| Patch | Change | Upstream |
-|---|---|---|
-| 1 | Broadcast tracks every dimension of a multidimensional index | merged (#11615) |
-| 2 | `isel`/`sel(drop=True)` refuses dropping only some coordinates of one index | PR #11617 |
-| 3, 4 | Opt-in `join_overlapping`, `check_unindexed_coord_conflicts`, `check_override`; joined index propagated to every aligned object; custom indexes kept through broadcast | local; 4 must be split before submission |
-| 5 | `swap_dims` decides per index and asks an opt-in `Index.swap_dims` | local |
-| 6 | Dataset reductions drop a multi-coordinate index whole | PR #11616 |
-| 7, 7b | Dataset `update` no longer silently replaces the Dataset's index: 7 raises on an index-type mismatch; 7b asks the index (`join_overlapping`) and keeps it for equal labels | PR #11621; 7b local |
-| 8 | Zero-length indexed `roll` no longer divides by zero | merged (#11613) |
-| 9 | Coarsen keeps unaffected indexes; opt-in `Index.check_coarsen` | local |
-| 10 | Opt-in `Index.check_stack`, `Index.check_pad` | local; split before submission |
+The [patch manifest](../xarray-upstream/xarray_patches.md) owns the current series and base;
+[upstream PR notes](../xarray-upstream/upstream_prs.md) own merge/review status. The
+[operation inventory](binding_operation_inventory.md) records dated measurements, not an
+unbounded certification of every native operation.
 
 ### Coordinate ownership: why a joint index
 

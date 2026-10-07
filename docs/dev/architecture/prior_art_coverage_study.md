@@ -1,7 +1,7 @@
 # Prior-art and coverage study
 
-**Status:** Active
-**Last updated:** 2026-09-28
+**Status:** Implemented
+**Last updated:** 2026-10-06
 **Scope:** How existing libraries model frames, coordinate systems and transforms; which of their
 use cases xarrayrf represents; what to reuse and what to avoid. Companion to the
 [core model](core_model_design.md).
@@ -21,6 +21,7 @@ source. Behaviours marked *verified* were run; the rest come from reading the ci
 | NGFF | spatialdata 0.8.0, ngff-zarr 0.47.0, ome-zarr-models 1.8.1, NGFF 0.6 | BSD-3, MIT, MIT |
 
 Probes ran against NumPy 2.5 and xarray 2026.7.0. Probe scripts were not kept.
+These are dated observations from the 2026-09-28 study, not claims about subsequent releases.
 
 ## Current Decision
 

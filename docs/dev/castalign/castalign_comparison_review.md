@@ -1,7 +1,7 @@
 # CASTalign comparison
 
-**Status:** Active
-**Last updated:** 2026-09-29
+**Status:** Implemented
+**Last updated:** 2026-10-06
 **Scope:** How CASTalign models spaces, transforms and resampling; where it overlaps xarrayrf,
 where it differs, and which pieces could be combined. Informs the
 [prior-art study](../architecture/prior_art_coverage_study.md) and any registration or

@@ -1,10 +1,10 @@
 # Cross-domain acceptance cases
 
-**Status:** Active
-**Last updated:** 2026-09-28
+**Status:** Implemented
+**Last updated:** 2026-10-06
 **Scope:** The DICOM, OME-NGFF, astronomy and GIS cases the model was tested against before its
 API and persistence schema became commitments, and what they established. DICOM, NIfTI, NGFF
-and GeoTIFF adapters have shipped; astronomy has not. [The core interface](../../core_interface.md)
+and GeoTIFF adapters are implemented; astronomy is not. No package release has shipped. [The core interface](../../core_interface.md)
 is normative; this note records the cases and their worked numbers.
 
 ## Context

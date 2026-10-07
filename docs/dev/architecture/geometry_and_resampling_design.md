@@ -1,7 +1,7 @@
 # Geometry, cells and resampling
 
-**Status:** Active
-**Last updated:** 2026-09-30
+**Status:** Implemented
+**Last updated:** 2026-10-06
 **Scope:** `Grid` (the immutable sampling value), `Geometry` (the read-through view),
 `ArrayCoordinates.sample_offset` and the
 `"samples" | "cells"` domain, `Geometry.is_coincident`, core `resample` including the same-grid
