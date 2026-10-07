@@ -6,6 +6,7 @@
 tests, no physics in the core), measured contraction in 1+1-D and 3+1-D, and the deferred design
 for relativistic viewing and angular coordinates. Executable companions:
 `tests/test_relativity.py` and `examples/relativity.ipynb`.
+The curved-spacetime follow-up is [the curved spacetime review](curved_spacetime_review.md).
 
 ## Context
 

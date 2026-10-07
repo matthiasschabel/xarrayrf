@@ -31,6 +31,9 @@ reasons. The stable documents are [the design](../design.md),
   interactive viewer such as napari, and where the viewer's responsibility begins.
 - [relativity_notes.md](architecture/relativity_notes.md): spacetime arrays as a test of the
   design's generality, and the deferred relativistic-viewing stages.
+- [curved_spacetime_review.md](architecture/curved_spacetime_review.md): whether the model
+  carries curved, pseudo-Riemannian spacetime; the layers that fit, the five gaps, and the
+  smallest changes that would close them.
 - [release_and_repository_notes.md](architecture/release_and_repository_notes.md): package
   metadata, CI lanes, dependency floors and the TestPyPI rehearsal.
 
