@@ -35,7 +35,8 @@ jobs:
           transform = xrf.AffineTransform(
               source=xrf.ArrayCoordinates(("row", "column"), ("1", "1")),
               target=space,
-              matrix=((0.0, 0.5), (0.5, 0.0)),
+              target_axes=("x", "y"),
+              basis_vectors={"row": (0.0, 0.5), "column": (0.5, 0.0)},
               translation=(10.0, 20.0),
           )
           image = xr.DataArray(
