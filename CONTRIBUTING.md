@@ -25,7 +25,8 @@
 ## Code conventions
 
 - Public names and terms follow [docs/core_interface.md](docs/core_interface.md), which is
-  normative.
+  normative. Architecture notes explain the decisions; [the roadmap](docs/dev/roadmap.md)
+  owns the current work queue.
 - Python 3.12+, src layout, NumPy typing, immutable value objects, composition over inheritance,
   standard-library exceptions, explicit validation at public boundaries and Google-style
   docstrings. Line length is 100.
@@ -75,8 +76,10 @@ and proposed upstream. The current series, its base commit and the state of each
 request are recorded in [the patch manifest](docs/dev/xarray-upstream/xarray_patches.md); the
 workflow is described in [docs/upstream.md](docs/upstream.md).
 
-Maintainers developing the patches use `make test-upstream` and `make test-patched`, which expect
-upstream and patched worktrees of one local xarray repository; see the Makefile for the paths.
+Maintainers developing patches can select their worktrees with
+`make test-upstream XARRAY_UPSTREAM=/path/to/xarray` and
+`make test-patched XARRAY_PATCHED=/path/to/patched-xarray`. The shared reproducible command
+is `make test-pinned`; local worktree targets use the existing stock test environment.
 
 ## Development notes
 
@@ -84,6 +87,10 @@ Maintainer notes live under [docs/dev/](docs/dev/README.md). Each opens with a S
 updated and Scope header, followed by Context, Current Decision, Alternatives Considered,
 Deferred Work and Next Steps. Stable decisions move into [docs/design.md](docs/design.md) or
 [docs/core_interface.md](docs/core_interface.md). README claims must match implemented behavior.
+Shared documentation and its linked files belong in the same change; a file present only in
+a maintainer's working tree must not be required by committed navigation. Local session state
+stays outside the shared documentation index. Completed reviews retain decisions and evidence,
+with remaining work moved to the roadmap rather than duplicated in execution transcripts.
 
 ## Further reading
 

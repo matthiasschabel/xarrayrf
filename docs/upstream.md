@@ -33,45 +33,36 @@ Frame identity, mapping representations and DICOM policy remain outside xarray c
 
 ## Testing an upstream PR branch locally
 
-Each candidate upstream PR lives in its own worktree of `~/GitHub/xarray-upstream`, on a
-branch `pr/<name>` cut from upstream `main`. A detached `~/GitHub/xarray-base` worktree at
-`dfd25c7252e71a47e789aa24b8a06dd911a56461` gives the "before" tree for the three open
-PRs. A reproducer can run on both sides without touching the `main` checkout that
-`make test-upstream` uses.
-
-`tools/xrpr` runs the upstream environment's Python with a chosen tree first on `PYTHONPATH`, so
-that tree's source shadows the installed xarray:
+Use a separate checkout/worktree for each candidate change. Choose the interpreter and source
+checkout explicitly; local worktrees may lag posted PR heads. Current remote status belongs in
+[upstream PR notes](dev/xarray-upstream/upstream_prs.md), while immutable series membership
+belongs in [the patch manifest](dev/xarray-upstream/xarray_patches.md).
 
 ```sh
-tools/xrpr base tools/upstream_reproducers/pr_11621.py    # before: run, then stay in the console
-tools/xrpr 11621 tools/upstream_reproducers/pr_11621.py   # after: same script on the PR branch
-tools/xrpr 11616                                                 # bare console, np and xr preloaded
-tools/xrpr main tools/upstream_reproducers/pr_11615.py   # merged fix; no PR worktree
-tools/xrpr base -c "import xarray; print(xarray.__file__)"       # confirm which tree answers
+tools/xrpr /path/to/baseline-xarray tools/upstream_reproducers/pr_11621.py
+tools/xrpr /path/to/pr-xarray tools/upstream_reproducers/pr_11621.py
+XARRAY_PYTHON=/path/to/xarray-environment/bin/python tools/xrpr /path/to/xarray -c 'import xarray; print(xarray.__file__)'
+make test-upstream XARRAY_UPSTREAM=/path/to/upstream-xarray
+make test-patched XARRAY_PATCHED=/path/to/patched-xarray
 ```
 
-Trees are named by PR number (the mapping is in the script header), plus `base`, `main` (the
-unmodified comparison checkout) and `patched` (the local series 4 tree, `index-hooks-4`), or
-an absolute path to any xarray checkout. Every reproducer prints `xarray.__file__` first.
+`tools/xrpr` defaults to this repository's `.venv/bin/python`. It puts the selected source first
+on `PYTHONPATH`, opens a NumPy/xarray console without a command, and runs scripts with `python -i`.
+Every [reproducer](../tools/upstream_reproducers/README.md) prints its imported xarray path.
+Keep merged reproducers when they remain useful for verifying baseline/released behavior.
+`make test-pinned` remains the portable shared command for the immutable published series.
 
-`tools/upstream_reproducers/` holds one self-contained script per PR, including merged
-#11613 and #11615, written around a public example (the `RasterIndex` from xarray's
-custom-index guide) so a maintainer can paste it. Add one when preparing a PR and record its
-before/after output in the PR's section of `docs/dev/xarray-upstream/upstream_prs.md`.
-
-To run xarray's own tests against a tree, use the same interpreter from inside that worktree:
+To run xarray's tests, work inside the selected tree and point at its source:
 
 ```sh
-cd ~/GitHub/xarray-pr-<name>
-PYTHONPATH=$PWD ~/GitHub/xarray-upstream/.venv/bin/pytest xarray/tests/test_dataset.py -q -p no:cacheprovider
-PYTHONPATH=$PWD ~/GitHub/xarray-upstream/.venv/bin/pytest xarray/tests -n 6 -q -p no:cacheprovider   # full suite
+cd /path/to/xarray
+PYTHONPATH="$PWD" /path/to/xarray-environment/bin/python -m pytest xarray/tests/test_dataset.py -q -p no:cacheprovider
 ```
 
-`PYTHONPATH=$PWD` is required; without it the editable install in the environment answers, not the
-worktree. Do not create a `.venv` inside a PR worktree (`uv run` will, if asked); it is gitignored but
-it shadows nothing and wastes space. Format with the ruff version pinned in the upstream
-`.pre-commit-config.yaml` (`uvx ruff@<version>`), and compare any mypy run against the baseline of an
-untouched tree, since the environment lacks some stubs.
+Without the source path, an editable install elsewhere may answer. Reuse a chosen environment;
+do not let `uv run` create an unnoticed environment in every PR worktree. Format using the ruff
+version pinned in upstream's `.pre-commit-config.yaml`, and compare typing checks with an
+untouched baseline when dependency stubs are incomplete.
 
 ## Ownership
 

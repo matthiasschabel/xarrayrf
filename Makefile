@@ -1,4 +1,6 @@
 UV ?= uv
+XARRAY_UPSTREAM ?= $(HOME)/GitHub/xarray-upstream
+XARRAY_PATCHED ?= $(HOME)/GitHub/xarray-patched-4
 
 .PHONY: check test test-upstream test-patched test-pinned tour relativity probe build
 check:
@@ -10,10 +12,10 @@ test:
 	$(UV) run --no-sync pytest
 
 test-upstream:
-	PYTHONPATH=$(HOME)/GitHub/xarray-upstream $(UV) run --no-sync pytest
+	PYTHONPATH="$(XARRAY_UPSTREAM)" $(UV) run --no-sync pytest
 
 test-patched:
-	PYTHONPATH=$(HOME)/GitHub/xarray-patched-4 $(UV) run --no-sync pytest
+	PYTHONPATH="$(XARRAY_PATCHED)" $(UV) run --no-sync pytest
 
 # The pinned patch series from the fork, in its own environment (the stock .venv is untouched).
 test-pinned:

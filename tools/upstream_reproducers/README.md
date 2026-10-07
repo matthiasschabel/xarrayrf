@@ -1,14 +1,23 @@
 # Upstream PR reproducers
 
-One script per pydata/xarray PR (#11613, #11615, #11616, #11617, #11621), each printing which
-xarray tree it imported and the behaviour the PR changes. #11613 and #11615 are merged;
-run them against `main`. `_raster_index.py` is the `RasterIndex` from
-xarray's custom-index guide (Meta-indexes), plus a scalar-keeping variant for #11617.
+One script per pydata/xarray bug-fix PR, plus the issue #11607 operand-conflict measurement.
+[Upstream PR notes](../../docs/dev/xarray-upstream/upstream_prs.md) own current merge/review
+status; the [patch manifest](../../docs/dev/xarray-upstream/xarray_patches.md) owns the pinned
+series. Every script prints the imported xarray path before its observed behavior.
 
-Run them against a tree with `tools/xrpr` (see its header): `base` is the PR base commit
-`dfd25c7252e71a47e789aa24b8a06dd911a56461` (worktree `~/GitHub/xarray-base`);
-the open PR numbers #11616, #11617 and #11621 map to their worktrees.
+Run against any selected xarray source checkout:
 
-`issue_11607_operand_check.py` is the measurement behind issue #11607: an xarray-only matrix of
-scalar custom-index, plain-coordinate and missing-coordinate operands. It prints JSON describing
-each operation's outcome on whichever xarray it imports.
+```sh
+tools/xrpr /path/to/xarray tools/upstream_reproducers/pr_11621.py
+XARRAY_PYTHON=/path/to/environment/bin/python tools/xrpr /path/to/xarray -c 'import xarray; print(xarray.__file__)'
+```
+
+Without a command, `xrpr` opens a console with NumPy and xarray preloaded; a script is run with
+`python -i`. The default interpreter is this repository's `.venv/bin/python`. Keep source
+revision and interpreter selection explicit; a local checkout is not necessarily current
+upstream or the posted PR head.
+
+`_raster_index.py` reproduces the public custom-index guide's RasterIndex and the scalar-keeping
+variant needed by the scalar-drop repro. `issue_11607_operand_check.py` prints JSON for indexed,
+plain-coordinate and missing-coordinate operands. Merged regression reproducers remain useful
+for verifying a series base or a released build.
