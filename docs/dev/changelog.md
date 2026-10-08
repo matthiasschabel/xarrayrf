@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026-10-07] — Independent QA of the core layering refactor
+
+- **Problem**: Verify that moving resampling planning, frame adoption, `Grid.isel`, binding
+  diagnostics and interval arithmetic out of the xarray modules preserves public behavior,
+  performance and the binding lifecycle, and that the stated import boundary holds.
+- **Resolution**: One defect fixed. The deferred-revalidation size view in `_resample` revalidated
+  the source Geometry on every planner size read (13 coordinate checks per call versus 9 at the
+  base), making small resamples about 18% slower. It now revalidates on the first read and
+  reuses those sizes; small resamples are now at or below base time, large ones unchanged.
+  Stale design text claiming Grid selection and BindingIndex policy were still pending was
+  corrected; the layering is recorded in
+  [core_layering_design.md](architecture/core_layering_design.md). The `Grid.isel` error-type
+  change for invalid indexers is recorded in `CHANGELOG.md`.
+- **Verification**: Full suites: stock 1,904 plus 47 xfailed; patched 1,951; minimum-core (no
+  SciPy) 1,648 plus 88 skipped/47 xfailed; minimum-resample 1,904 plus 47 xfailed; current
+  Python 3.13/xarray 2026.9.0 1,908 plus 43 xfailed. Ruff, mypy (stock, floor, current) pass.
+  `tools/binding_operation_probe.py` output is byte-identical to `da5f627`. Anonymous-frame
+  diagnostic messages match `da5f627` for RangeIndex-step and int64/float cases. Implementation
+  by Codex (gpt-6-astra) in three rounds, each reviewed by Claude Opus 5.5.
+- **Files affected**: `src/xarrayrf/_resample.py` (size caching); design notes and changelogs.
+- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`) applying QAEngineer.
+
 ## [2026-10-07] — Independent QA before committing repository cleanup
 
 - **Problem**: Verify that the dependency-floor corrections, publishing smoke and documentation

@@ -4,6 +4,9 @@
 
 ### Changed
 
+- `Grid.isel` selects without xarray. Valid indexers return the same Grids; invalid ones raise
+  uniform `IndexError` or `ValueError`. String indexers raise `IndexError` instead of `KeyError`
+  or `TypeError`, and a `("dim", scalar)` tuple selects like the scalar instead of being refused.
 - Clarified that the cells domain extends the outer bounds while interpolating interior gaps,
   with a concrete gap/edge example. Singleton coincidence and constant documentation now
   describe the implemented float64 roundoff allowances; numerical behavior is unchanged.

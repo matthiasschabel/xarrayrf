@@ -20,13 +20,19 @@ from ._transform import SupportsPoints
 
 
 class _GeometrySizes(Mapping[str, int]):
-    """Revalidate geometry only when the planner queries a dimension's size."""
+    """Revalidate geometry when the planner first queries a dimension's size.
+
+    The array cannot change during planning, so later reads reuse the first validated sizes.
+    """
 
     def __init__(self, geometry: Geometry) -> None:
         self.geometry = geometry
+        self._sizes: Mapping[str, int] | None = None
 
     def __getitem__(self, dim: str) -> int:
-        return self.geometry.sizes[dim]
+        if self._sizes is None:
+            self._sizes = self.geometry.sizes
+        return self._sizes[dim]
 
     def __iter__(self) -> Iterator[str]:
         return iter(self.geometry.dims)

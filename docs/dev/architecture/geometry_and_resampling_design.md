@@ -213,8 +213,8 @@ together. SciPy loads only after input and frame checks. These entry points rema
 Frame adoption lives in `_frame_adoption`, separate from derivation of coordinate-system
 changes in `_orientation`: adoption asserts shared identity before composing that change.
 The `_geometry.adopt_frame` wrapper resolves a framed DataArray and retains binding-facing
-errors. Grid selection and BindingIndex geometry policy remain in the integration layer for
-later work.
+errors. The layering and the contracts a second binding relies on are in
+[core_layering_design.md](core_layering_design.md).
 
 `resample(source, target, *, transform=None, ...)` computes each target sample's frame point,
 maps it into the source frame (an exact coordinate-system change between equivalent frames is
