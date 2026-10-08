@@ -210,7 +210,12 @@ no axis classes. A separable target axis is:
 **Interval claims (slice 1).** Output intervals state what the values are, per axis:
 
 - pass-through axis: the source's declared intervals at the selected samples, mapped into target
-  coordinates (none if the source declares none), whatever the target declared;
+  coordinates (none if the source declares none), whatever intervals the target declared, provided
+  they are declarable under the target's own `sample_offset` (validated as `Grid(intervals=)`
+  validates them); otherwise none. The output keeps the target's transform unchanged, so it stays
+  bindable with arrays on the target: a point-sampled target axis, or an offset the source's
+  intervals disagree with, loses the claim (support unknown) rather than altering the target's
+  declaration;
 - `support="average"` slab axis: the target's declared intervals;
 - any other axis, and every axis when there are no axis classes: none.
 
