@@ -49,6 +49,17 @@ extent* (FWHM for MRI), not necessarily its support; the profile shape is a sepa
 box unless stated. Coverage and gaps are defined on the nominal extent. Profiles must integrate to
 1, so constants are preserved.
 
+The interval is not defined as an enclosed fraction of the signal: FWHM (what scanners report as
+thickness) encloses about 76% for a Gaussian and a different fraction for other shapes, and profiles
+with negative side lobes have a non-monotone cumulative integral, so "the range enclosing p%" can be
+ambiguous or exceed 100%. Instead each shape is defined in units of its interval,
+`φ(x) = (1/w) p((x - c)/w)` with `w = hi - lo` and `p` a unit-width shape whose definition states
+its convention (box: unit support; Gaussian: unit FWHM). Interval plus shape name determine the
+kernel; enclosed fraction is derived. Infinite-support shapes need an explicit, documented
+truncation (a width multiple or enclosed fraction) for coverage, gap detection, cropping and
+quadrature; it sets accuracy, not meaning. For asymmetric shapes the sample sits at the kernel's
+centroid, which must agree with `sample_offset` (validation rule owed).
+
 Consequence: linear interpolation through slab centres is the right reconstruction for points and
 an approximation for slabs: its slab means differ from `y_i` unless the data is locally linear.
 
