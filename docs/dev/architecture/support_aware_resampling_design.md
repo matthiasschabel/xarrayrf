@@ -42,6 +42,13 @@ class. Readers that declare intervals do not switch the default.
   point declaration. Implied cell widths remain a tiling convention for domain and display only;
   operations that need widths refuse unless the caller supplies them.
 
+**Profiles.** In general a sample is `y_i = ⟨f, φ_i⟩` for an analysis kernel `φ_i` (an MRI slice
+profile; slice-selective excitation gives shoulders and side lobes, and DICOM does not record it).
+The box is the special case used first. A declared interval is therefore the sample's *nominal
+extent* (FWHM for MRI), not necessarily its support; the profile shape is a separate declaration,
+box unless stated. Coverage and gaps are defined on the nominal extent. Profiles must integrate to
+1, so constants are preserved.
+
 Consequence: linear interpolation through slab centres is the right reconstruction for points and
 an approximation for slabs: its slab means differ from `y_i` unless the data is locally linear.
 
@@ -111,7 +118,11 @@ Details per member:
   self-resampling smooths (`(v1 + 2v2 + v3)/4`). Not called "conservative": with overlaps
   `Σ y_i |S_i|` double-counts, so nothing is conserved.
 - **`smooth`.** `f̂ = argmin ∫ |f''|² subject to A f = y`, with point samples as point
-  constraints. Specification still owed (astra B6): the function space and integration domain,
+  constraints. It is the only member that generalises beyond box profiles: by the representer
+  theorem the solution is a combination of each `φ_i` convolved with the spline's Green's function,
+  so it is specified in those terms with the profile as a parameter; `step`, `pchip` and
+  `overlap-mean` are box-only fast paths (they rely on slab values being differences of `F`).
+  Specification still owed (astra B6): the function space and integration domain,
   boundary conditions (free ends give `f'' = f''' = 0` for box constraints; the point limit needs
   the matching treatment), complex handling (`|f''|²`), and the reconstruction operator written
   as `R`, not an unspecified pseudoinverse. Overlapping uniform stacks split into independent
@@ -169,6 +180,18 @@ the whole spacing.
   (`_resample.py:191-204`), so a global solve along an axis is a memory and cost contract to
   document, not an incompatibility.
 
+### Prior theory
+
+This is generalized sampling. Unser and Aldroubi's *consistent sampling* (1994; Unser, "Sampling:
+50 years after Shannon", Proc. IEEE 2000) requires exactly the consistency property above and
+constructs it as an oblique projection; Aldroubi and Gröchenig (SIAM Review 2001) treat nonuniform
+sample positions. Wahba (*Spline Models for Observational Data*, 1990) defines smoothing splines for
+arbitrary bounded linear functionals, equivalently Gaussian process regression with integral
+observations, which is `smooth` with its posterior variance. MRI super-resolution from thick slices
+models the slice profile as a point-spread function, often Gaussian with FWHM equal to the nominal
+thickness (Greenspan; Plenge et al. 2012; SMORE). Implementations should be tested against these
+formulations rather than derived afresh.
+
 ## Alternatives Considered
 
 - **Infer the functional from target intervals.** Rejected: a target built from a reader would
@@ -195,7 +218,8 @@ the whole spacing.
 - Posterior variance as the information diagnostic: `smooth` is the posterior mean of Gaussian
   process regression with integral observations (spline–GP equivalence), and its variance grows
   smoothly away from measured support and shrinks with overlap.
-- Non-box slice profiles; `average` + `omit`; oblique or coupled integration (supersampled
+- Non-box profiles (a `profile` declaration on source intervals and on the `average` target
+  functional; a Gaussian target kernel simulates a thicker acquisition); `average` + `omit`; oblique or coupled integration (supersampled
   quadrature); width-corrected averaging (average over `sqrt(t² - s²)`) as an approximate
   deconvolution.
 
