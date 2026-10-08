@@ -14,4 +14,4 @@ dist/
 # Agent guidance and session handoff notes are local to each maintainer.
 AGENTS.md
 CLAUDE.md
-docs/dev/handoff_notes.md
+docs/dev/handoffs/
