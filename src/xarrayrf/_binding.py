@@ -18,7 +18,7 @@ from ._frame import ReferenceFrame
 from ._frame_compatibility import binding_difference
 from ._geometry import check_coordinate_unit
 from ._grid import Coordinate, Grid
-from ._intervals import interval_rows, intervals_equal, missing_interval_positions
+from ._intervals import interval_rows, intervals_equal
 from ._sampling import freeze_intervals
 from ._transform import SupportsPoints
 
@@ -217,12 +217,14 @@ class BindingIndex(xr.Index):
 
     def _intervals_equal(self, name: str, other: BindingIndex) -> bool:
         mine, theirs = self.intervals.get(name), other.intervals.get(name)
-        if mine is None or theirs is None:
-            return intervals_equal(mine, theirs)
-        if name in self.fixed or self.axes[name].index.equals(other.axes[name].index):
-            return intervals_equal(mine, theirs)
-        labels = self.axes[name].index
-        positions = other.axes[name].index.get_indexer(labels)
+        positions = (
+            None
+            if mine is None
+            or theirs is None
+            or name in self.fixed
+            or self.axes[name].index.equals(other.axes[name].index)
+            else other.axes[name].index.get_indexer(self.axes[name].index)
+        )
         return intervals_equal(mine, theirs, positions)
 
     def _rows_for_axes(
@@ -237,7 +239,7 @@ class BindingIndex(xr.Index):
                 if self.axes[name].index.equals(target.index)
                 else self.axes[name].index.get_indexer(target.index)
             )
-            missing = missing_interval_positions(positions)
+            missing = positions < 0
             if missing.any() and other is None:
                 raise ValueError(
                     f"source axis {name!r} introduces labels without declared intervals"
@@ -247,7 +249,7 @@ class BindingIndex(xr.Index):
             if missing.any():
                 assert other is not None
                 other_positions = other.axes[name].index.get_indexer(target.index[missing])
-                if missing_interval_positions(other_positions).any():
+                if (other_positions < 0).any():
                     raise ValueError(
                         f"source axis {name!r} introduces labels without declared intervals"
                     )

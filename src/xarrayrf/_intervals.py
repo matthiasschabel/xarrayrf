@@ -1,14 +1,12 @@
-"""Interval-row arithmetic after a binding has matched its coordinate labels."""
+"""Interval-row arithmetic after a binding has matched its coordinate labels.
+
+Positions follow ``pandas.Index.get_indexer``: ``-1`` marks a label with no match.
+"""
 
 from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
-
-
-def missing_interval_positions(positions: npt.NDArray[np.intp]) -> npt.NDArray[np.bool_]:
-    """Identify missing labels in an already-matched positional indexer."""
-    return positions < 0
 
 
 def intervals_equal(
@@ -25,7 +23,7 @@ def intervals_equal(
         return mine is None and theirs is None
     if positions is None:
         return bool(np.array_equal(mine, theirs))
-    matched = ~missing_interval_positions(positions)
+    matched = positions >= 0
     return bool(np.array_equal(mine[matched], theirs[positions[matched]]))
 
 
@@ -41,11 +39,11 @@ def interval_rows(
     The caller must resolve every missing position before assembly. ``other_positions`` maps
     only the missing target rows into ``theirs``.
     """
-    missing = missing_interval_positions(positions)
+    missing = positions < 0
     rows = np.empty((len(positions), 2), dtype=np.float64)
     rows[~missing] = mine[positions[~missing]]
     if missing.any():
         assert theirs is not None and other_positions is not None
-        assert not missing_interval_positions(other_positions).any()
+        assert (other_positions >= 0).all()
         rows[missing] = theirs[other_positions]
     return rows

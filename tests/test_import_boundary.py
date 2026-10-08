@@ -39,7 +39,7 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
     assert grid.is_coincident(grid)
     from xarrayrf._frame_adoption import adopt_frame
     from xarrayrf._frame_compatibility import binding_difference
-    from xarrayrf._intervals import interval_rows, intervals_equal, missing_interval_positions
+    from xarrayrf._intervals import interval_rows, intervals_equal
     from xarrayrf._resampling import plan, execute
     assert adopt_frame(transform, frame) == transform
     assert "same frame on different grids" in binding_difference(
@@ -48,7 +48,6 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
     )
     rows = np.array([[0, 1], [1, 2]], dtype=np.float64)
     positions = np.array([1, 0], dtype=np.intp)
-    assert not missing_interval_positions(positions).any()
     assert intervals_equal(rows, rows)
     np.testing.assert_array_equal(interval_rows(rows, positions), rows[::-1])
     assert not any(name.split(".")[0] == "scipy" for name in sys.modules)

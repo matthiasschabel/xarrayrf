@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from xarrayrf._intervals import interval_rows, intervals_equal, missing_interval_positions
+from xarrayrf._intervals import interval_rows, intervals_equal
 
 
 @pytest.mark.parametrize(
@@ -70,14 +70,8 @@ def test_interval_rows_carries_missing_and_disjoint_labels(positions: list[int])
     mine = np.array([[0, 1], [2, 3]], dtype=np.float64)
     theirs = np.array([[4, 5], [6, 7]], dtype=np.float64)
     indexer = np.asarray(positions, dtype=np.intp)
-    missing = missing_interval_positions(indexer)
+    missing = indexer < 0
     other_positions = np.resize(np.array([1, 0], dtype=np.intp), np.count_nonzero(missing))
     result = interval_rows(mine, indexer, theirs=theirs, other_positions=other_positions)
-    np.testing.assert_array_equal(missing, np.asarray(positions) < 0)
     np.testing.assert_array_equal(result[~missing], mine[indexer[~missing]])
     np.testing.assert_array_equal(result[missing], theirs[other_positions])
-
-
-def test_missing_interval_positions_reports_each_repeated_missing_label() -> None:
-    positions = np.array([-1, 0, -1, 0], dtype=np.intp)
-    np.testing.assert_array_equal(missing_interval_positions(positions), [True, False, True, False])
