@@ -107,7 +107,7 @@ slices). Spending that redundancy on noise reduction or on resolution is the use
 | `nearest`/`linear`/`cubic` | interpolant through centres (today) | points only | yes | bridged | default; for slabs an approximation |
 | `step` | piecewise constant f (linear cumulative integral F) | non-overlapping slabs | yes | fill | conservative remap on partitions (xESMF `conservative_normed` analogue) |
 | `pchip` (on F) | monotone cubic of `F` at slab edges | non-overlapping slabs | yes | bridged by a defined heuristic | real data only; nonnegative for nonnegative data |
-| `overlap-mean` | pointwise mean of covering slabs | no | yes | fill | cheap choice for overlapping stacks; blurs twice |
+| `overlap_mean` | pointwise mean of covering slabs | no | yes | fill | cheap choice for overlapping stacks; blurs twice |
 | `smooth` | smoothest consistent f | yes, given independence | no (banded solve per axis) | bridged by the prior | unifies points, slabs, gaps, overlaps |
 
 Details per member:
@@ -120,7 +120,7 @@ Details per member:
   slabs at -1, 0, 1 with means 0, 1, 0 give `f̂(0) → 1.125`. It is a distinct reconstruction, not a
   thick-slice version of point interpolation. Complex data refuses: PCHIP is real-only and,
   being nonlinear, not phase-invariant (complex callers use `step` or `smooth`, which are linear).
-- **`overlap-mean`.** Pointwise normalised: at each x, the mean of the slabs covering x, then a
+- **`overlap_mean`.** Pointwise normalised: at each x, the mean of the slabs covering x, then a
   uniform average over the covered part of the target. Per-slab weights `|S_i ∩ T|` differ when
   coverage multiplicity varies inside the target (slabs `[0,1.5]`, `[1,2.5]` onto `[0,2]`: 0.6/0.4
   per-slab vs 0.625/0.375 pointwise); pointwise keeps coverage a union length, never above 1. The
@@ -132,7 +132,7 @@ Details per member:
   constraints. It is the only member that generalises beyond box profiles: by the representer
   theorem the solution is a combination of each `φ_i` convolved with the spline's Green's function,
   so it is specified in those terms with the profile as a parameter; `step`, `pchip` and
-  `overlap-mean` are box-only fast paths (they rely on slab values being differences of `F`).
+  `overlap_mean` are box-only fast paths (they rely on slab values being differences of `F`).
   Specification still owed (astra B6): the function space and integration domain,
   boundary conditions (free ends give `f'' = f''' = 0` for box constraints; the point limit needs
   the matching treatment), complex handling (`|f''|²`), and the reconstruction operator written
@@ -162,7 +162,7 @@ inference from a prior, with the same standing as a linear interpolant between t
 Refusing by coverage would be incoherent, since point samples are zero-thickness slabs whose gap is
 the whole spacing.
 
-- Methods without a prior (`step`, `overlap-mean`) return fill in gaps. `min_coverage` applies to
+- Methods without a prior (`step`, `overlap_mean`) return fill in gaps. `min_coverage` applies to
   them only; their partial results are means over covered support.
 - Methods with a prior (interpolants, `pchip`, `smooth`) answer in interior gaps.
 - The stack exterior keeps the existing domain reach rule.
@@ -191,6 +191,61 @@ the whole spacing.
   (`_resample.py:191-204`), so a global solve along an axis is a memory and cost contract to
   document, not an incompatibility.
 
+### First slices: interval claims and the box methods
+
+Decided 2026-10-08 for Next Steps 3 and 4.
+
+**Axis classes.** Every first-slice decision is per target axis, from the composed affine map in
+*coordinate* space (target coordinates → target frame → frame map → source coordinates), so
+nonuniform axes qualify. The map is separable when its linear part is a scaled permutation within
+the existing roundoff allowance; then each target axis `j` (including a retained scalar axis) maps
+to one source axis `i` by `c_s = a_j c_t + b_j`. A non-affine transform or a non-separable map has
+no axis classes. A separable target axis is:
+
+- **pass-through** if every target coordinate maps onto a source coordinate value (the 1-D operator
+  is a selection), and, for `support="average"`, the target declares no intervals there or declares
+  the mapped source intervals;
+- **slab** otherwise.
+
+**Interval claims (slice 1).** Output intervals state what the values are, per axis:
+
+- pass-through axis: the source's declared intervals at the selected samples, mapped into target
+  coordinates (none if the source declares none), whatever the target declared;
+- `support="average"` slab axis: the target's declared intervals;
+- any other axis, and every axis when there are no axis classes: none.
+
+This replaces attaching the target's intervals to every result (`native.py:538-545`). It keeps a
+thick-slice stack's thickness through an in-plane resampling and through self-resampling, and stops
+point interpolation claiming support it does not have. Core `resample` stays unframed; the claims
+are exposed to the native layer through a private return path.
+
+**Box methods (slice 2).** `method="overlap_mean"` and `method="step"` (`Method` gains both) are one
+operator: on each slab axis, the reconstruction at x is the mean of the source slabs whose closed
+declared intervals contain x. `step` additionally refuses overlapping source intervals (beyond the
+interval roundoff allowance), so a caller expecting a partition gets an error rather than a
+silently different operator. Closed intervals fix boundary ownership: a point on a shared edge
+takes the mean of both slabs, which is also the limit of shrinking symmetric averages.
+
+- The operator is a tensor product of 1-D weight matrices, one per target axis (pass-through
+  axes are selections), applied along the source's geometry axes; v1 requires every target axis to
+  be pass-through or a slab axis whose source axis declares intervals, and refuses otherwise
+  (resample the other axes first with a point method). Non-separable maps and non-affine
+  transforms refuse before reading pixels.
+- `support="point"`: weights from the covering slabs at the target coordinate; uncovered → fill.
+- `support="average"`: requires declared target intervals on slab axes. Weights integrate the
+  reconstruction over the target interval: split it at every source edge; a piece covered by the
+  set `C` gives each slab in `C` weight `length / |C|`; normalise by the covered length. Coverage is
+  the covered length over the target length, per axis, multiplied across axes; below
+  `min_coverage` the value is `fill_value`. `min_coverage` defaults to 0.5 (pending human
+  confirmation) and must lie in `(0, 1]`.
+- Missing values propagate: a NaN component with positive weight gives NaN (real and imaginary
+  parts independently, as for linear).
+- Real and complex floating sources only; integer and boolean sources refuse (convert explicitly).
+  Output float64 or complex128.
+- `domain` does not apply (declared support is the domain); a non-default `domain` refuses.
+- `support="average"` with `nearest`/`linear`/`cubic` refuses for now.
+- No cropping; the same-grid gather is not used (pass-through axes are selections already).
+
 ### Prior theory
 
 This is generalized sampling. Unser and Aldroubi's *consistent sampling* (1994; Unser, "Sampling:
@@ -209,8 +264,8 @@ formulations rather than derived afresh.
   silently switch from interpolation to averaging.
 - **Missing thickness means point.** Rejected: it asserts physics the file does not state.
 - **Interpolate through slab centres, then average over the target** (pass-2 answer for overlaps).
-  Rejected: same double blur and self-smoothing as `overlap-mean`, plus a second code path.
-- **Average overlaps with per-slab weights.** Kept as the reasoning behind `overlap-mean`, but
+  Rejected: same double blur and self-smoothing as `overlap_mean`, plus a second code path.
+- **Average overlaps with per-slab weights.** Kept as the reasoning behind `overlap_mean`, but
   pointwise normalisation chosen so coverage stays a fraction.
 - **Exact-coincidence shortcut for identity.** Rejected as the mechanism: idempotent but
   discontinuous (a target shifted by 1e-9 gets the smoothed answer). Consistency gives identity
@@ -236,10 +291,9 @@ formulations rather than derived afresh.
 
 ## Next Steps
 
-1. Human decisions: `min_coverage` default for `step` and `overlap-mean` (proposed 0.5, results
+1. Human decisions: `min_coverage` default for `step` and `overlap_mean` (proposed 0.5, results
    are means over covered support); the legacy cubic-with-missing-values behaviour (proposed:
    refuse, matching Pirana).
 2. Close the `smooth` specification (B6 items) and the `pchip` gap rule before implementing either.
-3. Stop attaching target intervals to `support="point"` output.
-4. Implement `support="average"` with `step` and `overlap-mean` first (local, linear, cheap), then
-   `pchip`, then `smooth`.
+3. Slice 1: per-axis interval claims (above).
+4. Slice 2: the box methods with `support="point"|"average"` (above); then `pchip`, then `smooth`.
