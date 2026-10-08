@@ -99,6 +99,9 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 - **Names.** `nifti.open`, `dicom.open`, `ngff.open` and `geotiff.open` read lazily by default;
   `rf.resample_to` and `Lattice.affine` are settled
   ([core model design](architecture/core_model_design.md)).
+- **xarray stays required.** The geometry core and resampling kernels import NumPy only, behind
+  private entry points, so a second binding can reuse them; xarray is not made optional
+  ([core layering design](architecture/core_layering_design.md)).
 - **Licences.** Code is MIT; the tour data release is CC BY 4.0.
 
 ## Alternatives Considered
