@@ -423,12 +423,39 @@ def test_extrapolation_near_the_float_limit_stays_finite(kind: str) -> None:
     np.testing.assert_allclose(actual, [[9e307], [1.05e308]], rtol=1e-14, atol=0)
 
 
-@pytest.mark.parametrize("indexer", [[2, 0], np.array([2, -1]), np.array([True, False, True])])
+@pytest.mark.parametrize(
+    "indexer",
+    [
+        1,
+        -1,
+        np.int64(2),
+        np.uint64(1),
+        np.array(1),
+        slice(None),
+        slice(1, 3),
+        slice(None, None, -1),
+        slice(None, None, -2),
+        slice(0, 0),
+        [],
+        np.array([], dtype=np.int64),
+        [2, 0],
+        np.array([2, -1]),
+        np.array([2, 0], dtype=np.uint64),
+        [True, False, True],
+        np.array([True, False, True]),
+        np.zeros(3, dtype=bool),
+        ("i", [2, 0]),
+        xr.Variable("i", [2, 0]),
+        xr.DataArray([2, 0], dims="i"),
+    ],
+)
 def test_grid_isel_matches_xarray_indexers(indexer: Any) -> None:
     grid = Grid(transform(), {"offset": ("i", [0, 2, 5])})
     selected = grid.isel(i=indexer)
-    expected = geometry(grid).array.isel(i=indexer)
-    assert selected == Geometry(expected, grid.transform, dims=("i",)).grid()
+    from xarrayrf.native import frame_array
+
+    expected = frame_array(np.zeros(3), grid).isel(i=indexer).rf.grid
+    assert selected == expected
 
 
 @pytest.mark.parametrize("label", [2, [5, 0], slice(0, 2)])
@@ -1105,3 +1132,58 @@ def test_extension_transform_grid_value_contract(kind: type[CustomShift]) -> Non
     else:
         assert hash(grid) == hash(equal)
         assert {grid: "sampling"}[equal] == "sampling"
+
+
+@pytest.mark.parametrize("indexer", [1, [2, 0], np.array([True, False, True])])
+def test_grid_isel_preserves_exact_int64_labels(indexer: Any) -> None:
+    from xarrayrf.native import frame_array
+
+    values = np.array([2**53, 2**53 + 1, 2**53 + 2], dtype=np.int64)
+    grid = Grid(transform(), {"offset": ("i", values)})
+    for selected in (grid.isel(i=indexer), frame_array(np.zeros(3), grid).isel(i=indexer).rf.grid):
+        entry = selected.coordinates["offset"]
+        actual = np.asarray(entry[1] if isinstance(entry, tuple) else entry)
+        assert actual.dtype == np.dtype(np.int64)
+        np.testing.assert_array_equal(actual, values[indexer])
+
+
+@pytest.mark.parametrize("indexer", [1, -1, slice(None, None, -2), [2, 0], [], [True, False, True]])
+def test_grid_isel_selects_matching_interval_rows(indexer: Any) -> None:
+    from xarrayrf.native import frame_array
+
+    grid = Grid(
+        transform(),
+        {"offset": ("i", [0, 2, 5])},
+        intervals={"offset": [[-1, 1], [1, 3], [4, 6]]},
+    )
+    selected = grid.isel(i=indexer)
+    assert selected == frame_array(np.zeros(3), grid).isel(i=indexer).rf.grid
+    np.testing.assert_array_equal(selected.intervals["offset"], grid.intervals["offset"][indexer])
+
+
+@pytest.mark.parametrize(
+    ("indexer", "error", "match"),
+    [
+        (np.bool_(True), ValueError, "Multi-dimensional indexing"),
+        (np.array(True), ValueError, "Multi-dimensional indexing"),
+        ([[0, 1]], IndexError, "Unlabeled multi-dimensional"),
+        (np.array([[True, False, True]]), IndexError, "Unlabeled multi-dimensional"),
+        (-4, IndexError, "out of bounds"),
+        ([3], IndexError, "out of bounds"),
+        ([True], IndexError, "boolean index did not match"),
+        (np.array([], dtype=bool), ValueError, "boolean indexer cannot be 0"),
+        ([1.5], IndexError, "integer"),
+        (np.array([], dtype=float), IndexError, "integer"),
+        (xr.Variable("other", [0, 1]), ValueError, "vectorized indexing changes"),
+        (("other", [0, 1]), ValueError, "vectorized indexing changes"),
+        ((0, 2), TypeError, "Could not convert tuple"),
+        ((), ValueError, "not in the form"),
+        (Ellipsis, ValueError, "dimensions"),
+    ],
+)
+def test_grid_isel_refuses_invalid_indexers(
+    indexer: Any, error: type[Exception], match: str
+) -> None:
+    grid = Grid(transform(), {"offset": ("i", [0, 2, 5])})
+    with pytest.raises(error, match=match):
+        grid.isel(i=indexer)

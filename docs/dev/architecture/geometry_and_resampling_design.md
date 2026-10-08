@@ -1,7 +1,7 @@
 # Geometry, cells and resampling
 
 **Status:** Implemented
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** `Grid` (the immutable sampling value), `Geometry` (the read-through view),
 `ArrayCoordinates.sample_offset` and the
 `"samples" | "cells"` domain, `Geometry.is_coincident`, core `resample` including the same-grid
@@ -63,9 +63,12 @@ Coordinate arrays are fresh read-only views, so editing their headers cannot cha
 declaration; copying and unpickling reconstruct through the constructor to freeze the buffers.
 Equality and hashing
 compare the exact declaration, including dimension order; `is_coincident` is the separate
-step-tolerant query. `isel` and `sel` lazily import xarray and select a coordinate-only Dataset
-carrying the native binding, retaining scalar selections. Positional lists, arrays and masks
-use xarray's indexing semantics. `transpose` stays native. All commute with `points()`.
+step-tolerant query. `isel` selects dtype-preserving NumPy coordinates and interval rows in
+core, retaining scalar selections. Positional lists, arrays and masks follow the existing
+xarray indexing contract. `sel` remains an xarray convenience, importing an integration helper
+that selects a coordinate-only Dataset carrying the native binding. `transpose` stays native.
+All commute with `points()`. Core per-axis selection also updates exact steps for sliced frame
+coordinates; their reach bookkeeping remains in the frame-coordinate integration module.
 
 `Geometry.grid()` revalidates and snapshots the current coordinates in its declared dimension
 order. It refuses multidimensional fields and shared dimensions. It never reads pixels, but
@@ -198,6 +201,20 @@ until declared cells give it a width. Cells, offsets and values are not compared
 exact.
 
 ### Core `resample`
+
+The private `_resampling.plan` consumes `Sampling` descriptions and explicit source/output
+axis orders; `_resampling.execute` interpolates NumPy blocks. Neither imports xarray, pandas
+or an integration module. `_resample.resample` translates Geometry/Grid inputs, applies the
+planned source window before transpose and Dask rechunking, and assembles xarray coordinates.
+Exact RangeIndex steps stay in `AxisSampling.step` through lattice construction. Cropped
+sizes determine gather indices and interpolation bounds; offsets and domain bounds shift
+together. SciPy loads only after input and frame checks. These entry points remain private.
+
+Frame adoption lives in `_frame_adoption`, separate from derivation of coordinate-system
+changes in `_orientation`: adoption asserts shared identity before composing that change.
+The `_geometry.adopt_frame` wrapper resolves a framed DataArray and retains binding-facing
+errors. Grid selection and BindingIndex geometry policy remain in the integration layer for
+later work.
 
 `resample(source, target, *, transform=None, ...)` computes each target sample's frame point,
 maps it into the source frame (an exact coordinate-system change between equivalent frames is

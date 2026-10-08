@@ -22,6 +22,7 @@ from ._sampling import (
     position_to_coordinate,
     singleton_step,
 )
+from ._selection import select_axis
 from ._transform import SupportsAffine, SupportsInverse, check_transform
 
 
@@ -163,17 +164,17 @@ class FrameCoordinateTransform(CoordinateTransform):
             dim = self.dims[dim_index]
             selection = slices.get(dim, slice(None))
             _, _, step = selection.indices(sizes[dim])
-            values = sampling.values[selection]
+            values, selected_step, intervals = select_axis(
+                sampling.values, selection, step=sampling.step, intervals=sampling.intervals
+            )
             sizes[dim] = values.size
             samplings.append(
                 replace(
                     sampling,
                     dim=dim,
                     values=values,
-                    step=sampling.step * step if sampling.step is not None else None,
-                    intervals=sampling.intervals[selection]
-                    if sampling.intervals is not None
-                    else None,
+                    step=selected_step,
+                    intervals=intervals,
                 )
             )
             if sampling.intervals is not None and self.domain == "cells":

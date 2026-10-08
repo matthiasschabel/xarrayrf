@@ -611,7 +611,7 @@ def test_cropping_the_source_to_the_target_footprint_changes_no_value(
     source = volume(rng.normal(size=(16, 40, 36)))
     target = volume(np.zeros(shape), matrix=matrix, translation=translation)
     cropped = xrf.resample(source, target, method=method, domain=domain, fill_value=-9.0).values
-    monkeypatch.setattr("xarrayrf._resample._crop_window", lambda *args: None)
+    monkeypatch.setattr("xarrayrf._resampling._crop_window", lambda *args: None)
     whole = xrf.resample(source, target, method=method, domain=domain, fill_value=-9.0).values
     # The cubic prefilter margin leaves ~2e-14 of a boundary change (CROP_MARGIN). Offsets
     # avoid exact half-sample ties, where nearest may pick either equidistant neighbour.
@@ -931,7 +931,7 @@ def test_linear_nan_buffers_are_reused_per_slice_and_released(
 ) -> None:
     import weakref
 
-    monkeypatch.setattr("xarrayrf._resample.POSITION_CACHE_BYTES", cache_bytes)
+    monkeypatch.setattr("xarrayrf._resampling.POSITION_CACHE_BYTES", cache_bytes)
     values = np.stack([ramp(), ramp() + 20, ramp() + 40])
     values[:, 1, 2, 2] = np.nan
     source = volume(values, extra={"context": 7, "echo": [0, 1, 2]})
@@ -1000,3 +1000,116 @@ def test_linear_nan_cells_hold_missing_edges_and_outside_fill(general: bool) -> 
     target = xrf.Grid(transform, {"i": ("i", [-0.75, -0.25, 3.25, 3.75])})
     result = xrf.resample(source, target, domain="cells", fill_value=-9)
     assert_allclose(result, [-9.0, np.nan, np.nan, -9.0], rtol=0, atol=ATOL)
+
+
+def test_large_origin_range_index_lattice_path_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    index = RangeIndex.arange(1e9, 1e9 + 3, 0.1, coord_name="i", dim="i")
+    values = np.arange(index.size, dtype=np.float64)
+    array = xr.DataArray(values, dims="i", coords=xr.Coordinates.from_xindex(index))
+    source = xrf.Geometry(array, _nan_line(values).transform, dims=("i",))
+
+    def refuse_general(*args: object) -> None:
+        raise AssertionError("an exact RangeIndex step must use the lattice path")
+
+    monkeypatch.setattr("xarrayrf._resampling._general_map", refuse_general)
+    assert_array_equal(xrf.resample(source, source).values, values)
+    target_index = RangeIndex.arange(1e9 + 0.025, 1e9 + 2.925, 0.1, coord_name="i", dim="i")
+    target = xrf.Geometry(
+        xr.DataArray(
+            np.zeros(target_index.size), dims="i", coords=xr.Coordinates.from_xindex(target_index)
+        ),
+        source.transform,
+        dims=("i",),
+    )
+    expected = (float(target_index.start) - float(index.start)) / float(index.step) + np.arange(
+        target_index.size
+    )
+    assert_allclose(xrf.resample(source, target), expected, rtol=0, atol=1e-6)
+
+
+@pytest.mark.parametrize("invalid", [{"method": "bogus"}, {"block_points": 0}])
+def test_resample_options_checked_before_source_revalidation(invalid: dict[str, object]) -> None:
+    source = _nan_line([0.0, 1.0, 2.0])
+    target = source.grid()
+    del source.array.coords["i"]
+    with pytest.raises(ValueError, match=next(iter(invalid))):
+        xrf.resample(source, target, **invalid)  # type: ignore[arg-type]
+
+
+def test_resample_empty_target_does_not_revalidate_stale_source() -> None:
+    source = _nan_line([0.0, 1.0, 2.0])
+    target = xrf.Grid(source.transform, {"i": ("i", [])})
+    del source.array.coords["i"]
+    result = xrf.resample(source, target)
+    assert result.sizes == {"i": 0}
+    assert result.dtype == np.dtype(np.float64)
+
+
+@pytest.mark.parametrize("labels", [[0, 1, 2], [2**53, 2**53 + 1, 2**53 + 2]])
+def test_resample_anonymous_adoption_preserves_coordinate_dtype_kind(labels: list[int]) -> None:
+    source = _nan_line([0.0, 1.0, 2.0])
+    transform = source.transform
+    assert isinstance(transform, xrf.AffineTransform)
+    frame = xrf.ReferenceFrame.anonymous(source.frame.coordinate_system)
+    source = xrf.Geometry(
+        xr.DataArray(np.zeros(3), dims="i", coords={"i": np.array(labels, dtype=np.int64)}),
+        transform.with_endpoints(target=frame),
+        dims=("i",),
+    )
+    target = xrf.Grid(
+        transform.with_endpoints(target=xrf.ReferenceFrame.local(frame.coordinate_system)),
+        {"i": ("i", np.array(labels, dtype=np.float64))},
+    )
+    with pytest.raises(ValueError, match="bindings differ") as error:
+        xrf.resample(source, target)
+    assert "rf.assume_frame alone suffices" not in str(error.value)
+
+
+def test_resample_anonymous_adoption_ignores_a_range_index_step() -> None:
+    source = _nan_line([0.0, 1.0, 2.0])
+    transform = source.transform
+    assert isinstance(transform, xrf.AffineTransform)
+    frame = xrf.ReferenceFrame.anonymous(source.frame.coordinate_system)
+    index = RangeIndex.arange(0.0, 3.0, 1.0, coord_name="i", dim="i")
+    source = xrf.Geometry(
+        xr.DataArray(np.zeros(3), dims="i", coords=xr.Coordinates.from_xindex(index)),
+        transform.with_endpoints(target=frame),
+        dims=("i",),
+    )
+    target = xrf.Grid(
+        transform.with_endpoints(target=xrf.ReferenceFrame.local(frame.coordinate_system)),
+        {"i": ("i", [0.0, 1.0, 2.0])},
+    )
+    with pytest.raises(ValueError, match=r"rf\.assume_frame alone suffices"):
+        xrf.resample(source, target)
+
+
+@pytest.mark.parametrize("stale", ["empty_target", "empty_source", "frame_error"])
+def test_resample_revalidates_sizes_at_the_original_planning_stage(stale: str) -> None:
+    source = _nan_line([] if stale == "empty_source" else [0.0, 1.0, 2.0])
+    target = xrf.Geometry(
+        xr.DataArray(
+            np.zeros(0 if stale == "empty_target" else 3),
+            dims="i",
+            coords={"i": np.arange(0 if stale == "empty_target" else 3)},
+        ),
+        source.transform,
+        dims=("i",),
+    )
+    if stale == "empty_target":
+        del target.array.coords["i"]
+    else:
+        del source.array.coords["i"]
+    if stale == "frame_error":
+        transform = source.transform
+        assert isinstance(transform, xrf.AffineTransform)
+        target = xrf.Geometry(
+            target.array,
+            transform.with_endpoints(
+                target=xrf.ReferenceFrame.local(source.frame.coordinate_system)
+            ),
+            dims=("i",),
+        )
+    match = "different frames" if stale == "frame_error" else "not a coordinate"
+    with pytest.raises(ValueError, match=match):
+        xrf.resample(source, target)

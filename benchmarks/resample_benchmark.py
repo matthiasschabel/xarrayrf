@@ -19,7 +19,7 @@ from scipy import ndimage
 
 import xarrayrf as xrf
 from xarrayrf._positions import extents
-from xarrayrf._resample import _lattice_map
+from xarrayrf._resampling import _lattice_map
 
 FRAME = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y", "z"), ("mm",) * 3))
 
@@ -74,7 +74,12 @@ def main() -> None:
     # The baseline is scipy alone applying the same composed map resample() uses, with the same
     # edge mode and a separately timed prefilter, so the difference is xarrayrf's overhead.
     composed = _lattice_map(
-        source, target, ("k", "j", "i"), None, extents(source._sampling(), "samples")
+        source._sampling(),
+        target._sampling(),
+        source.dims,
+        ("k", "j", "i"),
+        None,
+        extents(source._sampling(), "samples"),
     )
     assert composed is not None
     values = source.array.values

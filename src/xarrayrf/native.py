@@ -11,9 +11,8 @@ from typing import Any, Literal, Protocol, cast, overload
 import numpy as np
 import numpy.typing as npt
 import xarray as xr
-from xarray.indexes import PandasIndex
 
-from ._binding import BindingIndex, grid_from_binding, grid_variables
+from ._binding import BindingIndex, binding_coordinates, grid_from_binding, grid_variables
 from ._encoding import Decoder, MalformedDataError, decode_intervals, encode
 from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
@@ -109,26 +108,7 @@ def grid_coordinates(grid: Grid) -> xr.Coordinates:
     """
     if not isinstance(grid, Grid):
         raise TypeError(f"grid must be a Grid, got {type(grid).__name__}")
-    return _binding_coordinates(grid_variables(grid), grid.transform, grid.dims, grid.intervals)
-
-
-def _binding_coordinates(
-    variables: Mapping[str, xr.Variable],
-    transform: SupportsPoints,
-    dims: tuple[str, ...],
-    intervals: Mapping[str, npt.ArrayLike] | None = None,
-) -> xr.Coordinates:
-    ordered = [name for dim in dims for name in variables if variables[name].dims == (dim,)]
-    ordered += [name for name in transform.source.axes if variables[name].ndim == 0]
-    variables = {name: variables[name] for name in ordered}
-    axes = {
-        name: PandasIndex.from_variables({name: variable}, options={})
-        for name, variable in variables.items()
-        if variable.ndim == 1
-    }
-    fixed = {name: variable for name, variable in variables.items() if variable.ndim == 0}
-    index = BindingIndex(axes, fixed, transform, dims, intervals)
-    return xr.Coordinates(variables, indexes={name: index for name in variables})
+    return binding_coordinates(grid_variables(grid), grid.transform, grid.dims, grid.intervals)
 
 
 def _assign_binding(array: xr.DataArray, coords: xr.Coordinates) -> xr.DataArray:
@@ -387,7 +367,7 @@ class _ReferenceFrameAccessor:
                 dims=grid.dims,
                 intervals=grid.intervals,
             )
-            coords = _binding_coordinates(variables, grid.transform, grid.dims, grid.intervals)
+            coords = binding_coordinates(variables, grid.transform, grid.dims, grid.intervals)
             names = grid.transform.source.axes
             stripped = array.drop_indexes([name for name in names if name in array.xindexes])
             return _assign_binding(stripped.drop_vars(list(conflicts)), coords)
@@ -415,7 +395,7 @@ class _ReferenceFrameAccessor:
                 f"source coordinates share dimension(s) {shared}; binding several "
                 "coordinates that vary along one dimension is not supported"
             )
-        coords = _binding_coordinates(
+        coords = binding_coordinates(
             variables, coordinate_transform, geometry.dims, geometry.intervals
         )
         stripped = array.drop_indexes([name for name in names if name in array.xindexes])

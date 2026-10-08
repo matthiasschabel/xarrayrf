@@ -35,6 +35,25 @@ def grid_variables(grid: Grid) -> dict[str, xr.Variable]:
     }
 
 
+def binding_coordinates(
+    variables: Mapping[str, xr.Variable],
+    transform: SupportsPoints,
+    dims: tuple[str, ...],
+    intervals: Mapping[str, npt.ArrayLike] | None = None,
+) -> xr.Coordinates:
+    ordered = [name for dim in dims for name in variables if variables[name].dims == (dim,)]
+    ordered += [name for name in transform.source.axes if variables[name].ndim == 0]
+    variables = {name: variables[name] for name in ordered}
+    axes = {
+        name: PandasIndex.from_variables({name: variable}, options={})
+        for name, variable in variables.items()
+        if variable.ndim == 1
+    }
+    fixed = {name: variable for name, variable in variables.items() if variable.ndim == 0}
+    index = BindingIndex(axes, fixed, transform, dims, intervals)
+    return xr.Coordinates(variables, indexes={name: index for name in variables})
+
+
 def grid_from_binding(coordinates: xr.Coordinates, *, index: BindingIndex | None = None) -> Grid:
     """Snapshot source coordinates in the dimension order carried by their binding.
 

@@ -8,9 +8,13 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 import xarrayrf
 
-INTEGRATION_MODULES = frozenset({"_geometry", "_resample", "_frame_coordinates", "_binding"})
+INTEGRATION_MODULES = frozenset(
+    {"_geometry", "_resample", "_frame_coordinates", "_binding", "_grid_selection"}
+)
 """Modules allowed to import xarray; everything else in the package is core."""
 
 CORE_WITHOUT_XARRAY = textwrap.dedent(
@@ -33,13 +37,23 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
     assert xrf.decode(xrf.encode(grid)) == grid
     assert hash(grid) == hash(xrf.decode(xrf.encode(grid)))
     assert grid.is_coincident(grid)
-    for method, indexers in (("isel", {"i": slice(None, None, -1)}), ("sel", {"i": 1})):
-        try:
-            getattr(grid, method)(**indexers)
-        except ImportError as error:
-            assert f"Grid.{method} requires xarray" in str(error)
-        else:
-            raise AssertionError(f"Grid.{method} must need xarray")
+    from xarrayrf._frame_adoption import adopt_frame
+    from xarrayrf._resampling import plan, execute
+    assert adopt_frame(transform, frame) == transform
+    assert not any(name.split(".")[0] == "scipy" for name in sys.modules)
+    for indexer, expected in (
+        (1, {"i": 1}),
+        (slice(None, None, -1), {"i": ("i", [3, 1, 0])}),
+        ([2, 0], {"i": ("i", [3, 0])}),
+        (np.array([True, False, True]), {"i": ("i", [0, 3])}),
+    ):
+        assert grid.isel(i=indexer) == xrf.Grid(transform, expected)
+    try:
+        grid.sel(i=1)
+    except ImportError as error:
+        assert "Grid.sel requires xarray" in str(error)
+    else:
+        raise AssertionError("Grid.sel must need xarray")
     assert grid.transpose().dims == ("i",)
     uniform = xrf.Grid(transform, {"i": ("i", [0, 1, 2])})
     np.testing.assert_allclose(uniform.lattice().origin, [1.0], atol=1e-12)
@@ -81,33 +95,46 @@ def xarray_imports(source: str) -> list[int]:
 
 
 def test_core_modules_never_import_xarray_even_lazily() -> None:
-    """Catches imports the runtime check would miss: inside functions or never executed."""
+    """Catches integration imports at any depth, including never executed functions."""
     package = Path(xarrayrf.__file__).parent
     core = [
         path
         for path in package.glob("_*.py")
-        if path.stem not in INTEGRATION_MODULES | {"_grid"} and path.name != "__init__.py"
+        if path.stem not in INTEGRATION_MODULES and path.name != "__init__.py"
     ]
     assert core, "no core modules found; the check would pass vacuously"
-    offenders = {path.name: xarray_imports(path.read_text()) for path in core}
-    assert {name: lines for name, lines in offenders.items() if lines} == {}
+    assert package / "_resampling.py" in core
+    offenders = {}
+    for path in core:
+        offenders[path.name] = sampling_imports_with_grid_exemption(path.stem, path.read_text())
+    assert {name: imports for name, imports in offenders.items() if imports} == {}
 
 
-def test_grid_imports_xarray_only_inside_selection_methods() -> None:
+def sampling_imports_with_grid_exemption(module: str, source: str) -> set[str]:
+    tree = ast.parse(source)
+    if module == "_grid":
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == "Grid":
+                for method in node.body:
+                    if isinstance(method, ast.FunctionDef) and method.name == "sel":
+                        method.body = [ast.Pass()]
+    return forbidden_sampling_imports(ast.unparse(tree))
+
+
+def test_grid_imports_integration_only_inside_grid_sel() -> None:
     source = (Path(xarrayrf.__file__).parent / "_grid.py").read_text()
-    allowed: list[int] = []
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.FunctionDef) and node.name in ("isel", "sel"):
-            imports = xarray_imports(ast.unparse(node))
-            assert len(imports) == 1
-            allowed.extend(
-                child.lineno
-                for child in ast.walk(node)
-                if isinstance(child, ast.Import)
-                and any(alias.name == "xarray" for alias in child.names)
-            )
-    assert len(allowed) == 2
-    assert xarray_imports(source) == sorted(allowed)
+    assert xarray_imports(source) == []
+    assert forbidden_sampling_imports(source) == {"._grid_selection"}
+    assert sampling_imports_with_grid_exemption("_grid", source) == set()
+    assert sampling_imports_with_grid_exemption("_grid", "def sel():\n    import xarray\n") == {
+        "xarray"
+    }
+    assert sampling_imports_with_grid_exemption(
+        "_grid", "class Other:\n    def sel(self):\n        import xarray\n"
+    ) == {"xarray"}
+    assert sampling_imports_with_grid_exemption(
+        "_grid", "class Grid:\n    def isel(self):\n        import xarray\n"
+    ) == {"xarray"}
 
 
 def test_the_import_scan_detects_an_xarray_import() -> None:
@@ -139,6 +166,75 @@ def forbidden_core_imports(source: str) -> set[str]:
         for name in import_names(source)
         if name.removeprefix("xarrayrf.").lstrip(".").split(".")[0] in forbidden
     }
+
+
+def forbidden_sampling_imports(source: str) -> set[str]:
+    forbidden = INTEGRATION_MODULES | {
+        "xarray",
+        "pandas",
+        "native",
+        "anatomy",
+        "nifti",
+        "dicom",
+        "ngff",
+        "geotiff",
+    }
+    names = import_names(source)
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module == "xarrayrf":
+            names.update("xarrayrf." + alias.name for alias in node.names)
+    return {
+        name
+        for name in names
+        if name.removeprefix("xarrayrf.").lstrip(".").split(".")[0] in forbidden
+    }
+
+
+def test_sampling_import_scan_can_fail() -> None:
+    for name in sorted(INTEGRATION_MODULES | {"native", "nifti", "dicom", "ngff", "geotiff"}):
+        assert forbidden_sampling_imports(f"def f():\n    from .{name} import value\n") == {
+            f".{name}"
+        }
+        assert forbidden_sampling_imports(f"from xarrayrf import {name}\n") == {f"xarrayrf.{name}"}
+    assert forbidden_sampling_imports("def f():\n    import pandas as pd\n") == {"pandas"}
+    assert forbidden_sampling_imports("from xarray.core import indexing\n") == {"xarray.core"}
+    assert forbidden_sampling_imports("from ._sampling import Sampling\n") == set()
+
+
+def test_core_resampling_without_xarray() -> None:
+    pytest.importorskip("scipy")
+    script = textwrap.dedent(
+        """
+        import sys
+        sys.modules["xarray"] = None
+        sys.modules["pandas"] = None
+        import numpy as np
+        import xarrayrf as xrf
+        from xarrayrf._resampling import plan, execute
+
+        frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x",), ("mm",)))
+        transform = xrf.AffineTransform.from_matrix(
+            source=xrf.ArrayCoordinates(("u",), ("mm",)), target=frame, matrix=((1.0,),), translation=(0.0,)
+        )
+        source = xrf.Grid(transform, {"u": ("i", [0, 2, 4])})
+        target = xrf.Grid(transform, {"u": ("j", [1, 3])})
+        prepared = plan(
+            source._sampling(), target._sampling(), source_order=("i",), target_order=("j",),
+            dtype=np.dtype(np.float64), transform=None, method="linear", fill_value=np.nan,
+            domain="samples", block_points=1, other_dims=()
+        )
+        values = np.array([2.0, 6.0, 10.0])
+        if prepared.window is not None:
+            values = values[prepared.window]
+        # Each target is halfway between neighbours: (2 + 6)/2 and (6 + 10)/2.
+        np.testing.assert_allclose(execute(prepared, values), [4.0, 8.0], rtol=0, atol=1e-12)
+        assert not any(name.startswith("xarray.") for name in sys.modules)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def forbidden_adapter_imports(source: str, *, anatomy: bool, dicom: bool = False) -> set[str]:

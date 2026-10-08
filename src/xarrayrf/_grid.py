@@ -24,6 +24,7 @@ from ._positions import (
     transform_points,
 )
 from ._sampling import LATTICE_TOLERANCE, AxisSampling, Domain, Sampling, freeze_intervals
+from ._selection import positional_indexer, select_axis
 from ._transform import SupportsPoints, check_transform
 from ._validation import check_names, check_str, frozen_coordinate_array
 
@@ -297,27 +298,39 @@ class Grid:
         return is_coincident(self._sampling(), other._sampling(), check_tolerance(tolerance))
 
     def isel(self, **indexers: Any) -> Grid:
-        """Select samples by dimension using xarray's positional indexing semantics.
+        """Select samples by dimension using positional indexing.
 
         Integers retain scalar axes; lists, integer arrays, boolean masks and slices
         retain varying axes. Negative integer indices count from the end.
 
         Raises:
-            ImportError: If xarray is unavailable.
             ValueError: If dimensions are unknown or indexing changes geometry dimensions.
             IndexError: If an indexer is invalid or outside its dimension.
         """
-        try:
-            import xarray as xr
-        except ImportError as error:
-            raise ImportError(
-                "Grid.isel requires xarray; install xarray to select samples"
-            ) from error
-        from ._binding import grid_from_binding
-        from .native import grid_coordinates
-
-        selected = xr.Dataset(coords=grid_coordinates(self)).isel(indexers)
-        return grid_from_binding(selected.coords)
+        unknown = set(indexers) - set(self._dims)
+        if unknown:
+            raise ValueError(
+                f"Dimensions {unknown} do not exist. Expected one or more of {self._dims}"
+            )
+        selections = {
+            dim: positional_indexer(indexer, dim=dim) for dim, indexer in indexers.items()
+        }
+        coordinates: dict[str, Coordinate] = {}
+        axes = {axis.axis: axis for axis in self._axes}
+        intervals = dict(self._intervals)
+        for name, entry in self.coordinates.items():
+            if not isinstance(entry, tuple) or entry[0] not in selections:
+                coordinates[name] = entry
+                continue
+            dim, _ = entry
+            axis = axes[name]
+            values, _, rows = select_axis(
+                axis.values, selections[dim], intervals=intervals.get(name)
+            )
+            coordinates[name] = (dim, values) if values.ndim else values
+            if rows is not None:
+                intervals[name] = rows
+        return Grid(self._transform, coordinates, intervals=intervals)
 
     def sel(self, **indexers: Any) -> Grid:
         """Select samples by source-coordinate label using xarray's selection semantics.
@@ -330,16 +343,12 @@ class Grid:
             ValueError: If indexing changes geometry dimensions.
         """
         try:
-            import xarray as xr
+            from ._grid_selection import select_grid_labels
         except ImportError as error:
             raise ImportError(
                 "Grid.sel requires xarray; install xarray to select samples"
             ) from error
-        from ._binding import grid_from_binding
-        from .native import grid_coordinates
-
-        selected = xr.Dataset(coords=grid_coordinates(self)).sel(indexers)
-        return grid_from_binding(selected.coords)
+        return select_grid_labels(self, indexers)
 
     def transpose(self, *dims: str) -> Grid:
         """Reorder every varying dimension; with no arguments, reverse dimension order.
