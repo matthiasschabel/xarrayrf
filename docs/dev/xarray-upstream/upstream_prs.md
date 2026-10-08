@@ -1,7 +1,7 @@
 # Upstream xarray bug-fix pull requests
 
 **Status:** Active
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-08
 **Scope:** The five independent bug-fix PRs split from the local patch series: #11613 and #11615
 and #11616 merged, #11617 and #11621 open. No hook API is proposed here.
 
@@ -18,7 +18,7 @@ posted text. Reproducers are in `tools/upstream_reproducers/pr_<number>.py`, bui
 `RasterIndex` from xarray's custom-index guide; run them with `tools/xrpr PATH_TO_XARRAY`
 ([docs/upstream.md](../../upstream.md)). Historical bug-fix base: `dfd25c72`.
 
-PR status and remote heads below were checked through the GitHub API on 2026-10-06.
+PR status and remote heads below were checked through the GitHub API on 2026-10-08.
 Local worktrees can lag those heads. The descriptions below explain the local fixes; consult
 the posted PR for its newest implementation and review threads. No containing released-xarray
 version has been verified;
@@ -85,8 +85,10 @@ Review notes:
 
 ### #11617 Respect drop=True for scalar coordinates an index keeps (open)
 
-https://github.com/pydata/xarray/pull/11617, head `ee1b7f7023b950e592ccffa7713d78cd1b34b318` on
-`dfd25c72`. Local patch 2.
+https://github.com/pydata/xarray/pull/11617, head `81a8f22c` (2026-10-08; merged from main
+`4929aa90`). Local patch 2 has the same stable patch ID as the posted code diff, excluding
+whats-new. A merge from main had dropped the whats-new entry; `81a8f22c` restores it under
+v2026.09.1 Bug Fixes.
 
 An index whose `isel` rebuilds the selected position as a 0-d coordinate returns it in
 `index_variables`, and the `isel` paths copy it into the result before `drop` is considered, so
@@ -110,9 +112,10 @@ Review notes:
 
 ### #11621 Raise when Dataset.update would replace an index with another type (open)
 
-https://github.com/pydata/xarray/pull/11621, remote head
-`78074ee2f9d776ffc77df9fac635dedd7aeafcae`. Series 4 patch 7 reflects an earlier revision;
-refresh from the posted diff in the next series. Local patch 7b stays after merge.
+https://github.com/pydata/xarray/pull/11621, head `13be639d` (2026-10-08). Series 4 patch 7
+has the same stable patch ID as the posted code diff, excluding whats-new, so it needs no
+refresh. `13be639d` moves the whats-new entry from released v2026.09.0 to v2026.09.1 Breaking
+Changes. Local patch 7b stays after merge.
 
 `Dataset.update`, `ds[name] = value` and `assign` align the incoming object and then give it
 merge priority, so when labels are equal its default `PandasIndex` silently replaces the
@@ -132,7 +135,9 @@ ds["nir"] = nir.drop_indexes(["x", "y"])  # keeps the RasterIndex
 Review state: dcherian requested changes on 2026-09-28 (raise instead of keeping the Dataset's
 index; resolve with `drop_indexes`). The rework and a follow-up (coerced pandas values, whole
 group hint, explicit-replacement test, single `xindexes` binding, coordinate-set mismatch test)
-were pushed and the author replied on the PR. Review remains open.
+were pushed and the author replied on the PR; re-review was requested from dcherian on
+2026-10-05, with no newer feedback as of 2026-10-08. The PR title still names the first design
+(keep the Dataset's index); retitling to the raise behavior is pending.
 
 Possibly outstanding, check against the posted PR before responding:
 

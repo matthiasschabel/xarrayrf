@@ -1,7 +1,7 @@
 # Maintained xarray patches
 
 **Status:** Active
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-08
 **Scope:** The local xarray patch series that implements xarrayrf's native-operation contract,
 its pin in `pyproject.toml`, and its validation.
 
@@ -50,6 +50,16 @@ control confirmed different patches do not share IDs). PR-derived patches match 
 used to publish this immutable series, without their whats-new bullets. Current merge/review
 state and newer remote heads live in [upstream_prs.md](upstream_prs.md); refresh changed PR
 patches in a new series rather than modifying the published tag.
+
+#### Sync check (2026-10-08)
+
+Patches 2 and 7 have the same `git patch-id --stable` as the posted #11617 (`81a8f22c`) and
+#11621 (`13be639d`) code diffs, excluding whats-new (a negative control differs); neither needs
+refreshing. Against upstream `main` `4929aa90`, `git cherry` marks only patch 6 as upstream
+(#11616, `23c9dd1`, not in v2026.09.0); the other eight are still needed. #11613 and #11615 are
+in v2026.09.0. The minimal next series is series 4 without patch 6, on a base containing
+`23c9dd1`. Lanes: xarrayrf on `main` `4929aa90` 1,908 passed, 42 xfailed, probe 66 ok / 27
+holes; on series 4 by path 1,950 passed, probe 93 ok / 0 holes.
 
 #### Series 4 validation (2026-09-28)
 
