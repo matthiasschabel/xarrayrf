@@ -97,8 +97,10 @@ non-binding operands. Concatenation along a geometry dimension refuses. Along an
 dimension (time, echo, a new stacking dimension) xarray only aligns the operands' bindings:
 identical grids pass through, and differing grids join like any alignment, so pass
 `join="exact"` to require identical ones (xarray is moving its `concat` default to `"exact"`).
-Native resampling results carry the target's intervals, never the source's; core `resample`
-retains its ordinary unframed result contract.
+Native resampling claims mapped source intervals on pass-through axes only when valid under the
+unchanged target's `sample_offset`; all other axes claim none. See the
+[interval-claim design](dev/architecture/support_aware_resampling_design.md#first-slices-interval-claims-and-the-box-methods).
+Core `resample` retains its ordinary unframed result contract.
 
 ## Glossary
 

@@ -18,7 +18,7 @@ from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
 from ._geometry import Geometry, adopt_frame, check_coordinate_unit
 from ._grid import Coordinate, Grid
-from ._resample import Method, resample
+from ._resample import Method, _resample_with_intervals
 from ._sampling import Domain
 from ._transform import SupportsPoints
 from ._validation import check_names
@@ -503,6 +503,10 @@ class _ReferenceFrameAccessor:
         Empty targets return empty framed values. Empty sources with non-empty targets raise
         ValueError because there is nothing to sample from.
 
+        With a separable affine map, axes whose target samples coincide with source samples
+        retain mapped source intervals only when valid under the target's sample_offset;
+        other axes declare none. The target transform is unchanged.
+
         Args:
             target: Grid, framed array or geometry whose samples define the result.
             transform: Mapping from the target frame to the source frame, if needed.
@@ -525,7 +529,7 @@ class _ReferenceFrameAccessor:
             target_geometry = target
         else:
             raise TypeError("target must be a framed DataArray, Geometry or Grid")
-        result = resample(
+        result, intervals = _resample_with_intervals(
             source,
             target_geometry,
             transform=transform,
@@ -535,14 +539,12 @@ class _ReferenceFrameAccessor:
         )
         result.name = self._array.name
         result.attrs = {k: v for k, v in self._array.attrs.items() if k != _BINDING_ATTR}
-        if isinstance(target_geometry, Grid):
-            return cast(xr.DataArray, result.rf.frame(target_geometry))
         return cast(
             xr.DataArray,
             result.rf.frame(
                 target_geometry.transform,
                 dims=target_geometry.dims,
-                intervals=target_geometry.intervals,
+                intervals=intervals,
             ),
         )
 

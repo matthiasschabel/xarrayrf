@@ -573,7 +573,7 @@ def test_empty_intervals_round_trip(origin: str, native: bool) -> None:
 
 
 @pytest.mark.parametrize("method", ["nearest", "linear", "cubic"])
-def test_resample_slab_uses_source_support_and_retains_only_target_intervals(method: Any) -> None:
+def test_resample_slab_uses_source_domain_without_claiming_target_intervals(method: Any) -> None:
     source = frame_array(np.array([7.0]), grid([0], width=4))
     target = grid([-2, 0, 2, 3], width=0.5)
     pytest.importorskip("scipy", minversion="1.18")
@@ -584,9 +584,107 @@ def test_resample_slab_uses_source_support_and_retains_only_target_intervals(met
     ):
         result = source.rf.resample_to(operand, domain="cells", method=method)
         assert_allclose(result.values, [7, 7, 7, np.nan], rtol=0, atol=ATOL)
-        assert result.rf.grid == target
+        assert result.rf.grid == Grid(target.transform, target.coordinates)
     without = Grid(target.transform, target.coordinates)
     assert not source.rf.resample_to(without, domain="cells").rf.grid.intervals
+
+
+@pytest.mark.parametrize("method", ["nearest", "linear", "cubic"])
+@pytest.mark.parametrize("kind", ["grid", "array", "geometry"])
+def test_resample_coincident_stack_keeps_source_intervals(method: Any, kind: str) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
+    rows = np.array([[-0.5, 0.5], [1, 3], [2.5, 7.5]])  # One gap and one overlap.
+    value = Grid(mapping(), {"z": ("slice", [0, 2, 5])}, intervals={"z": rows})
+    source = frame_array(np.array([1.0, 3.0, 8.0]), value)
+    for target_grid in (value, grid(width=2), Grid(value.transform, value.coordinates)):
+        target_array = frame_array(np.zeros(3), target_grid)
+        target = {"grid": target_grid, "array": target_array, "geometry": target_array.rf.geometry}[
+            kind
+        ]
+        result = source.rf.resample_to(target, method=method)
+        assert_array_equal(result.rf.grid.intervals["z"], rows)
+        assert_allclose(result.values, source.values, rtol=0, atol=ATOL)
+    plain = frame_array(source.data, Grid(value.transform, value.coordinates))
+    assert not plain.rf.resample_to(value, method=method).rf.grid.intervals
+    assert not resample(source.rf.geometry, value, method=method).rf.is_framed
+
+
+@pytest.mark.parametrize("position", [2.0, 2.5])
+def test_resample_retained_scalar_claims_only_a_coincident_slice(position: float) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
+    source = frame_array(np.arange(3.0), grid())
+    target = Grid(mapping(), {"z": position})
+    result = source.rf.resample_to(target)
+    assert result.dims == ()
+    if position == pytest.approx(2, rel=0, abs=ATOL):
+        assert_array_equal(result.rf.grid.intervals["z"], [1.5, 2.5])
+    else:
+        assert not result.rf.grid.intervals
+
+
+@pytest.mark.parametrize("offset", [None, 0.0])
+def test_resample_drops_claims_incompatible_with_target_offset(offset: float | None) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
+    source = frame_array(np.arange(3.0), grid())
+    target = Grid(mapping(offset), source.rf.grid.coordinates)
+    result = source.rf.resample_to(target)
+    assert result.rf.coordinate_transform is target.transform
+    assert not result.rf.grid.intervals
+
+
+@pytest.mark.parametrize("source_offset,target_offset", [(0.5, 0.5), (0.25, 0.75), (0.25, 0.25)])
+def test_resample_reversed_units_claim_rows_only_with_reflected_offset(
+    source_offset: float, target_offset: float
+) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
+    source_transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("k",), ("1",), sample_offset=(source_offset,)),
+        target=mapping().target,
+        matrix=[[2]],
+        translation=[10],
+    )
+    rows = np.arange(3)[:, None] + np.array([-source_offset, 1 - source_offset])
+    source = frame_array(
+        np.arange(3.0), Grid(source_transform, {"k": ("slice", [0, 1, 2])}, intervals={"k": rows})
+    )
+    target_transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("slice_offset",), ("mm",), sample_offset=(target_offset,)),
+        target=source_transform.target,
+        matrix=[[-1]],
+        translation=[14],
+    )
+    target = Grid(target_transform, {"slice_offset": ("slice", [0, 2, 4])})
+    result = source.rf.resample_to(target)
+    assert result.rf.coordinate_transform is target.transform
+    assert_allclose(result.values, [2, 1, 0], rtol=0, atol=ATOL)
+    if source_offset + target_offset == pytest.approx(1, rel=0, abs=ATOL):
+        assert_allclose(
+            result.rf.grid.intervals["slice_offset"],
+            (4 - 2 * rows[::-1])[:, ::-1],
+            rtol=0,
+            atol=ATOL,
+        )
+    else:
+        assert not result.rf.grid.intervals
+
+
+@pytest.mark.parametrize(
+    "values,position,claims",
+    [
+        ([0, 2, 5], 1.0, False),
+        ([0, 2, 5], 2 + 1e-10, True),
+        ([0, 2, 5], 2 + 1e-8, False),
+        ([1000], np.nextafter(1000.0, np.inf), True),
+        ([1000], 1000 + 5e-7, False),
+    ],
+)
+def test_resample_claim_matching_uses_local_spacing_and_singleton_roundoff(
+    values: list[int], position: float, claims: bool
+) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
+    source = frame_array(np.zeros(len(values)), grid(values))
+    result = source.rf.resample_to(Grid(mapping(), {"z": ("slice", [position])}))
+    assert bool(result.rf.grid.intervals) is claims
 
 
 def test_public_binding_index_reindex_like_refuses_plain_index() -> None:

@@ -1384,7 +1384,7 @@ def test_anonymous_adoption_retains_declared_support_checks(framed: xr.DataArray
         _ = first + adopted
     pytest.importorskip("scipy", minversion="1.18")
     onto_first = adopted.rf.resample_to(first)
-    assert onto_first.rf.grid == first.rf.grid
+    assert onto_first.rf.grid == adopted.rf.grid
     assert_allclose(onto_first, first, rtol=0, atol=1e-12)
 
 

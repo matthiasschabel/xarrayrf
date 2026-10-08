@@ -107,6 +107,59 @@ class PointOnly:
 
 
 @pytest.mark.parametrize(
+    "mapping_kind", ["in_plane", "equivalent", "explicit", "permuted", "rotated", "non_affine"]
+)
+def test_native_interval_claims_follow_composed_coordinate_axes(mapping_kind: str) -> None:
+    source_view = volume(ramp())
+    rows = np.arange(4)[:, None] + [-0.25, 0.25]
+    coordinates = xrf.ArrayCoordinates(IJK.axes, IJK.units, sample_offset=(0.5,) * 3)
+    source_transform = xrf.AffineTransform.from_matrix(
+        source=coordinates, target=LPS, matrix=np.eye(3), translation=[0, 0, 0]
+    )
+    source = source_view.array.rf.frame(
+        source_transform, dims=source_view.dims, intervals={"k": rows}
+    )
+    matrix = np.eye(3)
+    translation = np.zeros(3)
+    frame = LPS
+    target_coordinates = dict(source.rf.grid.coordinates)
+    claimed_axis = "k"
+    transform: xrf.SupportsPoints | None = None
+    if mapping_kind == "in_plane":
+        matrix = np.diag([0.5, 0.5, 1])
+    elif mapping_kind == "equivalent":
+        frame, matrix = RAS, np.diag([-1, -1, 1])
+    elif mapping_kind == "explicit":
+        frame = xrf.ReferenceFrame.local(LPS.coordinate_system)
+        matrix = np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]])
+        translation = np.array([3, 2, 1])
+        transform = xrf.AffineTransform.from_matrix(
+            source=frame, target=LPS, matrix=matrix.T, translation=-matrix.T @ translation
+        )
+    elif mapping_kind == "rotated":
+        matrix[:2, :2] = [[0.6, -0.8], [0.8, 0.6]]
+    elif mapping_kind == "permuted":
+        matrix = np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]])
+        target_coordinates.update(i=("i", np.arange(4)), k=("k", np.arange(6)))
+        claimed_axis = "i"
+    else:
+        transform = Shift(LPS, LPS, 0)
+    target = xrf.Grid(
+        xrf.AffineTransform.from_matrix(
+            source=coordinates, target=frame, matrix=matrix, translation=translation
+        ),
+        target_coordinates,
+    )
+    result = source.rf.resample_to(target, transform=transform)
+    assert result.rf.coordinate_transform is target.transform
+    if mapping_kind in ("rotated", "non_affine"):
+        assert not result.rf.grid.intervals
+    else:
+        assert set(result.rf.grid.intervals) == {claimed_axis}
+        assert_array_equal(result.rf.grid.intervals[claimed_axis], rows)
+
+
+@pytest.mark.parametrize(
     ("shape", "matrix", "translation"),
     [
         ((4, 5, 6), np.eye(3), (0.0, 0.0, 0.0)),

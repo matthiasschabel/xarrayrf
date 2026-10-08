@@ -1,7 +1,7 @@
 # Geometry, cells and resampling
 
 **Status:** Implemented
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-08
 **Scope:** `Grid` (the immutable sampling value), `Geometry` (the read-through view),
 `ArrayCoordinates.sample_offset` and the
 `"samples" | "cells"` domain, `Geometry.is_coincident`, core `resample` including the same-grid
@@ -180,8 +180,10 @@ uniform stack and millimetres for `slice_offset`.
   mismatches and skips axes on excluded dimensions; coordinate merging raises xarray's
   `MergeError`. Joins and compatibility checks still raise `ValueError` naming the axis.
   Concat refuses along a geometry dimension; along other dimensions bindings only align.
-- All grid doors and native encoding preserve intervals. Native resampling carries only the
-  target's support; core resampling continues to return an unframed array. Existing xarray
+- All grid doors and native encoding preserve intervals. Native resampling claims mapped source
+  intervals on pass-through axes only when valid under the unchanged target's `sample_offset`;
+  all other axes claim none (see [interval claims](support_aware_resampling_design.md#first-slices-interval-claims-and-the-box-methods)).
+  Core resampling continues to return an unframed array. Existing xarray
   hook requirements still apply to mixed-index operations and `swap_dims`.
 
 In a 2-D frame a pixel has in-plane extent only; placing it in 3-D needs a third source axis

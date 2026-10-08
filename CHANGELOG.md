@@ -4,6 +4,9 @@
 
 ### Changed
 
+- `rf.resample_to` now claims mapped source intervals only on pass-through axes whose rows
+  validate under the target's `sample_offset`. Other axes declare no intervals; target
+  intervals are no longer copied onto interpolated results. The target transform is unchanged.
 - `Grid.isel` selects without xarray. Valid indexers return the same Grids; invalid ones raise
   uniform `IndexError` or `ValueError`. String indexers raise `IndexError` instead of `KeyError`
   or `TypeError`, and a `("dim", scalar)` tuple selects like the scalar instead of being refused.

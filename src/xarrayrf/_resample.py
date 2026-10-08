@@ -6,6 +6,7 @@ from collections.abc import Iterator, Mapping
 from functools import partial
 
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
 
 from ._affine import AffineTransform
@@ -138,6 +139,29 @@ def resample(
             collides with a source non-geometry coordinate.
         ImportError: If scipy is not installed, after input and frame validation.
     """
+    result, _ = _resample_with_intervals(
+        source,
+        target,
+        transform=transform,
+        method=method,
+        fill_value=fill_value,
+        domain=domain,
+        block_points=block_points,
+    )
+    return result
+
+
+def _resample_with_intervals(
+    source: Geometry,
+    target: Geometry | Grid,
+    *,
+    transform: SupportsPoints | None = None,
+    method: Method = "linear",
+    fill_value: float = np.nan,
+    domain: Domain = "samples",
+    block_points: int = BLOCK_POINTS,
+) -> tuple[xr.DataArray, dict[str, npt.NDArray[np.float64]]]:
+    """Return the unframed values and per-axis claims from the same validated plan."""
     if not isinstance(source, Geometry) or not isinstance(target, Geometry | Grid):
         raise TypeError("source must be Geometry and target must be Geometry or Grid")
     check_options(method, block_points)
@@ -220,7 +244,8 @@ def resample(
     for name in result.xindexes:
         if name in source.array.coords and set(source.array.coords[name].dims) <= set(other_dims):
             result.coords[name].attrs = dict(source.array.coords[name].attrs)
-    return result.drop_vars(
+    result = result.drop_vars(
         [name for name in result.coords if set(result.coords[name].dims) & set(plan.source_dims)],
         errors="ignore",
     ).assign_coords({**source_coordinates, **target_coordinates})
+    return result, plan.intervals

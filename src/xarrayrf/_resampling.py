@@ -12,12 +12,21 @@ import numpy as np
 import numpy.typing as npt
 
 from ._affine import AffineTransform, equilibrated_inverse
+from ._array_coordinates import ArrayCoordinates
 from ._frame import ReferenceFrame
 from ._frame_adoption import adopt_frame
 from ._frame_compatibility import anonymous_frame_difference
 from ._orientation import coordinate_system_change
 from ._positions import check_domain, extents, lattice, lattice_parts, locator, sample_columns
-from ._sampling import LATTICE_TOLERANCE, POSITION_SLACK, Domain, Sampling
+from ._sampling import (
+    LATTICE_TOLERANCE,
+    POSITION_SLACK,
+    AxisSampling,
+    Domain,
+    Sampling,
+    coordinate_to_position,
+    freeze_intervals,
+)
 from ._transform import SupportsAffine, SupportsPoints, check_transform
 
 type Method = Literal["nearest", "linear", "cubic"]
@@ -283,6 +292,107 @@ def _same_grid_indices(
 
 
 @dataclass(frozen=True)
+class _AxisClass:
+    """One target axis mapped by ``c_s = a * c_t + b``; indices mark pass-through."""
+
+    source_axis: AxisSampling
+    a: float
+    b: float
+    indices: npt.NDArray[np.intp] | None
+
+    @property
+    def pass_through(self) -> bool:
+        return self.indices is not None
+
+
+def _classify_axes(
+    source: Sampling, target: Sampling, frame_map: SupportsPoints | None
+) -> tuple[_AxisClass, ...] | None:
+    """Classify in target coordinate-axis order, including retained scalar axes."""
+    if not isinstance(source.transform, SupportsAffine) or not isinstance(
+        target.transform, SupportsAffine
+    ):
+        return None
+    if frame_map is not None and not isinstance(frame_map, SupportsAffine):
+        return None
+    matrix = source.transform.matrix
+    if matrix.shape[0] != matrix.shape[1]:
+        return None
+    if any(axis.dim is None or axis.values.size == 0 for axis in source.axes):
+        return None
+    try:
+        inverse = equilibrated_inverse(matrix)
+    except ValueError:
+        # Claims are metadata: an uninvertible source leaves location errors to the planner.
+        return None
+    linear = target.transform.matrix
+    offset = target.transform.translation
+    if frame_map is not None:
+        linear = frame_map.matrix @ linear
+        offset = frame_map.matrix @ offset + frame_map.translation
+    linear = inverse @ linear
+    offset = inverse @ (offset - source.transform.translation)
+    if linear.shape[0] != linear.shape[1]:
+        return None
+    # Use the gather allowance relative to each row, so coordinate units do not
+    # impose an absolute threshold on a scaled permutation.
+    significant = np.abs(linear) > ROUNDING_ALLOWANCE * np.max(
+        np.abs(linear), axis=1, keepdims=True
+    )
+    if not (
+        np.all(np.count_nonzero(significant, axis=0) == 1)
+        and np.all(np.count_nonzero(significant, axis=1) == 1)
+    ):
+        return None
+    classes = []
+    for j, target_axis in enumerate(target.axes):
+        i = int(np.flatnonzero(significant[:, j])[0])
+        axis = source.axes[i]
+        a, b = float(linear[i, j]), float(offset[i])
+        # Fractional positions scale the gather allowance by the local spacing;
+        # singletons reuse coordinate_to_position's SINGLE_SAMPLE_TOLERANCE rule.
+        positions = coordinate_to_position(
+            axis.values, a * target_axis.values + b, extrapolate=True
+        )
+        rounded = np.rint(positions)
+        matches = (
+            np.isfinite(positions)
+            & (np.abs(positions - rounded) <= ROUNDING_ALLOWANCE)
+            & (rounded >= 0)
+            & (rounded < axis.values.size)
+        )
+        indices = rounded.astype(np.intp) if np.all(matches) else None
+        classes.append(_AxisClass(axis, a, b, indices))
+    return tuple(classes)
+
+
+def _interval_claims(
+    source: Sampling, target: Sampling, frame_map: SupportsPoints | None
+) -> dict[str, npt.NDArray[np.float64]]:
+    classes = _classify_axes(source, target, frame_map)
+    claims: dict[str, npt.NDArray[np.float64]] = {}
+    if classes is None:
+        return claims
+    declaration = target.transform.source
+    assert isinstance(declaration, ArrayCoordinates)
+    for axis, classification in zip(target.axes, classes, strict=True):
+        rows = classification.source_axis.intervals
+        if rows is None or classification.indices is None:
+            continue
+        mapped = (rows[classification.indices] - classification.b) / classification.a
+        if classification.a < 0:
+            mapped = mapped[..., ::-1]
+        try:
+            claims.update(
+                freeze_intervals(declaration, {axis.axis: axis.values}, {axis.axis: mapped})
+            )
+        except ValueError:
+            # A claim may be incompatible with the target's unchanged sample_offset.
+            continue
+    return claims
+
+
+@dataclass(frozen=True)
 class _Plan:
     """Validated sampling choices and geometry shared by every block."""
 
@@ -300,6 +410,7 @@ class _Plan:
     source_last: npt.NDArray[np.float64]
     ndimage: ModuleType
     window: tuple[slice, ...] | None
+    intervals: dict[str, npt.NDArray[np.float64]]
 
 
 def check_options(method: Method, block_points: int) -> int:
@@ -434,6 +545,7 @@ def plan(
         source_last=source_last,
         ndimage=ndimage,
         window=window,
+        intervals=_interval_claims(source, target, frame_map) if total else {},
     )
 
 
