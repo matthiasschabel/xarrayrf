@@ -1,14 +1,60 @@
-"""Diagnostics for anonymous worlds; numerical agreement never establishes identity."""
+"""Frame diagnostics; numerical agreement never establishes identity."""
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 import numpy as np
 import numpy.typing as npt
 
 from ._affine import AffineTransform
+from ._frame import ReferenceFrame
+from ._frame_adoption import adopt_frame
 from ._orientation import coordinate_system_change
 from ._sampling import Sampling
-from ._transform import SupportsAffine
+from ._transform import SupportsAffine, SupportsPoints
+
+
+def binding_difference(
+    mine: SupportsPoints,
+    theirs: SupportsPoints,
+    *,
+    samplings: Callable[[], tuple[Sampling, Sampling]],
+    adoption_suffices: Callable[[AffineTransform], bool],
+) -> str:
+    """Explain incompatible bindings, using the adapter's exact adoption equality.
+
+    Sampling snapshots are deferred until after adoption and equality, and are needed only
+    for anonymous-frame diagnostics.
+    """
+    left = getattr(mine, "target", None)
+    right = getattr(theirs, "target", None)
+    if (
+        isinstance(left, ReferenceFrame)
+        and isinstance(right, ReferenceFrame)
+        and not left.is_equivalent_frame(right)
+    ):
+        if left.is_anonymous or right.is_anonymous:
+            try:
+                adopted = adopt_frame(mine, right)
+            except ValueError:
+                suffices = False
+            else:
+                suffices = adoption_suffices(adopted)
+            a, b = samplings()
+            return anonymous_frame_difference(
+                a, b, labels=("left operand", "right operand"), adoption_suffices=suffices
+            )
+        return (
+            f"the operands are in different reference frames ({left.identifier[0]}:"
+            f"{left.identifier[1]} and {right.identifier[0]}:{right.identifier[1]}); "
+            "resample one onto the other with a transform between the frames, or use "
+            "rf.assume_frame if they are the same space"
+        )
+    return (
+        "the operands sample the same frame on different grids; resample one onto the "
+        "other with rf.resample_to"
+    )
 
 
 def _numerically_matching(mine: Sampling, theirs: Sampling, change: AffineTransform) -> bool:

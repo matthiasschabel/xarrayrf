@@ -15,9 +15,10 @@ from xarray.indexes import PandasIndex
 from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
 from ._frame import ReferenceFrame
-from ._frame_compatibility import anonymous_frame_difference
-from ._geometry import adopt_frame, check_coordinate_unit
+from ._frame_compatibility import binding_difference
+from ._geometry import check_coordinate_unit
 from ._grid import Coordinate, Grid
+from ._intervals import interval_rows, intervals_equal, missing_interval_positions
 from ._sampling import freeze_intervals
 from ._transform import SupportsPoints
 
@@ -217,13 +218,12 @@ class BindingIndex(xr.Index):
     def _intervals_equal(self, name: str, other: BindingIndex) -> bool:
         mine, theirs = self.intervals.get(name), other.intervals.get(name)
         if mine is None or theirs is None:
-            return mine is None and theirs is None
+            return intervals_equal(mine, theirs)
         if name in self.fixed or self.axes[name].index.equals(other.axes[name].index):
-            return bool(np.array_equal(mine, theirs))
+            return intervals_equal(mine, theirs)
         labels = self.axes[name].index
         positions = other.axes[name].index.get_indexer(labels)
-        matched = positions >= 0
-        return bool(np.array_equal(mine[matched], theirs[positions[matched]]))
+        return intervals_equal(mine, theirs, positions)
 
     def _rows_for_axes(
         self, axes: Mapping[str, PandasIndex], other: BindingIndex | None = None
@@ -237,56 +237,38 @@ class BindingIndex(xr.Index):
                 if self.axes[name].index.equals(target.index)
                 else self.axes[name].index.get_indexer(target.index)
             )
-            missing = positions < 0
+            missing = missing_interval_positions(positions)
             if missing.any() and other is None:
                 raise ValueError(
                     f"source axis {name!r} introduces labels without declared intervals"
                 )
-            rows = np.empty((len(target.index), 2), dtype=np.float64)
-            rows[~missing] = intervals[name][positions[~missing]]
+            other_positions = None
+            other_rows = None
             if missing.any():
                 assert other is not None
-                theirs = other.axes[name].index.get_indexer(target.index[missing])
-                if np.any(theirs < 0):
+                other_positions = other.axes[name].index.get_indexer(target.index[missing])
+                if missing_interval_positions(other_positions).any():
                     raise ValueError(
                         f"source axis {name!r} introduces labels without declared intervals"
                     )
-                rows[missing] = other.intervals[name][theirs]
-            intervals[name] = rows
+                other_rows = other.intervals[name]
+            intervals[name] = interval_rows(
+                intervals[name], positions, theirs=other_rows, other_positions=other_positions
+            )
         return intervals
 
     def _difference(self, other: BindingIndex) -> str:
         """Say why two bindings cannot combine, naming the corrective action."""
-        mine = getattr(self.transform, "target", None)
-        theirs = getattr(other.transform, "target", None)
-        if (
-            isinstance(mine, ReferenceFrame)
-            and isinstance(theirs, ReferenceFrame)
-            and not mine.is_equivalent_frame(theirs)
-        ):
-            if mine.is_anonymous or theirs.is_anonymous:
-                try:
-                    adopted = adopt_frame(self.transform, theirs)
-                except ValueError:
-                    suffices = False
-                else:
-                    rebound = type(self)(self.axes, self.fixed, adopted, self.dims, self.intervals)
-                    suffices = rebound.equals(other)
-                return anonymous_frame_difference(
-                    self._grid()._sampling(),
-                    other._grid()._sampling(),
-                    labels=("left operand", "right operand"),
-                    adoption_suffices=suffices,
-                )
-            return (
-                f"the operands are in different reference frames ({mine.identifier[0]}:"
-                f"{mine.identifier[1]} and {theirs.identifier[0]}:{theirs.identifier[1]}); "
-                "resample one onto the other with a transform between the frames, or use "
-                "rf.assume_frame if they are the same space"
-            )
-        return (
-            "the operands sample the same frame on different grids; resample one onto the "
-            "other with rf.resample_to"
+
+        def adoption_suffices(adopted: AffineTransform) -> bool:
+            rebound = type(self)(self.axes, self.fixed, adopted, self.dims, self.intervals)
+            return rebound.equals(other)
+
+        return binding_difference(
+            self.transform,
+            other.transform,
+            samplings=lambda: (self._grid()._sampling(), other._grid()._sampling()),
+            adoption_suffices=adoption_suffices,
         )
 
     def _grid(self) -> Grid:

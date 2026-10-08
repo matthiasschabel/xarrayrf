@@ -38,8 +38,19 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
     assert hash(grid) == hash(xrf.decode(xrf.encode(grid)))
     assert grid.is_coincident(grid)
     from xarrayrf._frame_adoption import adopt_frame
+    from xarrayrf._frame_compatibility import binding_difference
+    from xarrayrf._intervals import interval_rows, intervals_equal, missing_interval_positions
     from xarrayrf._resampling import plan, execute
     assert adopt_frame(transform, frame) == transform
+    assert "same frame on different grids" in binding_difference(
+        transform, transform, samplings=lambda: (grid._sampling(), grid._sampling()),
+        adoption_suffices=lambda _: False,
+    )
+    rows = np.array([[0, 1], [1, 2]], dtype=np.float64)
+    positions = np.array([1, 0], dtype=np.intp)
+    assert not missing_interval_positions(positions).any()
+    assert intervals_equal(rows, rows)
+    np.testing.assert_array_equal(interval_rows(rows, positions), rows[::-1])
     assert not any(name.split(".")[0] == "scipy" for name in sys.modules)
     for indexer, expected in (
         (1, {"i": 1}),
@@ -104,6 +115,7 @@ def test_core_modules_never_import_xarray_even_lazily() -> None:
     ]
     assert core, "no core modules found; the check would pass vacuously"
     assert package / "_resampling.py" in core
+    assert package / "_intervals.py" in core
     offenders = {}
     for path in core:
         offenders[path.name] = sampling_imports_with_grid_exemption(path.stem, path.read_text())
