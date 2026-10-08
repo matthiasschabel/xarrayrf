@@ -19,6 +19,7 @@ from ._frame import ReferenceFrame
 from ._geometry import Geometry, adopt_frame, check_coordinate_unit
 from ._grid import Coordinate, Grid
 from ._resample import Method, _resample_with_intervals
+from ._resampling import BOX_METHODS, Support, check_box_values, check_support
 from ._sampling import Domain
 from ._transform import SupportsPoints
 from ._validation import check_names
@@ -489,6 +490,7 @@ class _ReferenceFrameAccessor:
         self._require_binding()
         return grid_from_binding(self._array.coords)
 
+    @overload
     def resample_to(
         self,
         target: xr.DataArray | Geometry | Grid,
@@ -497,7 +499,51 @@ class _ReferenceFrameAccessor:
         method: Method = "linear",
         fill_value: float = np.nan,
         domain: Domain = "samples",
-    ) -> xr.DataArray:
+        support: Support = "point",
+        min_coverage: float = 0.5,
+        return_coverage: Literal[False] = False,
+    ) -> xr.DataArray: ...
+
+    @overload
+    def resample_to(
+        self,
+        target: xr.DataArray | Geometry | Grid,
+        *,
+        transform: SupportsPoints | None = None,
+        method: Method = "linear",
+        fill_value: float = np.nan,
+        domain: Domain = "samples",
+        support: Support = "point",
+        min_coverage: float = 0.5,
+        return_coverage: Literal[True],
+    ) -> tuple[xr.DataArray, xr.DataArray]: ...
+
+    @overload
+    def resample_to(
+        self,
+        target: xr.DataArray | Geometry | Grid,
+        *,
+        transform: SupportsPoints | None = None,
+        method: Method = "linear",
+        fill_value: float = np.nan,
+        domain: Domain = "samples",
+        support: Support = "point",
+        min_coverage: float = 0.5,
+        return_coverage: bool,
+    ) -> xr.DataArray | tuple[xr.DataArray, xr.DataArray]: ...
+
+    def resample_to(
+        self,
+        target: xr.DataArray | Geometry | Grid,
+        *,
+        transform: SupportsPoints | None = None,
+        method: Method = "linear",
+        fill_value: float = np.nan,
+        domain: Domain = "samples",
+        support: Support = "point",
+        min_coverage: float = 0.5,
+        return_coverage: bool = False,
+    ) -> xr.DataArray | tuple[xr.DataArray, xr.DataArray]:
         """Resample values onto a target geometry and bind them to its frame.
 
         Empty targets return empty framed values. Empty sources with non-empty targets raise
@@ -505,23 +551,47 @@ class _ReferenceFrameAccessor:
 
         With a separable affine map, axes whose target samples coincide with source samples
         retain mapped source intervals only when valid under the target's sample_offset;
-        other axes declare none. The target transform is unchanged.
+        average slab axes claim target intervals and point slab axes declare none. The target
+        transform is unchanged.
+
+        Box methods reconstruct the mean of covering slabs, treating each source slab value
+        as a mean over its declared interval. ``step`` refuses overlapping source slabs.
+        ``support="average"`` averages over covered target support; uncovered samples and
+        coverage below ``min_coverage`` receive fill. These methods require floating or complex
+        values, separable affine maps and source intervals on slab axes (also target intervals
+        for averaging). Non-default ``domain`` refuses. Average support for nearest, linear
+        and cubic is not yet supported. Defaults are unchanged.
+        Unlike point interpolation, box methods assume nothing between slabs: targets in gaps
+        are fill rather than bridged, and values reach the outer slab edges rather than
+        stopping at the outer slab centres.
 
         Args:
             target: Grid, framed array or geometry whose samples define the result.
             transform: Mapping from the target frame to the source frame, if needed.
-            method: ``"nearest"``, ``"linear"`` or ``"cubic"`` interpolation.
+            method: ``"nearest"``, ``"linear"``, ``"cubic"``, ``"step"`` or ``"overlap_mean"``.
             fill_value: Value outside the source domain.
             domain: ``"samples"`` or ``"cells"``.
+            support: ``"point"`` (default) or ``"average"`` over declared target intervals.
+            min_coverage: Minimum covered fraction in ``(0, 1]``; default 0.5. Validated
+                for every method, but used only by box methods.
+            return_coverage: Return ``(values, coverage)`` for box methods. Coverage is a
+                framed float64 array over target geometry dimensions only, bound to the target
+                transform without intervals. Fractions multiply across axes; pass-through
+                axes contribute 1 and point slab axes contribute 0 or 1.
 
         Returns:
             Framed values with target geometry, source non-geometry coordinates, name and
             ordinary attributes. A reserved ``xarrayrf_binding`` attribute is not carried.
 
         Raises:
-            TypeError: If target is not a DataArray, Geometry or Grid.
+            TypeError: If target is not a DataArray, Geometry or Grid, or a box method
+                receives non-floating source values.
             ValueError: If either array is unframed or core resampling rejects the geometry.
         """
+        check_support(method, support, min_coverage)
+        check_box_values(method, self._array.dtype, domain)
+        if return_coverage and method not in BOX_METHODS:
+            raise ValueError("return_coverage requires step or overlap_mean")
         source = self.geometry
         if isinstance(target, xr.DataArray):
             target_geometry = target.rf.geometry
@@ -529,17 +599,19 @@ class _ReferenceFrameAccessor:
             target_geometry = target
         else:
             raise TypeError("target must be a framed DataArray, Geometry or Grid")
-        result, intervals = _resample_with_intervals(
+        result, intervals, coverage = _resample_with_intervals(
             source,
             target_geometry,
             transform=transform,
             method=method,
             fill_value=fill_value,
             domain=domain,
+            support=support,
+            min_coverage=min_coverage,
         )
         result.name = self._array.name
         result.attrs = {k: v for k, v in self._array.attrs.items() if k != _BINDING_ATTR}
-        return cast(
+        framed = cast(
             xr.DataArray,
             result.rf.frame(
                 target_geometry.transform,
@@ -547,6 +619,17 @@ class _ReferenceFrameAccessor:
                 intervals=intervals,
             ),
         )
+
+        if return_coverage:
+            assert coverage is not None
+            return framed, cast(
+                xr.DataArray,
+                coverage.rf.frame(
+                    target_geometry.transform,
+                    dims=target_geometry.dims,
+                ),
+            )
+        return framed
 
     def assume_frame(self, other: ReferenceFrame | xr.DataArray) -> xr.DataArray:
         """Adopt another frame's declaration and derivable coordinate-system change.

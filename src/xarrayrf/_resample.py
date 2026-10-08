@@ -13,7 +13,7 @@ from ._affine import AffineTransform
 from ._binding import grid_variables
 from ._geometry import Geometry
 from ._grid import Grid
-from ._resampling import BLOCK_POINTS, check_options, execute
+from ._resampling import BLOCK_POINTS, Support, check_options, execute
 from ._resampling import Method as Method
 from ._resampling import plan as _plan
 from ._sampling import Domain, Sampling
@@ -62,6 +62,8 @@ def resample(
     method: Method = "linear",
     fill_value: float = np.nan,
     domain: Domain = "samples",
+    support: Support = "point",
+    min_coverage: float = 0.5,
     block_points: int = BLOCK_POINTS,
 ) -> xr.DataArray:
     """Resample the source array's values onto a target Geometry or Grid.
@@ -77,9 +79,23 @@ def resample(
     the target's frame to the source's, such as a registration result. Numerically identical
     declarations never stand in for identity.
 
+    Box methods (``step`` and ``overlap_mean``) treat each slab value as a mean over its
+    declared interval and reconstruct the mean of the slabs covering each point. ``step``
+    refuses overlapping source slabs. ``support="average"`` averages this reconstruction over
+    covered target support; ``support="point"`` evaluates it at target coordinates. Uncovered
+    targets and coverage below ``min_coverage`` receive ``fill_value``. Box methods require
+    floating or complex source values, a separable affine map, source intervals on slab axes,
+    and target intervals when averaging those axes. They refuse non-default ``domain``.
+    Average support for nearest, linear and cubic is not yet supported. Defaults are unchanged.
+    Unlike point interpolation, box methods assume nothing between slabs: targets in gaps
+    are fill rather than bridged, and values reach the outer slab edges rather than
+    stopping at the outer slab centres.
+    Box methods apply sparse per-axis weights without cropping; Dask geometry dimensions are
+    core dimensions and may be rechunked into memory together.
+
     Domain: by default values are defined between the outer source samples, as for xarray's
     ``interp``, and ``fill_value`` marks everything else. ``domain="cells"`` also answers in the
-    outer samples' cells, holding the edge sample's value there for every method
+    outer samples' cells, holding the edge sample's value there for point interpolation methods
     (ITK's domain is the same; its nearest and linear interpolators also hold the edge).
     Each source axis's :attr:`~xarrayrf.ArrayCoordinates.sample_offset` says where its cells
     lie; a point-sampled axis has none and reaches no further than its samples. Interpolation
@@ -114,9 +130,12 @@ def resample(
         target: Geometry or Grid whose samples receive values; target pixels are ignored.
         transform: The transform from the target's frame to the source's frame, required when
             they are different frames.
-        method: ``"nearest"``, ``"linear"`` or ``"cubic"`` (spline) interpolation.
+        method: ``"nearest"``, ``"linear"``, ``"cubic"``, ``"step"`` or ``"overlap_mean"``.
         fill_value: Value for target samples outside the domain.
         domain: ``"samples"`` or ``"cells"``, as above.
+        support: ``"point"`` (default) or ``"average"`` over declared target intervals.
+        min_coverage: Minimum covered fraction in ``(0, 1]``; default 0.5. Validated for
+            every method, but used only by box methods; coverage multiplies across axes.
         block_points: Target samples located per block.
 
     Returns:
@@ -127,7 +146,8 @@ def resample(
         representable in it.
 
     Raises:
-        TypeError: If an argument has the wrong type, or ``transform`` is not a point transform.
+        TypeError: If an argument has the wrong type, ``transform`` is not a point transform,
+            or a box method receives non-floating source values.
         ValueError: If the frames are different and no transform is given, ``transform`` has the
             wrong endpoints, the source is empty and the target is not, ``method`` or ``domain``
             is unknown, a source axis declaring cells
@@ -139,13 +159,15 @@ def resample(
             collides with a source non-geometry coordinate.
         ImportError: If scipy is not installed, after input and frame validation.
     """
-    result, _ = _resample_with_intervals(
+    result, _, _ = _resample_with_intervals(
         source,
         target,
         transform=transform,
         method=method,
         fill_value=fill_value,
         domain=domain,
+        support=support,
+        min_coverage=min_coverage,
         block_points=block_points,
     )
     return result
@@ -159,12 +181,14 @@ def _resample_with_intervals(
     method: Method = "linear",
     fill_value: float = np.nan,
     domain: Domain = "samples",
+    support: Support = "point",
+    min_coverage: float = 0.5,
     block_points: int = BLOCK_POINTS,
-) -> tuple[xr.DataArray, dict[str, npt.NDArray[np.float64]]]:
-    """Return the unframed values and per-axis claims from the same validated plan."""
+) -> tuple[xr.DataArray, dict[str, npt.NDArray[np.float64]], xr.DataArray | None]:
+    """Return unframed values, interval claims and optional box coverage from one plan."""
     if not isinstance(source, Geometry) or not isinstance(target, Geometry | Grid):
         raise TypeError("source must be Geometry and target must be Geometry or Grid")
-    check_options(method, block_points)
+    check_options(method, block_points, support, min_coverage)
     target_order = (
         target.dims
         if isinstance(target, Grid)
@@ -190,6 +214,8 @@ def _resample_with_intervals(
         method=method,
         fill_value=fill_value,
         domain=domain,
+        support=support,
+        min_coverage=min_coverage,
         block_points=block_points,
         adoption_suffices=adoption_suffices,
     )
@@ -248,4 +274,13 @@ def _resample_with_intervals(
         [name for name in result.coords if set(result.coords[name].dims) & set(plan.source_dims)],
         errors="ignore",
     ).assign_coords({**source_coordinates, **target_coordinates})
-    return result, plan.intervals
+    coverage = (
+        None
+        if plan.box is None
+        else xr.DataArray(
+            plan.box.coverage,
+            dims=plan.target_dims,
+            coords=target_coordinates,
+        )
+    )
+    return result, plan.intervals, coverage

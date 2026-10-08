@@ -306,5 +306,7 @@ formulations rather than derived afresh.
 1. Human decision: the legacy cubic-with-missing-values behaviour (proposed: refuse, matching
    Pirana). `min_coverage=0.5` was confirmed 2026-10-08.
 2. Close the `smooth` specification (B6 items) and the `pchip` gap rule before implementing either.
-3. Slice 1: per-axis interval claims (above).
-4. Slice 2: the box methods with `support="point"|"average"` (above); then `pchip`, then `smooth`.
+3. Done 2026-10-08: slice 1, per-axis interval claims (`72e91cb`); slice 2, the box methods with
+   `support="point"|"average"`, opt-in coverage output, point-edge roundoff and agreement tests
+   against linear interpolation.
+4. Next: `pchip`, then `smooth`.

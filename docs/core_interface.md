@@ -98,7 +98,8 @@ dimension (time, echo, a new stacking dimension) xarray only aligns the operands
 identical grids pass through, and differing grids join like any alignment, so pass
 `join="exact"` to require identical ones (xarray is moving its `concat` default to `"exact"`).
 Native resampling claims mapped source intervals on pass-through axes only when valid under the
-unchanged target's `sample_offset`; all other axes claim none. See the
+unchanged target's `sample_offset`; average slab axes claim target intervals, while point slab
+axes claim none. See the
 [interval-claim design](dev/architecture/support_aware_resampling_design.md#first-slices-interval-claims-and-the-box-methods).
 Core `resample` retains its ordinary unframed result contract.
 
@@ -691,7 +692,8 @@ multidimensional coordinate fields are refused); and interpolates values at thos
 carrying non-geometry dimensions through. It is format-neutral and lazy.
 
 `source.rf.resample_to(target, *, transform=None, method="linear", fill_value=np.nan,
-domain="samples")` accepts a `Grid`, framed DataArray or `Geometry`, calls the core `resample`, and binds
+domain="samples", support="point", min_coverage=0.5, return_coverage=False)` accepts a `Grid`,
+framed DataArray or `Geometry`, calls the core `resample`, and binds
 the result to the target's coordinate transform and geometry dimensions. Target pixels are ignored.
 Core `resample(source, target, ...)` takes a source `Geometry`
 and a target `Geometry` or `Grid`; a grid produces the same values as its equivalent framed
@@ -700,6 +702,35 @@ The target contributes only coordinates named by its transform's source axes. Un
 coordinates, including scalar context, are ignored; non-geometry coordinates come from the
 source. If a target geometry coordinate name collides with a source non-geometry coordinate,
 resampling raises `ValueError` naming that coordinate instead of replacing it.
+
+`method="step"` and `method="overlap_mean"` reconstruct the pointwise mean of covering source
+slabs, whose values represent means over their declared intervals. `step` additionally refuses
+source overlap on slab axes; touching intervals are allowed. A point on a shared edge takes
+the mean of both slabs. `support="point"` evaluates this reconstruction, while
+`support="average"` averages it over the covered part of each declared target interval.
+Coverage is the product of per-axis covered fractions (pass-through axes contribute 1).
+Gaps give fill, as do fractions below `min_coverage` (default 0.5, valid range `(0, 1]`).
+Partial results are means over covered support. Unlike point interpolation, box methods do not
+bridge gaps, and they answer out to the outer slab edges rather than the outer slab centres.
+`min_coverage` is validated but ignored by
+other methods. The default linear point interpolation is unchanged; average support with
+nearest, linear or cubic is not yet supported.
+
+Box methods require real or complex floating values (convert integers explicitly), separable
+affine coordinate maps, and declared source intervals on every slab axis; averaging also
+requires target intervals there. Axes selecting coincident source samples pass through;
+for average support, target intervals must be absent or match mapped source intervals to
+qualify. Resample other axes first with a point method or declare their intervals. Non-default
+`domain` refuses because declared support defines the box domain. NaN components propagate
+only from positive weights, independently for real and imaginary parts. Output is float64 or
+complex128. This path uses sparse tensor weights without cropping or same-grid gathering;
+Dask remains lazy, with geometry dimensions rechunked as core dimensions.
+
+Native `return_coverage=True` returns `(values, coverage)` for box methods only. Coverage is a
+framed float64 DataArray with the target's geometry dimensions and transform, no context
+dimensions and no claimed intervals. Point slab axes contribute 0 or 1. Core `resample` keeps
+its unframed DataArray return type and accepts `support` and `min_coverage` only.
+
 Input, frame and empty-source validation runs before loading optional SciPy. Valid sampling
 requests require the `resample` extra, including empty-target requests; without it they raise
 `ImportError` with an installation hint.

@@ -82,6 +82,11 @@
 
 ### Added
 
+- Box resampling methods `step` and `overlap_mean` with point or average target support,
+  declared-interval weights, gap filling and a configurable coverage threshold. Native
+  `rf.resample_to(return_coverage=True)` returns framed geometry-only coverage; average
+  results claim target intervals on slab axes. Existing defaults are unchanged.
+
 - `ngff.open` accepts `frame=` as a frame or framed DataArray, matching every other reader.
   The override replaces anonymous or store-derived identities and composes derivable
   coordinate-system changes for OME-Zarr 0.4, 0.5 and 0.6.

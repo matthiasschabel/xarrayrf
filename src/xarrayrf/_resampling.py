@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import product
+from numbers import Real
 from types import ModuleType
 from typing import Any, Final, Literal, cast
 
@@ -13,6 +14,7 @@ import numpy.typing as npt
 
 from ._affine import AffineTransform, equilibrated_inverse
 from ._array_coordinates import ArrayCoordinates
+from ._box import BoxOperator, as_operator, interval_tolerance, weights
 from ._frame import ReferenceFrame
 from ._frame_adoption import adopt_frame
 from ._frame_compatibility import anonymous_frame_difference
@@ -29,7 +31,9 @@ from ._sampling import (
 )
 from ._transform import SupportsAffine, SupportsPoints, check_transform
 
-type Method = Literal["nearest", "linear", "cubic"]
+type Method = Literal["nearest", "linear", "cubic", "step", "overlap_mean"]
+type Support = Literal["point", "average"]
+BOX_METHODS = ("step", "overlap_mean")
 
 _SPLINE_ORDER: Final = {"nearest": 0, "linear": 1, "cubic": 3}
 
@@ -306,7 +310,10 @@ class _AxisClass:
 
 
 def _classify_axes(
-    source: Sampling, target: Sampling, frame_map: SupportsPoints | None
+    source: Sampling,
+    target: Sampling,
+    frame_map: SupportsPoints | None,
+    support: Support = "point",
 ) -> tuple[_AxisClass, ...] | None:
     """Classify in target coordinate-axis order, including retained scalar axes."""
     if not isinstance(source.transform, SupportsAffine) or not isinstance(
@@ -362,20 +369,33 @@ def _classify_axes(
             & (rounded < axis.values.size)
         )
         indices = rounded.astype(np.intp) if np.all(matches) else None
+        if support == "average" and indices is not None and target_axis.intervals is not None:
+            mapped = np.sort(a * target_axis.intervals + b, axis=-1)
+            if axis.intervals is None or np.any(
+                np.abs(mapped - axis.intervals[indices]) > interval_tolerance(mapped)[..., None]
+            ):
+                indices = None
         classes.append(_AxisClass(axis, a, b, indices))
     return tuple(classes)
 
 
 def _interval_claims(
-    source: Sampling, target: Sampling, frame_map: SupportsPoints | None
+    source: Sampling,
+    target: Sampling,
+    frame_map: SupportsPoints | None,
+    support: Support = "point",
 ) -> dict[str, npt.NDArray[np.float64]]:
-    classes = _classify_axes(source, target, frame_map)
+    classes = _classify_axes(source, target, frame_map, support)
     claims: dict[str, npt.NDArray[np.float64]] = {}
     if classes is None:
         return claims
     declaration = target.transform.source
     assert isinstance(declaration, ArrayCoordinates)
     for axis, classification in zip(target.axes, classes, strict=True):
+        if support == "average" and not classification.pass_through:
+            if axis.intervals is not None:
+                claims[axis.axis] = axis.intervals
+            continue
         rows = classification.source_axis.intervals
         if rows is None or classification.indices is None:
             continue
@@ -392,10 +412,78 @@ def _interval_claims(
     return claims
 
 
+def _box_operator(
+    source: Sampling,
+    target: Sampling,
+    frame_map: SupportsPoints | None,
+    source_dims: tuple[str, ...],
+    target_dims: tuple[str, ...],
+    method: Method,
+    support: Support,
+    min_coverage: float,
+) -> BoxOperator:
+    if any(
+        not isinstance(t, SupportsAffine)
+        for t in (source.transform, target.transform, frame_map)
+        if t is not None
+    ):
+        raise ValueError("box methods require affine transforms; a non-affine transform was given")
+    classes = _classify_axes(source, target, frame_map, support)
+    if classes is None:
+        raise ValueError(
+            "box methods require a separable composed map; non-separable map or unsupported source axes"
+        )
+    coverage = np.ones(tuple(target.sizes[d] for d in target_dims))
+    operators = []
+    for axis, cls in zip(target.axes, classes, strict=True):
+        if cls.indices is not None:
+            operator = cls.indices.ravel()
+            fraction = np.ones(axis.values.size)
+        else:
+            slabs = cls.source_axis.intervals
+            if slabs is None:
+                raise ValueError(
+                    f"source axis {cls.source_axis.axis!r} needs intervals; resample that axis first with a point method or declare intervals"
+                )
+            if support == "average" and axis.intervals is None:
+                raise ValueError(f"average target axis {axis.axis!r} needs declared intervals")
+            slabs = slabs.reshape(-1, 2)
+            if method == "step":
+                sorted_slabs = slabs[np.argsort(slabs[:, 0])]
+                tolerance = np.maximum(
+                    interval_tolerance(sorted_slabs[:-1]), interval_tolerance(sorted_slabs[1:])
+                )
+                if np.any(sorted_slabs[:-1, 1] - sorted_slabs[1:, 0] > tolerance):
+                    raise ValueError(
+                        f"step refuses overlapping source intervals on axis {cls.source_axis.axis!r}"
+                    )
+            coordinates = axis.values
+            if support == "average":
+                assert axis.intervals is not None
+                coordinates = axis.intervals
+            mapped = cls.a * coordinates + cls.b
+            if support == "average":
+                mapped = np.sort(mapped, axis=-1)
+                query = slabs
+            else:
+                # A point within roundoff of an edge (after a unit change or reversal) is on it.
+                query = slabs + interval_tolerance(slabs)[:, None] * [-1, 1]
+            rows, fraction = weights(query, mapped, average=support == "average")
+            operator = as_operator(rows, len(slabs))
+        shape = [1] * len(target_dims)
+        if axis.dim is not None:
+            shape[target_dims.index(axis.dim)] = -1
+        coverage *= fraction.reshape(shape)
+        assert cls.source_axis.dim is not None
+        operators.append((source_dims.index(cls.source_axis.dim), axis.dim, operator))
+    return BoxOperator(operators, coverage, min_coverage)
+
+
 @dataclass(frozen=True)
 class _Plan:
     """Validated sampling choices and geometry shared by every block."""
 
+    box: BoxOperator | None
     order: int
     output_dtype: np.dtype[np.generic]
     fill_value: float
@@ -413,13 +501,43 @@ class _Plan:
     intervals: dict[str, npt.NDArray[np.float64]]
 
 
-def check_options(method: Method, block_points: int) -> int:
+def check_options(
+    method: Method, block_points: int, support: Support = "point", min_coverage: float = 0.5
+) -> int:
     """Validate interpolation options before a binding revalidates its geometry."""
-    if method not in _SPLINE_ORDER:
-        raise ValueError(f"method must be one of {tuple(_SPLINE_ORDER)}, got {method!r}")
+    if method not in (*_SPLINE_ORDER, *BOX_METHODS):
+        raise ValueError(f"method must be one of {(*_SPLINE_ORDER, *BOX_METHODS)}, got {method!r}")
     if isinstance(block_points, bool) or not isinstance(block_points, int) or block_points < 1:
         raise ValueError(f"block_points must be a positive integer, got {block_points!r}")
-    return _SPLINE_ORDER[method]
+    check_support(method, support, min_coverage)
+    return _SPLINE_ORDER.get(method, 0)
+
+
+def check_support(method: Method, support: Support, min_coverage: float) -> None:
+    """Validate new options without changing legacy method-error ordering."""
+    if support not in ("point", "average"):
+        raise ValueError("support must be 'point' or 'average'")
+    if support == "average" and method not in BOX_METHODS:
+        raise ValueError(
+            "average support is not yet supported for this method; use step or overlap_mean"
+        )
+    if (
+        isinstance(min_coverage, bool)
+        or not isinstance(min_coverage, Real)
+        or not 0 < min_coverage <= 1
+    ):
+        raise ValueError("min_coverage must be a real number in (0, 1]")
+
+
+def check_box_values(method: Method, dtype: np.dtype[np.generic], domain: Domain) -> None:
+    """Refuse unsupported value and domain declarations before coordinate reads."""
+    if method in BOX_METHODS:
+        if dtype.kind not in "fc":
+            raise TypeError("box methods require floating source values; convert explicitly")
+        if domain != "samples":
+            raise ValueError(
+                "box methods refuse non-default domain; declared support is the domain"
+            )
 
 
 def plan(
@@ -435,6 +553,8 @@ def plan(
     domain: Domain,
     block_points: int,
     other_dims: tuple[str, ...],
+    support: Support = "point",
+    min_coverage: float = 0.5,
     adoption_suffices: Callable[[AffineTransform], bool] | None = None,
 ) -> _Plan:
     """Plan interpolation for trailing source axes and output axes in explicit storage order.
@@ -449,7 +569,8 @@ def plan(
     Raises:
         ValueError: If either storage order does not name exactly its sampling's dims.
     """
-    order = check_options(method, block_points)
+    order = check_options(method, block_points, support, min_coverage)
+    check_box_values(method, dtype, domain)
     for name, storage_order, sampling in (
         ("source_order", source_order, source),
         ("target_order", target_order, target),
@@ -488,9 +609,14 @@ def plan(
     check_domain(domain)
     lattice_map = None
     position_map = None
-    if total:
-        if any(source.sizes[dim] == 0 for dim in source_dims):
-            raise ValueError("cannot resample an empty source: nothing to sample from")
+    box = None
+    if total and any(source.sizes[dim] == 0 for dim in source_dims):
+        raise ValueError("cannot resample an empty source: nothing to sample from")
+    if method in BOX_METHODS:
+        box = _box_operator(
+            source, target, frame_map, source_dims, target_dims, method, support, min_coverage
+        )
+    elif total:
         reach = extents(source, domain)
         reach = [reach[source.dims.index(dim)] for dim in source_dims]
         lattice_map = _lattice_map(source, target, source_dims, target_dims, frame_map, reach)
@@ -531,6 +657,7 @@ def plan(
         raise ImportError("resample needs scipy; install xarrayrf[resample]") from error
 
     return _Plan(
+        box=box,
         order=order,
         output_dtype=output_dtype,
         fill_value=fill_value,
@@ -545,7 +672,7 @@ def plan(
         source_last=source_last,
         ndimage=ndimage,
         window=window,
-        intervals=_interval_claims(source, target, frame_map) if total else {},
+        intervals=_interval_claims(source, target, frame_map, support) if total else {},
     )
 
 
@@ -757,6 +884,8 @@ def execute(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.gene
     leading = values.shape[: values.ndim - len(plan.source_dims)]
     if plan.total == 0:
         return np.empty((*leading, *plan.target_shape), dtype=plan.output_dtype)
+    if plan.box is not None:
+        return plan.box.apply(values, len(plan.source_dims), plan.target_dims, plan.fill_value)
     slices = [values[index] for index in np.ndindex(*leading)]
     if plan.lattice_map is None:
         return _general_block(plan, slices, leading)
