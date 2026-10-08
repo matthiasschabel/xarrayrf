@@ -241,8 +241,15 @@ takes the mean of both slabs, which is also the limit of shrinking symmetric ave
   reconstruction over the target interval: split it at every source edge; a piece covered by the
   set `C` gives each slab in `C` weight `length / |C|`; normalise by the covered length. Coverage is
   the covered length over the target length, per axis, multiplied across axes; below
-  `min_coverage` the value is `fill_value`. `min_coverage` defaults to 0.5 (pending human
-  confirmation) and must lie in `(0, 1]`.
+  `min_coverage` the value is `fill_value`. `min_coverage` defaults to 0.5 (confirmed
+  2026-10-08) and must lie in `(0, 1]`. Rationale: interior MRI gaps sit near 80-90% coverage, so
+  the threshold acts mainly at the stack exterior, where 0.5 matches the cells domain's half-cell
+  reach. Known costs: a cliff at the threshold, and partial values are means over covered support
+  (biased toward what was measured). Any-coverage (xESMF `conservative_normed`) was rejected as
+  the default because slivers at the edge would produce values.
+- Coverage output, opt-in: the native layer can return the per-target coverage fraction alongside
+  the values (private plumbing, public opt-in on `rf.resample_to`; shape and name decided in the
+  slice), so partial-coverage values are visible.
 - Missing values propagate: a NaN component with positive weight gives NaN (real and imaginary
   parts independently, as for linear).
 - Real and complex floating sources only; integer and boolean sources refuse (convert explicitly).
@@ -296,9 +303,8 @@ formulations rather than derived afresh.
 
 ## Next Steps
 
-1. Human decisions: `min_coverage` default for `step` and `overlap_mean` (proposed 0.5, results
-   are means over covered support); the legacy cubic-with-missing-values behaviour (proposed:
-   refuse, matching Pirana).
+1. Human decision: the legacy cubic-with-missing-values behaviour (proposed: refuse, matching
+   Pirana). `min_coverage=0.5` was confirmed 2026-10-08.
 2. Close the `smooth` specification (B6 items) and the `pchip` gap rule before implementing either.
 3. Slice 1: per-axis interval claims (above).
 4. Slice 2: the box methods with `support="point"|"average"` (above); then `pchip`, then `smooth`.
