@@ -106,8 +106,10 @@ def resample(
     imaginary components are handled independently, without renormalizing the finite
     weights. The same allowance classifies integral signed-permutation maps for exact
     gathering. It covers measured large-origin oblique grids, not arbitrary ill-scaled maps.
-    Cubic prefiltering can spread NaNs through spline coefficients; only same-grid gathering
-    retains original samples. Infinities retain SciPy's existing interpolation behavior.
+    Cubic resampling refuses NaN in the source samples it reads (its window, when cropped),
+    because the spline prefilter would spread them along whole lines; fill or mask them first.
+    Cubic splines can overshoot near sharp edges. Infinities retain SciPy's existing
+    interpolation behavior.
 
     Empty targets return empty values without locating or interpolating samples. Empty sources
     with non-empty targets raise ValueError, regardless of the domain or ``fill_value``.
@@ -155,8 +157,9 @@ def resample(
             source's samples cannot be located (no
             exact inverse, a retained scalar or multidimensional source coordinate, or
             non-monotonic coordinates), or a target geometry dimension name is used by a
-            non-geometry dimension of the source, or a target geometry coordinate name
-            collides with a source non-geometry coordinate.
+            non-geometry dimension of the source, a target geometry coordinate name
+            collides with a source non-geometry coordinate, or cubic resampling reads NaN
+            source values (raised when the values are read, so at compute time for Dask).
         ImportError: If scipy is not installed, after input and frame validation.
     """
     result, _, _ = _resample_with_intervals(

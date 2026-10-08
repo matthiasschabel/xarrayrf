@@ -182,9 +182,8 @@ the whole spacing.
   conversion; label maps refuse `average` and every slab method.
 - Missing values: `propagate` works throughout; `average` + `omit` is deferred (the `omit` ratio
   of interpolants has no piecewise-polynomial closed form: `2 log 2 - 1` versus `1/3` for a ratio of
-  integrals). Legacy cubic behaviour with missing values (shortcut gathers finite values, the
-  general path gives NaN, `tests/test_resample.py:904-908`) is an explicit exception to the
-  single-reconstruction guarantee until decided.
+  integrals). Cubic resampling refuses NaN in the samples it reads (decided 2026-10-08), including on the
+  same-grid gather, which previously returned finite values while the general path gave NaN.
 - Convergence of shrinking averages to the point value holds at continuity points with positive
   coverage only; point evaluation on a shared slab boundary uses a fixed ownership rule.
 - Dask: geometry dimensions are already core dimensions with rechunking
@@ -303,8 +302,7 @@ formulations rather than derived afresh.
 
 ## Next Steps
 
-1. Human decision: the legacy cubic-with-missing-values behaviour (proposed: refuse, matching
-   Pirana). `min_coverage=0.5` was confirmed 2026-10-08.
+1. Decided 2026-10-08: `min_coverage=0.5`; cubic resampling refuses NaN, matching Pirana.
 2. Close the `smooth` specification (B6 items) and the `pchip` gap rule before implementing either.
 3. Done 2026-10-08: slice 1, per-axis interval claims (`72e91cb`); slice 2, the box methods with
    `support="point"|"average"`, opt-in coverage output, point-edge roundoff and agreement tests

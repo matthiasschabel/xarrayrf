@@ -886,6 +886,13 @@ def execute(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.gene
         return np.empty((*leading, *plan.target_shape), dtype=plan.output_dtype)
     if plan.box is not None:
         return plan.box.apply(values, len(plan.source_dims), plan.target_dims, plan.fill_value)
+    if plan.order == 3 and np.isnan(values).any():
+        # The spline prefilter is global along each line, so one NaN would empty its line,
+        # except where the same-grid gather bypasses the prefilter: refuse both alike.
+        raise ValueError(
+            "cubic resampling refuses missing (NaN) source values, which the spline prefilter "
+            "spreads along whole lines; fill or mask them first, or use method='linear'"
+        )
     slices = [values[index] for index in np.ndindex(*leading)]
     if plan.lattice_map is None:
         return _general_block(plan, slices, leading)

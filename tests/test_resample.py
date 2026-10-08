@@ -954,11 +954,21 @@ def test_linear_nan_oblique_round_trip_at_large_origins(
     assert_allclose(result, expected, rtol=0, atol=1e-9)
 
 
-def test_cubic_nan_prefilter_spreads_missing_values_except_on_gather() -> None:
-    source = _nan_line([1.0, np.nan, 3.0, 4.0])
-    assert_allclose(xrf.resample(source, source, method="cubic"), source.array, rtol=0, atol=ATOL)
-    target = xrf.Grid(xrf.CompositeTransform(source.transform), {"i": ("i", [0.0, 1.0, 2.0, 3.0])})
-    assert np.isnan(xrf.resample(source, target, method="cubic")).all()
+@pytest.mark.parametrize("value", [np.nan, complex(1, np.nan)])
+def test_cubic_refuses_missing_values_including_on_gather(value: complex) -> None:
+    source = _nan_line([1.0, value, 3.0, 4.0])
+    general = xrf.Grid(xrf.CompositeTransform(source.transform), {"i": ("i", [0.0, 1.0, 2.0])})
+    for target in (source, general):
+        with pytest.raises(ValueError, match="cubic resampling refuses missing"):
+            xrf.resample(source, target, method="cubic")
+
+
+def test_cubic_ignores_missing_values_outside_its_cropped_window() -> None:
+    values = np.arange(64.0)
+    values[0] = np.nan
+    source = _nan_line(values)
+    target = xrf.Grid(source.transform, {"i": ("i", [40.5, 41.5])})
+    assert np.isfinite(xrf.resample(source, target, method="cubic")).all()
 
 
 @pytest.mark.parametrize("general", [False, True])

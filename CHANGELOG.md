@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Cubic resampling refuses NaN in the source samples it reads, including onto a coincident
+  grid. The spline prefilter spread one NaN along its whole line, while the same-grid gather
+  returned finite values, so results depended on grid alignment. Fill or mask NaNs first, or use
+  linear interpolation.
 - `rf.resample_to` now claims mapped source intervals only on pass-through axes whose rows
   validate under the target's `sample_offset`. Other axes declare no intervals; target
   intervals are no longer copied onto interpolated results. The target transform is unchanged.
