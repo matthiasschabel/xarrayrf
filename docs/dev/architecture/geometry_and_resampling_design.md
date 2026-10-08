@@ -279,6 +279,8 @@ adapter decisions, recorded with the adapters.
 
 ## Deferred Work
 
+- Support-aware resampling over declared intervals (averaging targets, slab reconstructions,
+  gaps and overlaps): [support-aware resampling](support_aware_resampling_design.md).
 - CF bounds encoding, `cell_corners`, and a strict domain defined only inside declared cells.
 - Curvilinear and irregular cells: dense cells share a vertex grid (VTK structured grids, UGRID);
   sparse cells are per-element shapes (CF 2-D bounds, footprints), possibly not boxes.

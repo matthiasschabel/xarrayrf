@@ -17,6 +17,9 @@ reasons. The stable documents are [the design](../design.md),
   identity and equivalence, roles, orientation, the `Transform` protocol, units, affine classes.
 - [geometry_and_resampling_design.md](architecture/geometry_and_resampling_design.md): the
   `Geometry` view, sample offsets and cells, declared intervals, resampling.
+- [support_aware_resampling_design.md](architecture/support_aware_resampling_design.md): what a
+  value on a declared interval means, and the resampling operators (step, PCHIP on the integral,
+  overlap mean, smoothest consistent) that respect it; proposed.
 - [core_layering_design.md](architecture/core_layering_design.md): which modules form the
   xarray-free geometry core, and the private contracts another array binding would use.
 - [grid_plan.md](architecture/grid_plan.md): implemented freestanding `Grid` rationale, its doors,
