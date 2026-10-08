@@ -1,7 +1,7 @@
 # Release, packaging and repository notes
 
 **Status:** Active
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** Package metadata, CI lanes, dependency floors, the manual TestPyPI workflow and the
 hosted steps still outstanding. The maintainer procedure is [releasing.md](../../releasing.md).
 
@@ -55,14 +55,23 @@ frame/adoption refusals validate before loading SciPy and remain covered by core
 Local worktree targets have overrideable source paths; `make test-pinned` uses an isolated
 pinned environment. These are local commands, not hosted lanes.
 
-**Validation checked 2026-10-06:** [hosted run 37538303719](https://github.com/matthiasschabel/xarrayrf/actions/runs/37538303719)
-on `a0b7e6f` passes locked/current but fails minimum-core (60 missing-SciPy test failures) and
-minimum-resample (eight NumPy-floor typing errors in three files). The corrections pass locally
-in the workflow's exact floor environments: core 1,559 passed, 86 skipped and 47 xfailed;
-resample 1,796 passed and 47 xfailed, with floor mypy passing all 82 files. Stock and patched
-full suites pass 1,796 and 1,843 tests respectively. The current Python 3.13/xarray 2026.9.0
-lane passes 1,800 tests and 43 xfailed, plus mypy. A fresh hosted run after the next push is
-still required; local success does not rewrite the historical hosted result.
+**Hosted validation checked 2026-10-07:**
+[run 37668735524](https://github.com/matthiasschabel/xarrayrf/actions/runs/37668735524) on
+`da5f627d7e822de647273b14afb42d659c97d3bb` passes all four jobs: locked, minimum-core,
+minimum-resample and current. The three `check` jobs pass dependency consistency, lint,
+formatting, mypy, tests and distribution build/payload checks; minimum-core passes dependency
+consistency, the absent-SciPy assertion and tests. The preceding cleanup revision `43eed8c`
+also passes [hosted checks](https://github.com/matthiasschabel/xarrayrf/actions/runs/37668711828).
+
+Historical [run 37538303719](https://github.com/matthiasschabel/xarrayrf/actions/runs/37538303719)
+on `a0b7e6f` failed minimum-core (60 missing-SciPy test failures) and minimum-resample (eight
+NumPy-floor typing errors). These failures are resolved by the cleanup commits. Fresh local
+QA on 2026-10-07 passed core 1,559/86 skipped/47 xfailed, resample 1,796/47 xfailed, stock
+1,796/47 xfailed, patched 1,843, and current Python 3.13/xarray 2026.9.0 1,800/43 xfailed;
+details belong in the [maintainer changelog](../changelog.md).
+
+No hosted job validates the patched pin yet. Stock expected failures still represent native
+operation gaps; green dependency-floor CI does not certify the release invariant.
 
 ### Publishing workflow (`.github/workflows/publish.yml`)
 
@@ -78,9 +87,11 @@ The wheel smoke uses the current named-basis affine constructor; its older `matr
 failed after that constructor was replaced. Local wheel validation is recorded in the
 [maintainer changelog](../changelog.md). Procedures remain in releasing.md.
 
-Hosted setup observed 2026-09-28: the `testpypi` environment exists with a deployment branch
-policy allowing only `main`. Pending publishers for `xarrayrf` were reported added on PyPI and TestPyPI; their
-field values have not been independently checked.
+Hosted setup rechecked 2026-10-07: the `testpypi` environment exists with a selected-branch
+policy allowing only `main`; the GitHub API lists no publishing workflow runs. PyPI and TestPyPI
+project JSON endpoints both return 404 for `xarrayrf`. Pending publishers were previously
+reported added on both services, but their fields remain unverified; a pending publisher does
+not establish a published project.
 
 ## Alternatives Considered
 
@@ -100,7 +111,7 @@ field values have not been independently checked.
 
 ## Next Steps
 
-1. Confirm the repaired dependency-floor jobs on a new hosted run.
-2. Run the TestPyPI rehearsal one hosted step at a time, following
-   [releasing.md](../../releasing.md).
-   Publishing requires the maintainer's explicit go-ahead.
+1. Add hosted validation of the immutable patched pin and retain all four stock/floor jobs.
+2. Prepare the TestPyPI rehearsal against an identified revision and version, following
+   [releasing.md](../../releasing.md). Dispatch and upload require the maintainer's explicit
+   go-ahead.

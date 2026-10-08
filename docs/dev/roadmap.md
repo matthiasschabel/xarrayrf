@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -30,16 +30,18 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
    a valid-looking incorrect binding.
 3. Persistence schema 1 frozen ([persistence design](architecture/persistence_design.md)).
    Freezing is an explicit maintainer decision.
-4. All supported dependency-floor CI lanes pass. The latest hosted run on `a0b7e6f` failed
-   minimum-core and minimum-resample; local corrections and validation are recorded in the
-   [repository notes](architecture/release_and_repository_notes.md). A fresh hosted run remains.
+4. All supported dependency-floor CI lanes pass. This criterion is met on `da5f627`:
+   [hosted run 37668735524](https://github.com/matthiasschabel/xarrayrf/actions/runs/37668735524)
+   passes locked, minimum-core, minimum-resample and current. Hosted validation of the patched
+   pin remains separate work; passing stock CI with known xfails does not meet criterion 1.
 5. The TestPyPI rehearsal completed ([release notes](architecture/release_and_repository_notes.md),
    [releasing.md](../releasing.md)).
 
 ### Planned work, in rough priority order
 
-- **Validation and publishing rehearsal.** Confirm the corrected minimum-dependency jobs on
-  hosted CI after the next push; run the TestPyPI procedure only when publishing is authorized.
+- **Release preparation.** Extend the native-operation audit, add hosted validation of the
+  immutable patched pin, prepare the schema-freeze decision and complete the TestPyPI rehearsal
+  when publishing is authorized. Dependency-floor hosted verification is complete.
 - **xarray upstream.** Respond to review on the open bug-fix PRs, retire duplicate patches when
   a new series baseline includes their merged fixes, verify released-xarray support when fixes
   ship, and reduce the lifecycle hook patches to two `Index` methods before
