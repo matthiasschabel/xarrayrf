@@ -110,7 +110,7 @@ Review notes:
 - An earlier revision crashed when the object had an index the indexers did not touch; fixed
   and tested with an extra untouched `PandasIndex` dimension.
 
-### #11621 Raise when Dataset.update would replace an index with another type (open)
+### #11621 Raise when Dataset.update would replace an index with one of another type (open)
 
 https://github.com/pydata/xarray/pull/11621, head `13be639d` (2026-10-08). Series 4 patch 7
 has the same stable patch ID as the posted code diff, excluding whats-new, so it needs no
@@ -136,8 +136,8 @@ Review state: dcherian requested changes on 2026-09-28 (raise instead of keeping
 index; resolve with `drop_indexes`). The rework and a follow-up (coerced pandas values, whole
 group hint, explicit-replacement test, single `xindexes` binding, coordinate-set mismatch test)
 were pushed and the author replied on the PR; re-review was requested from dcherian on
-2026-10-05, with no newer feedback as of 2026-10-08. The PR title still names the first design
-(keep the Dataset's index); retitling to the raise behavior is pending.
+2026-10-05, with no newer feedback as of 2026-10-08. Retitled on 2026-10-08 to match the
+raise behavior.
 
 Possibly outstanding, check against the posted PR before responding:
 
