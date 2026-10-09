@@ -1,7 +1,7 @@
 # Completed codebase audit
 
 **Status:** Implemented
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** Five-stage correctness and API audit of xarrayrf at baseline `de48d8a`, completed
 through `a0b7e6f` plus the Unicode DICOM destination correction.
 

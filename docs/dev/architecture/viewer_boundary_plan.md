@@ -1,7 +1,7 @@
 # Viewer boundary: what xarrayrf owes napari
 
 **Status:** Active
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** Core (`Geometry`, `resample`, units, endpoints) and the NGFF reader, as needed by a
 napari integration. napari's own work is listed only to fix the boundary.
 

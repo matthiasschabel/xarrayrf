@@ -199,8 +199,10 @@ member gets explicit frame endpoints, including the intermediate frame between t
 
 ### Importers
 
-Behind an optional extra (name open; for example `warps = ["nitransforms>=25.1",
-"nibabel>=5.4"]`, which brings h5py and a NumPy 2 floor within the extra only):
+Under the [transform adapter](../adapters/transform_adapters_design.md) contract: engine
+subpackages with their own extras, core-only imports, caller-named endpoint frames and a report
+of every normalization. The ITK-family extra depends on `nitransforms>=25.1` and `nibabel>=5.4`,
+which brings h5py and a NumPy 2 floor within that extra only:
 
 - ITK/ANTs NIfTI warps, ITK composite `.h5`, ITK B-spline transforms and FSL warps are read
   through `nitransforms.io` for arrays, affines and sign conventions, then wrapped in the
@@ -293,7 +295,8 @@ evaluation is cubic and cannot check the linear interpolant.
 
 1. Names: `DisplacementFieldTransform`, `PositionFieldTransform`, `BSplineTransform`, the pair
    class, `declared_inverse()` and `transform_point_masked`.
-2. The optional extra's name, and whether the container-level persistence API lives in
+2. The ITK-family subpackage layout (one `xarrayrf.itk` for ITK, ANTs and elastix, or one per
+   engine) and its extra's name; whether the container-level persistence API lives in
    `xarrayrf.native`.
 3. Whether stationary velocity fields follow 1a directly. They are the only family here whose
    inverse is the same object with a sign flipped.

@@ -1,7 +1,7 @@
 # Native `.rf` binding design
 
 **Status:** Implemented
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** The runtime binding behind the `DataArray.rf` accessor (`src/xarrayrf/_binding.py`,
 `src/xarrayrf/native.py`): its carrier, ownership rules, Dataset rule, native-operation outcomes,
 operand checks and the local xarray hooks it relies on. Per-operation results are in the

@@ -1,7 +1,7 @@
 # Reference frames as an xarray extension
 
 **Status:** Active
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** Independent reference-frame semantics for xarray; DICOM and other scientific-image
 producers; geometry-aware downstream algorithms. The value objects, the `Grid` sampling value and
 the `Geometry` view, declared cell intervals, anatomical grid operations, complete and anonymous

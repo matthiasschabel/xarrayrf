@@ -1,7 +1,7 @@
 # Special relativity as a test of the core
 
 **Status:** Deferred
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-09
 **Scope:** Lorentz and Poincaré transformations on spacetime arrays (implemented as examples and
 tests, no physics in the core), measured contraction in 1+1-D and 3+1-D, and the deferred design
 for relativistic viewing and angular coordinates. Executable companions:
@@ -164,7 +164,8 @@ Open decisions before implementing viewing or angular support:
    seam-aware sampling (recommended: declarations and valid-chart evaluation only).
 2. First astronomy and geography cases (recommended: lon/lat and the celestial sphere).
 3. Numerical inverse result and failure contract; who chooses branches and initial guesses.
-4. Exception-only versus explicitly requested per-point validity for bounded transforms.
+4. *(Resolved 2026-10-09 in the [field-backed transforms design](field_transform_design.md):
+   exceptions by default, validity only when `resample` requests it.)*
 5. Whether a shared homogeneous representation has enough consumers for a core type.
 6. The light-cone demonstrator's observable (recommended: an optically thin emission integral).
 

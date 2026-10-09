@@ -1,7 +1,7 @@
 # Freestanding grids
 
 **Status:** Implemented
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** A NumPy-only `Grid` value describing an array's sampling without pixels; the doors that
 bind, snapshot, resample onto and persist it; declared intervals carried by grids and bindings;
 anatomical grid operations; and complete versus anonymous frames.

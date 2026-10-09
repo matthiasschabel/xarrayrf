@@ -19,7 +19,8 @@ reasons. The stable documents are [the design](../design.md),
   `Geometry` view, sample offsets and cells, declared intervals, resampling.
 - [support_aware_resampling_design.md](architecture/support_aware_resampling_design.md): what a
   value on a declared interval means, and the resampling operators (step, PCHIP on the integral,
-  overlap mean, smoothest consistent) that respect it; proposed.
+  overlap mean, smoothest consistent) that respect it; interval claims and the box methods are
+  implemented, PCHIP and smooth are next.
 - [core_layering_design.md](architecture/core_layering_design.md): which modules form the
   xarray-free geometry core, and the private contracts another array binding would use.
 - [grid_plan.md](architecture/grid_plan.md): implemented freestanding `Grid` rationale, its doors,
@@ -76,6 +77,6 @@ reasons. The stable documents are [the design](../design.md),
 
 - [adapters_design.md](adapters/adapters_design.md): the shared adapter contract, frame
   identity, and the NIfTI, DICOM, OME-NGFF and GeoTIFF adapters.
-- [transform_adapters_design.md](adapters/transform_adapters_design.md): proposed adapters that
-  wrap registration results from CASTalign, ITK, ANTs and elastix as xarrayrf transforms,
-  without running an optimizer.
+- [transform_adapters_design.md](adapters/transform_adapters_design.md): adapters that wrap
+  registration results from CASTalign, ITK, ANTs and elastix as xarrayrf transforms, without
+  running an optimizer; the ITK-family codec is scheduled with the field-backed transforms.

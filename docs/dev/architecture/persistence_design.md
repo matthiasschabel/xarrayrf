@@ -1,7 +1,7 @@
 # Data-only persistence of the core value objects
 
 **Status:** Active
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
 **Scope:** `xarrayrf.encode` and `xarrayrf.decode` for vocabularies, coordinate systems, frames,
 array coordinates, grids, affine and composite transforms, and user-defined transforms. Native binding
 persistence wraps this encoding; NGFF, CF and NIfTI formats are adapters.

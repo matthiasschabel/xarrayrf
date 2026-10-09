@@ -1,7 +1,7 @@
 # Support-aware resampling
 
-**Status:** Active (proposed; no code yet)
-**Last updated:** 2026-10-08
+**Status:** Active (slices 1 and 2 implemented; `pchip` and `smooth` next)
+**Last updated:** 2026-10-09
 **Scope:** what a sample value means on an axis with declared intervals, and the resampling
 operators that respect it: core `resample`, `rf.resample_to`, `Grid(intervals=)`. Extends
 [geometry, cells and resampling](geometry_and_resampling_design.md), whose current behaviour is

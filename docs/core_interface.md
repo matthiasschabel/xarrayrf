@@ -1,7 +1,7 @@
 # Core interface and nomenclature
 
 **Status:** Active (normative)
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-08
 **Scope:** The public vocabulary, value objects, transform protocol, calling conventions and
 adapter contract of xarrayrf. Every public name follows this document. Where
 [the core model design](dev/architecture/core_model_design.md) or [the architecture](design.md) disagree with it,

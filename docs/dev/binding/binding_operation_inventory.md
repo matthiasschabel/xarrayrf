@@ -1,7 +1,7 @@
 # Native binding operation inventory
 
 **Status:** Active
-**Last updated:** 2026-09-28
+**Last updated:** 2026-10-04
 **Scope:** Measured outcome of 93 native xarray operations on a framed DataArray, on stock
 xarray, upstream `main` and the patched series; the release gate for the private `BindingIndex`.
 

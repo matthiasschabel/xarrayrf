@@ -1,7 +1,7 @@
 # Prior-art and coverage study
 
 **Status:** Implemented
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07
 **Scope:** How existing libraries model frames, coordinate systems and transforms; which of their
 use cases xarrayrf represents; what to reuse and what to avoid. Companion to the
 [core model](core_model_design.md).

@@ -1,10 +1,11 @@
 # Transform adapters
 
-**Status:** Deferred
-**Last updated:** 2026-10-06
+**Status:** Active (ITK-family codec scheduled with stage 1a of the
+[field-backed transforms](../architecture/field_transform_design.md); CASTalign deferred)
+**Last updated:** 2026-10-09
 **Scope:** A proposed family of optional adapters that turn registration results from external
 engines (CASTalign, ITK/SimpleITK, ANTs, elastix, and later voxel-space fields such as
-VoxelMorph's) into xarrayrf transforms. Nothing is implemented. CASTalign specifics come from
+VoxelMorph's) into xarrayrf transforms. Nothing is implemented yet. CASTalign specifics come from
 the [CASTalign comparison](../castalign/castalign_comparison_review.md), a source reading at
 `e12f509`.
 
@@ -71,10 +72,12 @@ capability its methods contradict (design.md §7):
   check.
 - **`PointTransformNoAnalyticInverse`** inverts numerically, with a 1000-point cap. Only its
   fast direction is wrapped; `SupportsInverse` is never claimed.
-- **ITK B-spline and displacement-field transforms** wait for the field-backed transform
-  (design.md §7): a field bound to its own `Geometry`, with a declared interpolant and no
-  inferred inverse. Voxel-space fields such as VoxelMorph's fit the same type. Binding the field
-  to its grid's geometry avoids a chain through `ArrayCoordinates`, which the core refuses.
+- **ITK B-spline and displacement-field transforms** become the
+  [field-backed transforms](../architecture/field_transform_design.md): a field or control grid
+  with its own lattice in the source frame, a declared interpolant and exterior behaviour, and
+  a declared inverse pair where the engine writes both directions, never an inferred one.
+  Voxel-space fields such as VoxelMorph's fit the same types. A lattice in the source frame
+  avoids a chain through `ArrayCoordinates`, which the core refuses.
 
 `resample` needs only `SupportsPoints` for the frame-to-frame step, written from the target's
 frame to the source's. A nonlinear edge without an exact inverse is therefore usable only in the
@@ -113,15 +116,14 @@ Direction errors need no extra check. Named endpoints turn a reversed transform 
 - **A `Registrar` protocol now.** `register(fixed, moving) -> SupportsPoints` has one
   implementation today. Extract a result contract only if three hand-written integrations
   converge on one.
-- **Depending on nitransforms for the ITK/ANTs conventions.** Not decided. It already maps ITK,
-  ANTs, FSL and AFNI conventions, including LPS/RAS. At minimum it is a test oracle for the ITK
-  codec. Decide when that codec is written.
+- **nitransforms as the engine.** Rejected for evaluation (float32 points, fixed cubic
+  interpolation, silent identity outside the domain; see the
+  [field-backed transforms design](../architecture/field_transform_design.md)). Its `io` layer is
+  adopted as the ITK-family codec's reader for formats Pirana's existing elastix and ANTs
+  parsers do not cover, and it is a test oracle.
 
 ## Deferred Work
 
-- The field-backed transform in the core, which ITK B-spline, displacement-field and
-  voxel-space fields need. Tracked on the [roadmap](../roadmap.md) as the bounded nonlinear
-  provider.
 - A framed `DataArray` ↔ `SimpleITK.Image`/`itk.Image` bridge. It is part of the ITK adapter,
   not a separate module.
 - Writing transforms back out (`to_engine`, ITK transform files), once a consumer needs it.
@@ -135,5 +137,6 @@ Direction errors need no extra check. Named endpoints turn a reversed transform 
    `Transform` protocol with a third-party nonlinear transform and needs no core change.
 2. Promote it to `src/xarrayrf/castalign/` with an extra only if CASTalign is interested. Its
    required dependencies include a Qt GUI stack, so the extra's weight needs checking first.
-3. Write the ITK codec for affine transforms after that, then extend it to fields once the
-   field-backed transform exists.
+3. The ITK-family codec (ITK, ANTs, elastix; affine and field transforms) is built with stage 1a
+   of the [field-backed transforms](../architecture/field_transform_design.md), starting from
+   Pirana's elastix and ANTs parsers. It no longer waits for CASTalign.

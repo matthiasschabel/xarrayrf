@@ -1,7 +1,7 @@
 # Upstream xarray bug-fix pull requests
 
 **Status:** Active
-**Last updated:** 2026-10-08
+**Last updated:** 2026-10-09
 **Scope:** The five independent bug-fix PRs split from the local patch series: #11613 and #11615
 and #11616 merged, #11617 and #11621 open. No hook API is proposed here.
 
@@ -20,9 +20,9 @@ posted text. Reproducers are in `tools/upstream_reproducers/pr_<number>.py`, bui
 
 PR status and remote heads below were checked through the GitHub API on 2026-10-08.
 Local worktrees can lag those heads. The descriptions below explain the local fixes; consult
-the posted PR for its newest implementation and review threads. No containing released-xarray
-version has been verified;
-merged fixes must not be presented as available in stock 2026.7.0.
+the posted PR for its newest implementation and review threads. #11613 and #11615 ship in
+v2026.09.0 (the [patch manifest](xarray_patches.md)'s 2026-10-08 sync check); #11616 is on
+`main` only. None is in the 2026.7.0 floor.
 
 xarray's AI policy (`doc/contribute/ai-policy.md`): the submitter reviews every line, and PR
 descriptions and replies are in the submitter's own words. Nothing is posted or pushed without

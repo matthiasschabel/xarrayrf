@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-09
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -10,7 +10,8 @@ maintainer is most likely to revisit. Area-specific detail lives in the linked n
 xarrayrf provides reference frames for native xarray objects: frames and transforms bound to
 `DataArray`s that survive frame-preserving xarray operations and refuse or unframe otherwise.
 The core, the `.rf` binding, freestanding `Grid` values with declared cell intervals,
-anatomical reformatting, complete and anonymous frames, persistence schema 1 and the NIfTI,
+the first support-aware resampling methods (per-axis interval claims and the `step` and
+`overlap_mean` box methods), anatomical reformatting, complete and anonymous frames, persistence schema 1 and the NIfTI,
 DICOM, OME-NGFF and GeoTIFF adapters are implemented. No package has been published.
 The [five-stage codebase audit](codebase_audit_review.md) is complete; no further audit stage
 is queued. Deferred conveniences and release/viewer work below are separate.
@@ -50,11 +51,16 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   targets and checked on-plane inversion
   ([viewer boundary plan](architecture/viewer_boundary_plan.md)). The pixel-free target domain
   itself is done (`Grid`, [grid plan](architecture/grid_plan.md)).
+- **Support-aware resampling**, continued in its
+  [design](architecture/support_aware_resampling_design.md): `pchip` on the integral, then
+  `smooth`, each after its specification gaps are closed. Pirana's MRI slice stacks are the
+  first consumer.
 - **Framed concat along a geometry dimension** (stitching slabs that share a transform), if a
   consumer needs it; overlapping labels would stack samples at the same place.
 - **Nonlinear geometry**, staged in the [plan](architecture/nonlinear_geometry_plan.md):
   field-backed transforms for deformable registration
-  ([design](architecture/field_transform_design.md); Pirana is the consumer), then angular charts
+  ([design](architecture/field_transform_design.md), starting from Pirana's deformable
+  transforms, which Pirana adopts only after the release gate), then angular charts
   with chart transitions and a minimal CF reader (rectilinear GCM and celestial grids), then
   curvilinear coordinate fields, then provider adapters (pyproj, Astropy). Angular charts change
   core value objects and need their own reviewed design.
@@ -68,7 +74,7 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 | A4: common metadata Grid/report convenience | A concrete metadata-only Grid or ordinary-reader report consumer ([audit rationale](codebase_audit_review.md#deferred-work)) |
 | A6: unlabeled nongeometry construction and mixed Grid/Geometry coincidence | Existing DataArray framing or Grid snapshot comparison blocks a real workflow ([audit rationale](codebase_audit_review.md#deferred-work)) |
 | Grid snapshot RangeIndex step parity | Rounded coordinate snapshots block a measured workflow |
-| Cubic missing-data policy; general-path many-context routing optimization | A concrete NaN case or profiling shows a material limitation |
+| General-path many-context routing optimization | Profiling shows a material limitation |
 | Dataset `.rf` accessor and Dataset persistence | A consumer needs Dataset save and load |
 | Product spacetime frames (shared spatial template with a private clock) | A consumer combines template-registered time series across runs |
 | GeoTIFF export; NGFF `omero` metadata and labels; NGFF RFC-3 relaxed axes | A consumer needs them, or RFC-3 is adopted |
@@ -120,4 +126,5 @@ See *Parked* above.
 
 1. Continue the upstream PR work and the hook consolidation.
 2. Start the native-operation audit.
-3. Keep this roadmap current when an item starts, finishes or is parked.
+3. Stage 1a of the field-backed transforms, after its open decisions.
+4. Keep this roadmap current when an item starts, finishes or is parked.
