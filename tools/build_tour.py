@@ -15,18 +15,29 @@ code = nbformat.v4.new_code_cell
 
 cells = [
     md(
-        """# xarrayrf: arrays that know where they are
+        """# xarrayrf: reference frames and coordinate transformations for xarray
 
-Scientific arrays describe *somewhere*: a patient's head, a slide under a microscope, a patch of
-the Earth, a region of spacetime. xarray keeps the labels; **xarrayrf keeps the place.**
+xarrayrf associates xarray `DataArray` objects with reference frames and mappings from array
+coordinates to frame coordinates. These mappings support geometric queries, compatibility
+checks, and resampling between grids. The examples show frame bindings through selection,
+arithmetic, Dataset operations, and serialization. Operations that combine incompatible framed
+coordinate mappings raise `ValueError`.
 
-Attach a reference frame to a `DataArray` once. From then on, ordinary xarray code (selection,
-arithmetic, alignment, Datasets, saving to disk) carries it along, and anything that would put
-data in the wrong place is refused instead of silently accepted. The same few ideas work for
-medical images, microscopy, geospatial rasters and physics.
+The notebook uses microscopy, MRI, and satellite datasets, followed by a synthetic scalar field
+in spacetime. It distinguishes three operations: declaring frame identity, changing coordinate
+conventions within a frame, and applying a transformation between different frames. Familiarity
+with NumPy arrays and xarray dimensions and coordinates is assumed.
 
-This notebook is a short tour on real, public data: microscopy and satellite images read
-directly from public servers, and MRI downloaded once and cached. It needs a network connection."""
+**Execution requirements.** Run the cells in order in the patched-xarray environment specified
+below. The MRI data, brain images, atlas, and histology image are downloaded and cached locally;
+the OME-Zarr and GeoTIFF examples access remote datasets. Initial downloads and remote dataset
+access require a network connection. The serialization example writes to a temporary directory.
+
+```sh
+git clone https://github.com/matthiasschabel/xarrayrf && cd xarrayrf
+uv sync --extra dev --group patched --group docs
+uv run --group patched --group docs --with jupyterlab jupyter lab examples/xarrayrf_tour.ipynb
+```"""
     ),
     code(
         """import tempfile
@@ -35,26 +46,34 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.colors import ListedColormap
+import tour_data  # fetches and caches the MRI study
 import xarray as xr
+from matplotlib.colors import ListedColormap
 
 import xarrayrf as xrf
 import xarrayrf.native  # registers the .rf accessor
 from xarrayrf import dicom, geotiff, ngff, nifti
-
-import tour_data  # fetches and caches the MRI study
 
 workdir = Path(tempfile.mkdtemp())
 BLUE, ORANGE = "#2a78d6", "#eb6834"
 plt.rcParams.update({"figure.dpi": 110, "axes.spines.top": False, "axes.spines.right": False})"""
     ),
     md(
-        """## 1. Frame once, then just use xarray
+        """## 1. Reference frames and array geometry
 
-A frame says *which* space the data lives in; a transform says how the array's own coordinates
-map into it. Here a stained tissue section (colonic glands; FHL2 in brown, nuclei in blue) is
-placed on a slide-scanner stage: 0.5 µm pixels, rotated 10° against the stage axes, at
-(1200, 800) µm on the slide. The colour channels simply come along."""
+This section defines an array-to-frame mapping and examines its behavior under selection and
+arithmetic.
+
+### 1.1. Defining an array-to-frame transform
+
+A reference frame identifies the space in which coordinates are interpreted. A coordinate system
+specifies its axes and units, and an array-to-frame transform maps array coordinates into that
+system.
+
+This example assigns an illustrative stage geometry to a stained tissue image: 0.5 µm pixel
+spacing, a 10° rotation relative to the stage axes, and a translation of (1200, 800) µm. The
+image shows colonic glands, with FHL2 staining in brown and nuclei in blue. The binding applies
+to `row` and `column`; `rgb` is a non-geometric dimension."""
     ),
     code(
         """stage = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("um", "um")))
@@ -77,22 +96,24 @@ image = xr.DataArray(
 image"""
     ),
     md(
-        """Now treat it as any other `DataArray`: adjust the contrast, crop it, keep every second pixel.
-The result is a different, smaller array, but every sample still knows exactly where it is."""
+        """The following operation applies an intensity power transformation, crops the image, and retains
+every second sample along each spatial dimension. The geometric query compares the first
+retained pixel with its corresponding pixel in the original array. The plot displays both arrays
+in stage coordinates."""
     ),
     code(
         """view = (image**0.6).isel(row=slice(120, 380, 2), column=slice(200, 460, 2))
 
 print("view:", dict(view.sizes))
-print("its first pixel sits at   ", view.rf.geometry.point_at(row=0, column=0).values.round(2), "µm")
-print("original pixel (120, 200) at", image.rf.geometry.point_at(row=120, column=200).values.round(2), "µm")"""
+print("first retained pixel (stage coordinates):", view.rf.geometry.point_at(row=0, column=0).values.round(2), "µm")
+print("source pixel (120, 200) (stage coordinates):", image.rf.geometry.point_at(row=120, column=200).values.round(2), "µm")"""
     ),
     code(
         """from matplotlib.transforms import Affine2D
 
 
 def place(ax, array, **style):
-    \"\"\"Draw an RGB array at its stage position, using its own geometry.\"\"\"
+    \"\"\"Display an RGB array in stage coordinates.\"\"\"
     to_stage = Affine2D(array.rf.geometry.lattice(("column", "row")).affine)
     rows, columns = array.sizes["row"], array.sizes["column"]
     ax.imshow(np.clip(array.transpose("row", "column", "rgb").values, 0, 1),
@@ -108,19 +129,24 @@ ax.plot(*crop.T, color=BLUE, lw=1.5)
 ax.set(xlim=(outline[:, 0].min() - 10, outline[:, 0].max() + 10),
        ylim=(outline[:, 1].min() - 10, outline[:, 1].max() + 10),
        aspect="equal", xlabel="stage x (µm)", ylabel="stage y (µm)",
-       title="The processed crop lands exactly where it came from")
+       title="Original image and selected samples in stage coordinates")
 plt.show()"""
     ),
     md(
-        """<sub>Image: scikit-image `immunohistochemistry` sample (Center for Microscopy and Molecular
-Imaging), no known copyright restrictions. The stage placement is illustrative.</sub>"""
+        """Image source: scikit-image `immunohistochemistry` sample, Center for Microscopy and Molecular
+Imaging; no known copyright restrictions. Pixel spacing, rotation, and translation are assigned
+for this example and are not measured properties of the image."""
     ),
     md(
-        """## 2. Guardrails, not handcuffs
+        """### 1.2. Frame compatibility and explicit frame assumptions
 
-Frames carry identity. Combining arrays from different frames is refused, because their pixels
-do not describe the same places. Plain arrays are still welcome, and when you *know* two frames
-are the same space, one explicit call says so."""
+Frames with identical axes and units can have distinct identities. In the following example,
+addition of arrays in two distinct local frames raises `ValueError`. Multiplication by an
+unframed mask with matching labels retains the image's binding.
+
+`assume_frame` declares that two frames identify the same space; it does not estimate a
+registration. Here, the two arrays also have matching coordinate mappings, so addition is
+permitted after the explicit assumption."""
     ),
     code(
         """elsewhere = xrf.ReferenceFrame.local(stage.coordinate_system)  # another slide, same axes
@@ -133,18 +159,20 @@ other = image.rf.unframe().rf.frame(
 try:
     image + other
 except ValueError as error:
-    print("refused:", error)
+    print("ValueError:", error)
 
 mask = xr.ones_like(image.rf.unframe())                  # a plain DataArray, same labels
-print("framed + plain stays framed:", (image * mask).rf.is_framed)
-print("after an explicit assumption:", (image + other.rf.assume_frame(image)).rf.is_framed)"""
+print("binding retained after multiplication by unframed mask:", (image * mask).rf.is_framed)
+print("binding retained after explicit frame assumption:", (image + other.rf.assume_frame(image)).rf.is_framed)"""
     ),
     md(
-        """## 3. Microscopy: a public OME-Zarr image, opened over the web
+        """## 2. Multiscale microscopy with OME-Zarr
 
-A confocal volume of mouse tissue from the Image Data Resource (IDR), stored as OME-Zarr on a
-public server: two channels (Lamin B1 marking the nuclear envelope, DAPI marking DNA),
-236 planes, calibrated in micrometres. Opening it reads only metadata."""
+The Image Data Resource (IDR) dataset below is a confocal mouse-tissue volume stored in a public
+OME-Zarr repository. It contains 236 planes and two channels: Lamin B1, marking the nuclear
+envelope, and DAPI, marking DNA. Spatial coordinates are expressed in micrometres. With the
+default lazy reader, opening the dataset loads metadata and defers image-value access until
+computation."""
     ),
     code(
         """IDR_TISSUE = "https://uk1s3.embassy.ebi.ac.uk/idr/zarr/v0.4/idr0062A/6001240.zarr"
@@ -153,14 +181,19 @@ lattice = tissue.rf.geometry.lattice()
 print(dict(tissue.sizes), "| lazy:", type(tissue.data).__name__)
 print("voxel size (z, y, x):", lattice.spacing.round(3), "µm")"""
     ),
-    md("""Select a plane and it knows its depth; only that plane's chunks are downloaded."""),
+    md(
+        """Selecting `z=118` retains the plane's position in the volume's reference frame. Calling
+`compute()` retrieves the storage chunks needed for that plane."""
+    ),
     code(
         """plane = tissue.isel(z=118).compute()
-print("plane z = 118 sits at depth", plane.rf.geometry.point_at(y=0, x=0).values[0].round(2), "µm")"""
+print("selected plane (z=118), frame z coordinate:", plane.rf.geometry.point_at(y=0, x=0).values[0].round(2), "µm")"""
     ),
     md(
-        """OME-Zarr stores several resolution levels. They share one frame but sample it differently,
-so combining them naively is refused, and `resample_to` brings one onto the other."""
+        """The resolution levels in this OME-Zarr dataset share a reference frame but use different
+sampling grids. Direct addition of the two levels raises `ValueError`. The example uses
+`resample_to` to interpolate a slab from level 1 onto the corresponding full-resolution grid
+before displaying the images side by side."""
     ),
     code(
         """coarse = ngff.open(IDR_TISSUE, level="1")  # 2x downsampled in y and x
@@ -168,7 +201,7 @@ print("levels:", dict(tissue.sizes), "and", dict(coarse.sizes))
 try:
     tissue + coarse
 except ValueError as error:
-    print("refused:", error)
+    print("ValueError:", error)
 
 slab = dict(z=slice(110, 127))
 upsampled = coarse.isel(slab).rf.resample_to(tissue.isel(slab)).compute()"""
@@ -182,15 +215,15 @@ upsampled = coarse.isel(slab).rf.resample_to(tissue.isel(slab)).compute()"""
 height, width = plane.sizes["y"] * lattice.spacing[1], plane.sizes["x"] * lattice.spacing[2]
 extent = [0, float(width), float(height), 0]
 fig, axes = plt.subplots(1, 2, figsize=(9, 4.4), constrained_layout=True)
-panels = [(plane, "full resolution (0.36 µm)"), (upsampled.isel(z=8), "level 1 (0.72 µm), resampled")]
+panels = [(plane, "Level 0 (0.36 µm in-plane spacing)"), (upsampled.isel(z=8), "Level 1 (0.72 µm in-plane spacing), resampled")]
 for ax, (shown, title) in zip(axes, panels, strict=True):
     ax.imshow(composite(shown), extent=extent)
     ax.set(title=title, xlabel="x (µm)", ylabel="y (µm)")
 plt.show()"""
     ),
     md(
-        """**In napari**, the same geometry places the layer in micrometres; no manual `scale` or
-`translate`:
+        """The lattice affine specifies the image geometry when constructing a napari layer, without
+separate `scale` or `translate` values:
 
 ```python
 import napari
@@ -200,15 +233,27 @@ viewer.add_image(tissue.data, channel_axis=0, name=["Lamin B1", "DAPI"],
                  colormap=["magenta", "green"], affine=lattice.affine)
 ```
 
-<sub>Data: IDR idr0062 (Blin et al., *PLOS Biology* 2019), CC BY 4.0.</sub>"""
+For the displayed composites, Lamin B1 is shown in magenta and DAPI in green; each channel is
+scaled independently by its 99.5th percentile.
+
+Data source: IDR idr0062, Blin et al., *PLOS Biology* (2019), CC BY 4.0."""
     ),
     md(
-        """## 4. Medical imaging: one study, three orientations, two formats
+        """## 3. MRI geometry and resampling
 
-Fetal MRI is acquired as quick single-shot series in several orientations. Here are three T2
-HASTE series (coronal, sagittal, axial) of a pregnant non-human primate from one session, as
-DICOM, plus the same series converted to NIfTI with `dcm2niix`. The files are de-identified and
-downloaded once (about 29 MB, CC BY 4.0). Readers are lazy: no pixels are read until needed."""
+The following examples distinguish acquisition geometry, coordinate conventions, anatomical
+orientation, and geometric queries.
+
+### 3.1. DICOM series in a shared patient frame
+
+The example uses three T2-weighted HASTE series from one imaging session of a pregnant non-human
+primate, acquired in coronal, sagittal, and axial orientations. The de-identified dataset
+includes DICOM files and corresponding NIfTI conversions produced by `dcm2niix` (approximately
+29 MB, CC BY 4.0).
+
+The DICOM reader loads metadata and constructs lazy pixel arrays. The reader derives frame
+identity from the DICOM `FrameOfReferenceUID`; the printed comparison checks that the three
+series share this identity."""
     ),
     code(
         """study_dir = tour_data.mri_study()
@@ -218,18 +263,34 @@ axial = dicom.open(study_dir / "dicom" / "t2_haste_axial_pat2")
 
 for name, series in [("coronal", coronal), ("sagittal", sagittal), ("axial", axial)]:
     print(f"{name:9s}", dict(series.sizes))
-print("one patient space:", coronal.rf.reference_frame == sagittal.rf.reference_frame == axial.rf.reference_frame)"""
+print("shared reference-frame identity:", coronal.rf.reference_frame == sagittal.rf.reference_frame == axial.rf.reference_frame)"""
     ),
     md(
-        """Three differently oriented grids, one frame. `resample_to` puts the sagittal and axial series
-onto the coronal grid; the results are framed in the coronal geometry and line up anatomically.
-They differ where they should: different moments, 2 mm slices, and a fetus that moves."""
+        """The three series have different sampling grids in a shared patient frame. `resample_to`
+interpolates the sagittal and axial series onto the coronal grid, after which the arrays can be
+combined in a Dataset. Linear interpolation is used by default; target samples outside the
+source domain receive NaN. The displayed average is computed over available values
+(`skipna=True`).
+
+Point resampling between these differently oriented grids does not retain the acquired slice
+intervals. To compare values on common coordinates, the coronal display copy omits its interval
+declaration while retaining the frame and coordinate mapping. The original `coronal` array
+retains its slice intervals for slab averaging below. The voxelwise mean is a value comparison,
+not an average over a combined acquisition support.
+
+Sharing a patient frame does not establish anatomical correspondence across acquisitions.
+Differences may reflect motion between acquisitions and the 2 mm slice sampling. This example
+resamples the recorded acquisition geometries; it does not perform motion correction."""
     ),
     code(
         """sagittal_on_coronal = sagittal.rf.resample_to(coronal).compute()   # lazy until computed
 axial_on_coronal = axial.rf.resample_to(coronal).compute()
 
-views = xr.Dataset({"coronal": coronal.compute(), "sagittal": sagittal_on_coronal,
+coronal = coronal.compute()
+coronal_values = coronal.rf.unframe().rf.frame(
+    coronal.rf.coordinate_transform, dims=coronal.rf.geometry_dims
+)
+views = xr.Dataset({"coronal": coronal_values, "sagittal": sagittal_on_coronal,
                     "axial": axial_on_coronal})
 views["average"] = views.to_dataarray("view").mean("view", skipna=True)
 print({name: views[name].rf.is_framed for name in views.data_vars})"""
@@ -240,7 +301,7 @@ fig, axes = plt.subplots(1, 4, figsize=(11, 5.2), constrained_layout=True)
 middle = dict(k=42)
 top = float(views.coronal.quantile(0.995))
 titles = {"coronal": "coronal (native)", "sagittal": "sagittal, resampled",
-          "axial": "axial, resampled", "average": "average of all three"}
+          "axial": "axial, resampled", "average": "Mean across available series"}
 for ax, (name, title) in zip(axes, titles.items(), strict=True):
     ax.imshow(views[name].isel(middle), cmap=gray, vmin=0, vmax=top)
     ax.set_title(title)
@@ -248,9 +309,13 @@ for ax, (name, title) in zip(axes, titles.items(), strict=True):
 plt.show()"""
     ),
     md(
-        """The NIfTI files were written by a different tool, in RAS rather than LPS, with a different
-array layout. NIfTI carries no study identifier, so its frame is **anonymous**: usable on its own,
-but never assumed to be the DICOM patient space, and the refusal says what to do."""
+        """### 3.2. Coordinate conventions and frame identity in NIfTI
+
+The converted NIfTI files use right–anterior–superior (RAS) coordinates, whereas the DICOM
+reader uses left–posterior–superior (LPS) coordinates. Their array layouts also differ. The
+NIfTI geometry does not identify the DICOM reference frame, so this file is initially assigned
+an anonymous frame. Resampling it onto the DICOM grid without an explicit frame relationship
+raises `ValueError`."""
     ),
     code(
         """unnamed = nifti.open(study_dir / "nifti" / "t2_haste_cor.nii.gz")
@@ -258,43 +323,361 @@ print("anonymous frame:", unnamed.rf.reference_frame.is_anonymous)
 try:
     unnamed.rf.resample_to(coronal)
 except ValueError as error:
-    print("refused:", error)"""
+    print("ValueError:", error)"""
     ),
     md(
-        """We know it is the same session, so we say so when opening it (`rf.assume_frame` would do the
-same afterwards). The RAS-to-LPS conversion is derived automatically, and the NIfTI volume then
-drops onto the DICOM grid, agreeing to within `dcm2niix`'s single-precision affine."""
+        """Because this NIfTI file was converted from the same DICOM series, the example supplies
+`frame=coronal` when opening it. `rf.assume_frame` can make the corresponding declaration after
+opening. RAS and LPS differ by known axis flips, which xarrayrf applies during the
+coordinate-system conversion. The caller supplies the frame-identity declaration.
+
+The following comparison resamples the NIfTI data onto the DICOM grid and reports the maximum
+absolute intensity difference. Small discrepancies can arise from finite precision in the stored
+affine and interpolation; this diagnostic does not isolate their causes."""
     ),
     code(
         """coronal_nifti = nifti.open(study_dir / "nifti" / "t2_haste_cor.nii.gz", frame=coronal)
 print("NIfTI layout:", dict(coronal_nifti.sizes), "  DICOM layout:", dict(coronal.sizes))
 
 difference = coronal_nifti.rf.resample_to(coronal) - views.coronal
-print(f"largest difference: {float(abs(difference).max()):.2f} on a signal up to {int(views.coronal.max())}")"""
+print(f"maximum absolute intensity difference: {float(abs(difference).max()):.2f}; maximum DICOM intensity: {int(views.coronal.max())}")"""
     ),
     md(
-        """## 5. Reformat to a standard plane
+        """### 3.3. Anatomical orientation and slice extent
 
-Each series knows its orientation: the direction each array index increases toward, in patient
-letters. DICOM's `SliceThickness` is kept as each slice's declared extent (its *cell*), separately
-from the spacing between slices. In this study the two are equal; for gapped or overlapping
-slices they differ, and the cells-domain queries and resampling respect the declared extent."""
+`anatomy.orientation_codes` reports the anatomical direction associated with increasing indices
+along each geometric dimension. The reader records DICOM `SliceThickness` as a declared slice
+interval, separately from the distance between slice centres. The output compares these
+quantities for the three series; they are equal in this dataset. For gapped or overlapping
+acquisitions, slice thickness and centre-to-centre spacing differ."""
     ),
     code(
         """from xarrayrf import anatomy
 
 for name, series in [("coronal", coronal), ("sagittal", sagittal), ("axial", axial)]:
-    grid = series.rf.grid  # the sampling, without pixels
+    grid = series.rf.grid  # Sampling grid without image values
     spacing = float(series.rf.geometry.lattice().spacing[0])  # mm between slice centres
     lo, hi = grid.intervals["k"][0]  # declared cell of the first slice, in index units
     print(f"{name:9s} {anatomy.orientation_codes(grid)}  slices {spacing:.1f} mm apart, "
           f"{(hi - lo) * spacing:.1f} mm thick")"""
     ),
     md(
-        """`cardinal_grid` builds an axial target in the same patient space, covering every cell of the
-coronal series at 1 mm. Resampling both the coronal and the native axial series onto it
-reformats one and re-grids the other. The target covers cells, so resample in the cells domain to
-fill its edges."""
+        """### 3.4. Point samples and slab averages
+
+A point sample represents a value at a coordinate. A slab sample represents an average over a
+declared interval. In MRI, slice thickness describes a nominal extent, which can differ from
+centre-to-centre spacing. The examples here use a rectangular slice-profile model; the nominal
+thickness does not determine an acquired MRI slice's full response profile.
+
+Resampling specifies two separate choices: `method` constructs or selects a reconstruction from
+the source, and `support` determines how that reconstruction is evaluated on the target.
+`support="point"` evaluates target coordinates. With a box method, `support="average"` averages
+over the covered portion of each declared target interval. Merely assigning intervals to a
+target does not change the default linear point interpolation into slab averaging.
+
+#### Controlled sampling examples
+
+The following one-dimensional examples vary slice spacing and thickness independently. All use
+the analytic signal
+
+\\[
+f(z)=2+\\sin(\\pi z/5),
+\\]
+
+with \\(z\\) in millimetres. Point values are evaluated at sample coordinates; slab values are
+computed as the analytic mean over each declared source interval. Thus the inputs represent
+different measurements of the same underlying function, rather than identical numbers with
+different geometry metadata.
+
+| Case | Slice centres | Declared thickness | Resampling method |
+|---|---|---|---|
+| Point samples | Every 2 mm | None (`sample_offset=None`) | `linear`, point support |
+| Contiguous, evenly spaced slabs | Every 2 mm | 2 mm | `step`, point and average support |
+| Gapped, evenly spaced slabs | Every 2 mm | 1 mm | `step`, point and average support |
+| Overlapping, evenly spaced slabs | Every 2 mm | 3 mm | `overlap_mean`, point and average support |
+| Uneven spacing and thickness | Centres of intervals with edges 0, 1.5, 4, 5, 8, 10 mm | Per-sample widths | `step`, point and average support |
+
+`step` reconstructs a constant value within each non-overlapping slab and returns NaN in gaps.
+`overlap_mean` takes the mean of all slabs covering a position; it does not reconstruct a unique
+underlying signal from the overlapping measurements. Both methods average their reconstruction
+over covered target support. `step` rejects overlapping intervals on an axis being resampled.
+
+The default `linear` method remains available for slab data. It interpolates through the
+measured values at the slice centres and bridges interior gaps, making a different
+reconstruction assumption. Declaring source intervals does not change that default. Averaging
+with `linear`, `nearest`, or `cubic` is not yet implemented."""
+    ),
+    code(
+        """from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from xarrayrf.native import frame_array
+
+
+profile_frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("z",), ("mm",)))
+
+
+def profile_grid(centres, intervals=None):
+    \"\"\"Declare sample positions and optional slab intervals in millimetres.\"\"\"
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(
+            ("z",), ("mm",), sample_offset=(None if intervals is None else 0.5,)
+        ),
+        target=profile_frame,
+        matrix=[[1.0]],
+        translation=[0.0],
+    )
+    return xrf.Grid(
+        transform,
+        {"z": ("slice", np.asarray(centres, dtype=float))},
+        intervals=None if intervals is None else {"z": intervals},
+    )
+
+
+def signal_at(z):
+    return 2.0 + np.sin(np.pi * z / 5.0)
+
+
+def signal_mean(intervals):
+    centres = intervals.mean(axis=1)
+    widths = intervals[:, 1] - intervals[:, 0]
+    return 2.0 + np.sinc(widths / 10.0) * np.sin(np.pi * centres / 5.0)"""
+    ),
+    code(
+        """regular_centres = np.arange(1.0, 10.0, 2.0)
+irregular_edges = np.array([0.0, 1.5, 4.0, 5.0, 8.0, 10.0])
+irregular_intervals = np.column_stack((irregular_edges[:-1], irregular_edges[1:]))
+profiles = [
+    ("Point samples", regular_centres, None, "linear"),
+    ("Contiguous slabs", regular_centres, regular_centres[:, None] + [-1.0, 1.0], "step"),
+    ("Gapped slabs", regular_centres, regular_centres[:, None] + [-0.5, 0.5], "step"),
+    ("Overlapping slabs", regular_centres, regular_centres[:, None] + [-1.5, 1.5], "overlap_mean"),
+    (
+        "Uneven spacing and thickness",
+        irregular_intervals.mean(axis=1),
+        irregular_intervals,
+        "step",
+    ),
+]
+
+point_z = np.linspace(0.0, 10.0, 400)
+point_target = profile_grid(point_z)
+target_edges = np.linspace(0.0, 10.0, 5)
+target_intervals = np.column_stack((target_edges[:-1], target_edges[1:]))
+slab_target = profile_grid(target_intervals.mean(axis=1), target_intervals)
+results = []
+summary_rows = []"""
+    ),
+    code(
+        """for name, centres, intervals, method in profiles:
+    values = signal_at(centres) if intervals is None else signal_mean(intervals)
+    source = frame_array(values, profile_grid(centres, intervals))
+    centre_interpolant = source.rf.resample_to(point_target, method="linear")
+    point_values = source.rf.resample_to(point_target, method=method, support="point")
+    average, coverage = None, None
+    if intervals is not None:
+        average, coverage = source.rf.resample_to(
+            slab_target,
+            method=method,
+            support="average",
+            return_coverage=True,
+        )
+        for z, value, fraction in zip(average.z.values, average.values, coverage.values, strict=True):
+            summary_rows.append((name, z, value, fraction))
+    results.append((name, source, intervals, centre_interpolant, point_values, average, coverage))
+
+summary = pd.DataFrame(summary_rows, columns=["Source geometry", "Target centre (mm)", "Slab mean", "Coverage"])
+gap_summary = summary.loc[
+    summary["Source geometry"] == "Gapped slabs",
+    ["Target centre (mm)", "Slab mean", "Coverage"],
+]
+gap_summary.round(4)"""
+    ),
+    code(
+        """fig, axes = plt.subplots(5, 2, figsize=(11, 12), sharex=True, sharey=True, constrained_layout=True)
+for row, (name, source, intervals, interpolant, point_values, average, coverage) in enumerate(results):
+    left, right = axes[row]
+    left.plot(point_z, signal_at(point_z), color="0.45", ls=":", lw=1.5)
+    left.plot(point_z, interpolant.values, color="#eb6834", ls="--", lw=1.5)
+    if intervals is not None:
+        left.hlines(source.values, intervals[:, 0], intervals[:, 1], color="#8056b3", lw=1.3, alpha=0.7)
+        left.plot(point_z, point_values.values, color="#2a78d6", lw=1.5)
+    left.scatter(source.z.values, source.values, color="#8056b3", s=22, zorder=5)
+    left.set_title(f"{name}: point evaluation", fontsize=10)
+    left.set_ylabel("Signal (arbitrary units)")
+    if average is None:
+        sampled = source.rf.resample_to(slab_target, method="linear", support="point")
+        right.hlines(signal_mean(target_intervals), target_intervals[:, 0], target_intervals[:, 1], color="0.45", ls=":", lw=1.5)
+        right.scatter(sampled.z.values, sampled.values, color="#eb6834", s=28)
+        right.set_title("Point interpolation at target centres", fontsize=10)
+        right.text(0.04, 0.07, "Dotted lines: analytic target means.\\nMarkers: linear values at target centres.", transform=right.transAxes, fontsize=9)
+    else:
+        cov_ax = right.twinx()
+        cov_ax.bar(average.z.values, coverage.values, width=2.5, color="#459b72", alpha=0.13, align="center")
+        cov_ax.axhline(0.5, color="#459b72", ls=":", lw=0.8)
+        cov_ax.set(ylim=(0, 1.05), yticks=[0, 0.5, 1], ylabel="Covered fraction")
+        cov_ax.tick_params(axis="y", labelsize=8, colors="#459b72")
+        right.plot(average.z.values, signal_mean(target_intervals), color="0.45", ls=":", marker=".")
+        right.hlines(average.values, target_intervals[:, 0], target_intervals[:, 1], color="#2a78d6", lw=2)
+        right.scatter(average.z.values, average.values, color="#2a78d6", s=25, zorder=5)
+        right.set_title("Target slab averages (2.5 mm); min_coverage=0.5", fontsize=10)
+    for ax in (left, right):
+        ax.set(xlim=(0, 10), ylim=(0.8, 3.2), xticks=np.arange(0, 11, 2))
+        ax.grid(axis="x", alpha=0.15)
+for ax in axes[-1]:
+    ax.set_xlabel("Slice position z (mm)")
+fig.legend(
+    handles=[
+        Line2D([], [], color="0.45", ls=":", label="Analytic signal / full target mean"),
+        Line2D([], [], color="#8056b3", marker="o", label="Source samples / slab means"),
+        Line2D([], [], color="#eb6834", ls="--", label="Linear centre interpolation"),
+        Line2D([], [], color="#2a78d6", label="Box reconstruction / covered-support mean"),
+        Patch(color="#459b72", alpha=0.13, label="Covered fraction (right axis)"),
+    ],
+    loc="outside upper center",
+    ncol=2,
+    fontsize=9,
+)
+plt.show()"""
+    ),
+    md(
+        """For contiguous slabs, `step` returns each source value inside its declared interval; at a shared
+edge, it takes the mean of the adjacent slabs. The averaged result is determined by the lengths
+of the source pieces intersecting each target slab. Uneven centre spacing and per-sample
+thickness use the same operation when explicit intervals are declared.
+
+For gapped slabs, point evaluation in a gap returns NaN with zero coverage. A partially covered
+target can still return a value: this is a mean over measured support, not an estimate of the
+missing part of the slab. `return_coverage=True` reports that fraction. The default
+`min_coverage=0.5` rejects targets below 50% coverage. In this example the fractions are 0.4,
+0.6, 0.6, 0.4, so only the middle two averages are returned. Raising the threshold to 0.75
+rejects all four. Linear centre interpolation returns values in those same gaps.
+
+For overlapping slabs, `overlap_mean` first normalizes by the number of covering slabs at each
+position, then averages that reconstruction over covered target support. It is not a simple
+weighting of source means by their total overlap lengths, and it is not a deconvolution method.
+A point at a shared closed interval edge takes the mean of covering slabs. The known analytic
+curve and full target means are references for the synthetic experiment, not quantities
+recovered exactly by the box reconstruction.
+
+Point results on the dense target grid have no declared intervals. Averaged results retain the
+declared target intervals, recording the support represented by their values."""
+    ),
+    code(
+        """gapped_source = results[2][1]
+gap_probe = profile_grid([2.0])
+gap_value, gap_coverage = gapped_source.rf.resample_to(
+    gap_probe, method="step", support="point", return_coverage=True
+)
+linear_in_gap = gapped_source.rf.resample_to(gap_probe, method="linear")
+print("At z=2 mm: linear =", float(linear_in_gap.values[0]),
+      "| step =", float(gap_value.values[0]), "| coverage =", float(gap_coverage.values[0]))
+
+strict_average = gapped_source.rf.resample_to(
+    slab_target, method="step", support="average", min_coverage=0.75
+)
+print("Target means with min_coverage=0.75:", strict_average.values)
+print("Dense point output declares intervals:", bool(results[1][4].rf.grid.intervals))
+print("Average output interval widths (mm):", np.diff(results[1][5].rf.grid.intervals["z"], axis=1).ravel())
+
+try:
+    results[3][1].rf.resample_to(point_target, method="step")
+except ValueError as error:
+    print("ValueError:", error)"""
+    ),
+    md(
+        """#### Averaging adjacent MRI slices
+
+The coronal DICOM series declares 2 mm slice thickness and 2 mm centre spacing. The next example
+combines consecutive triplets into nominally 6 mm slabs, keeping the in-plane sampling
+unchanged. DICOM image values are integer-valued; box methods require floating values, so the
+example converts explicitly. It uses one voxel column from the already loaded `coronal`
+array, so no additional dataset is required. Its target intervals use array-coordinate units;
+the existing affine maps those intervals into patient space."""
+    ),
+    code(
+        """column = coronal.isel(j=slice(150, 151), i=slice(80, 81)).astype(float)
+column_grid = column.rf.grid
+group_centres = np.arange(1.0, column.sizes["k"] - 1, 3.0)
+group_intervals = np.column_stack((group_centres - 1.5, group_centres + 1.5))
+target_coordinates = dict(column_grid.coordinates)
+target_coordinates["k"] = ("k", group_centres)
+grouped_grid = xrf.Grid(
+    column_grid.transform,
+    target_coordinates,
+    intervals={"k": group_intervals},
+)
+
+slab_means, covered_fraction = column.rf.resample_to(
+    grouped_grid, method="step", support="average", return_coverage=True
+)
+centre_values = column.rf.resample_to(grouped_grid, method="linear", support="point")
+
+source_spacing = float(coronal.rf.geometry.lattice().spacing[0])
+positions = np.arange(column.sizes["k"]) * source_spacing
+target_positions = group_centres * source_spacing
+comparison = pd.DataFrame(
+    {
+        "Position relative to first slice (mm)": target_positions,
+        "Centre-interpolated value": centre_values.values.ravel(),
+        "Slab mean (6 mm)": slab_means.values.ravel(),
+        "Coverage": covered_fraction.values.ravel(),
+    }
+)
+middle_group = len(comparison) // 2
+print(comparison.iloc[middle_group - 3:middle_group + 3].round(3).to_string(index=False))
+print("Source slices:", column.sizes["k"], "| groups:", len(group_centres),
+      "| unused trailing slices:", column.sizes["k"] - 3 * len(group_centres))
+print("Source centre spacing (mm):", source_spacing)
+print("Source nominal slab thickness (mm):",
+      np.diff(column_grid.intervals["k"], axis=1)[0, 0] * source_spacing)
+print("Linear output nominal slab thickness (mm):",
+      np.diff(centre_values.rf.grid.intervals["k"], axis=1)[0, 0] * source_spacing)
+print("Average output slab thickness (mm):", np.diff(slab_means.rf.grid.intervals["k"], axis=1)[0, 0] * source_spacing)"""
+    ),
+    md(
+        """The target centres coincide with every third source slice. The linear call selects the middle
+slice of each triplet, while the slab call averages all three slices. The resulting values
+generally differ, making the effect of target support visible in the measured MRI data.
+
+Because the linear call selects existing samples, its result retains the selected source slices'
+nominal 2 mm intervals. The averaged result instead declares the nominal 6 mm target intervals.
+The output table prints both thicknesses, centre spacing, group counts and unused trailing
+slices; all source slices are used in this dataset. The in-plane axes retain their source
+samples and declare no target intervals, so they pass through unchanged. One voxel column
+keeps the example small.
+
+Small deviations from nominal spacing and full coverage reflect the recorded decimal DICOM
+geometry. Slice positions in the plot are relative to the first source slice centre."""
+    ),
+    code(
+        """fig, ax = plt.subplots(figsize=(9, 3.3), constrained_layout=True)
+ax.plot(positions, column.values.ravel(), color="0.6", marker=".", lw=0.8, label="Source slab means (2 mm)")
+ax.scatter(target_positions, centre_values.values.ravel(), color="#eb6834", s=28, label="Centre-interpolated values (middle slice)")
+ax.hlines(slab_means.values.ravel(), (group_centres - 1.5) * source_spacing, (group_centres + 1.5) * source_spacing, color="#2a78d6", lw=1.5, label="Target slab means (6 mm)")
+ax.set(xlabel="Position along slice axis relative to first sample (mm)", ylabel="MRI intensity (arbitrary units)", title="Averaging three adjacent slices in the coronal series")
+ax.legend(fontsize=8)
+plt.show()"""
+    ),
+    md(
+        """The current box methods require floating or complex values, declared source intervals on axes
+being resampled, and separable affine coordinate mappings. Target averaging also requires
+declared intervals on those axes. Axes that select matching source samples can pass through.
+This example averages along the original slice axis; it does not use slab averaging to reformat
+an oblique stack onto a differently oriented grid. For point interpolation, `domain="cells"`
+extends the outer evaluation domain to the declared cell edges; it does not change point
+evaluation into target averaging or prevent interpolation across interior gaps. Box methods
+already use declared intervals as their domain and reject `domain="cells"`."""
+    ),
+    md(
+        """### 3.5. Resampling onto a cardinal grid
+
+`anatomy.cardinal_grid` constructs an axial grid with 1 mm spacing that covers the declared
+cells of the coronal series. Both the coronal and native axial series are resampled onto this
+target.
+
+For the default linear interpolation used here, `domain="cells"` extends evaluation to the outer
+source-cell boundaries, holding the edge sample's value within that extension. Interpolation
+between sample centres is unchanged."""
     ),
     code(
         """target = anatomy.cardinal_grid(coronal.rf.grid, "axial", spacing=1.0)
@@ -303,7 +686,7 @@ print("axial target:", dict(target.sizes), anatomy.orientation_codes(target))
 from_coronal = coronal.rf.resample_to(target, domain="cells").compute()
 from_axial = axial.rf.resample_to(target, domain="cells").compute()
 
-slice_dim = target.dims[0]  # the dimension pointing toward S
+slice_dim = target.dims[0]  # Dimension increasing in the superior direction
 cut = {slice_dim: target.sizes[slice_dim] // 2}
 fig, axes = plt.subplots(1, 2, figsize=(9, 4.6), constrained_layout=True)
 for ax, (title, array) in zip(axes, [("coronal, reformatted to axial", from_coronal),
@@ -314,11 +697,12 @@ for ax, (title, array) in zip(axes, [("coronal, reformatted to axial", from_coro
 plt.show()"""
     ),
     md(
-        """## 6. Ask where things are
+        """### 3.6. Mapping between voxel and patient coordinates
 
-Every framed array answers geometric questions in patient space. Pick a voxel in the coronal
-series, ask where it is in millimetres, then ask which voxel of the *native* sagittal and axial
-series sits at that same place, without resampling anything."""
+`point_at` maps an array index position to patient coordinates in millimetres. `positions_at`
+maps that point to continuous index positions in the native sagittal and axial grids. These
+positions need not be integers or lie within the sampled extent. The queries do not resample
+image values."""
     ),
     code(
         """voxel = dict(k=42, j=150, i=80)
@@ -330,12 +714,16 @@ for name, series in [("sagittal", sagittal), ("axial", axial)]:
     print(f"  in the native {name} series it is voxel ({located})")"""
     ),
     md(
-        """## 7. Brain atlases: a subject in MNI space
+        """## 4. Registration transforms and atlas queries
 
-A T1-weighted MRI from a public study (OpenNeuro ds000001) lives in its own scanner space, an
-anonymous frame because the file does not name it. The
-MNI152 template and the Schaefer 2018 parcellation are NIfTI files coded as MNI space, so they
-share one frame automatically, without any registration between them."""
+The T1-weighted subject image from OpenNeuro ds000001 is initially assigned an anonymous scanner
+frame. The MNI152NLin2009cAsym template and Schaefer 2018 parcellation used here are both
+provided in the MNI152NLin2009cAsym template space through TemplateFlow.
+
+Their coded NIfTI geometry is interpreted by the adapter as a shared MNI152 frame. This
+metadata-based frame assignment does not estimate a registration or establish that arbitrary
+files coded as MNI152 use the same template variant. The subject-to-template relationship is
+supplied separately below."""
     ),
     code(
         """brain = tour_data.brain_images()
@@ -348,9 +736,14 @@ print("template and atlas:", template.rf.reference_frame.identifier,
       "shared:", template.rf.reference_frame == atlas.rf.reference_frame)"""
     ),
     md(
-        """A registration tool (here SimpleITK, see `tools/register_tour_subject.py`) produces an
-affine between the two spaces. In xarrayrf it becomes a transform that names both frames, and
-`resample_to` uses it to put the subject on the template's grid."""
+        """An affine registration computed with SimpleITK is provided in `examples/tour_data.py`;
+`tools/register_tour_subject.py` records the procedure used to estimate it. The transform maps
+template-frame points to subject-frame points, as required by `resample_to`: each target point
+is mapped into the source frame before interpolation. xarrayrf applies the supplied transform;
+it does not estimate the registration.
+
+The plots overlay atlas boundaries on the resampled subject image. They illustrate use of the
+transform and do not quantify registration accuracy."""
     ),
     code(
         """mni_to_subject = xrf.AffineTransform.from_matrix(
@@ -358,7 +751,7 @@ affine between the two spaces. In xarrayrf it becomes a transform that names bot
     matrix=tour_data.MNI_TO_SUBJECT_MATRIX, translation=tour_data.MNI_TO_SUBJECT_TRANSLATION,
 )
 in_mni = subject.rf.resample_to(template, transform=mni_to_subject).compute()
-print("subject now on the template grid:", dict(in_mni.sizes), in_mni.rf.reference_frame.identifier)"""
+print("resampled subject: target grid and frame identifier:", dict(in_mni.sizes), in_mni.rf.reference_frame.identifier)"""
     ),
     code(
         """def boundaries(labels):
@@ -378,8 +771,10 @@ for ax, (cut, title) in zip(axes, [(dict(i=80), "sagittal"), (dict(j=110), "coro
 plt.show()"""
     ),
     md(
-        """Ask the atlas about a voxel of the original scan: map it through the registration into MNI
-space and look it up."""
+        """To query the atlas from the original subject image, the inverse registration maps a point
+from the subject frame into template coordinates. The resulting atlas index position is rounded to the
+nearest sample, and the parcel label at that sample is looked up in the label table. This is a
+discrete label query rather than interpolation of parcel identifiers."""
     ),
     code(
         """networks = pd.read_csv(brain / "Schaefer2018_100Parcels7Networks.tsv", sep="\\t").set_index("index")["name"]
@@ -389,30 +784,32 @@ in_scanner = subject.rf.geometry.point_at(**voxel).values
 in_template = mni_to_subject.inverse().transform_point([in_scanner])[0]
 position = np.round(atlas.rf.geometry.positions_at(in_template)).astype(int)
 parcel = int(atlas.isel(dict(zip(atlas.rf.geometry_dims, position, strict=True))))
-print(f"subject voxel {voxel} -> MNI {in_template.round(1)} mm -> {networks[parcel]}")"""
+print(f"subject index {voxel} -> template point {in_template.round(1)} mm -> nearest-sample parcel {networks[parcel]}")"""
     ),
     md(
-        """A transform records which frames it connects, so it cannot be applied to the wrong data by
-mistake: sub-01's registration is refused for sub-02, whose scan sits in its own space."""
+        """The transform records its source and target frame identities. Applying the transform associated
+with sub-01 to sub-02 raises `ValueError` because its endpoints do not match the requested frame
+relationship. The check concerns the declared frame identities."""
     ),
     code(
         """other_subject = nifti.open(brain / "sub-02_T1w.nii.gz")
 try:
     other_subject.rf.resample_to(template, transform=mni_to_subject)
 except ValueError as error:
-    print("refused:", error)"""
+    print("ValueError:", error)"""
     ),
     md(
-        """<sub>Data: OpenNeuro ds000001 (CC0); MNI152NLin2009cAsym template, © 1993–2004 Louis Collins,
-McConnell Brain Imaging Centre, MNI, McGill University; Schaefer et al. 2018 parcellation, via
-TemplateFlow.</sub>"""
+        """Data sources: OpenNeuro ds000001 (CC0); MNI152NLin2009cAsym template, © 1993–2004 Louis Collins,
+McConnell Brain Imaging Centre, MNI, McGill University; Schaefer et al. (2018) parcellation,
+obtained through TemplateFlow."""
     ),
     md(
-        """## 8. Satellite imagery: public Sentinel-2 scenes
+        """## 5. Geospatial raster resampling and mosaicking
 
-True-colour Sentinel-2 images (10 m pixels, 10 980 × 10 980 each) are public Cloud-Optimized
-GeoTIFFs. Three scenes from one satellite pass over northern Italy: two neighbouring tiles in
-UTM zone 32, and one covering the same ground from zone 33."""
+The example reads three public Sentinel-2 true-colour scenes stored as Cloud-Optimized GeoTIFFs,
+with 10 m pixel spacing and 10,980 × 10,980 pixels per scene. The scenes are from the same
+satellite pass over northern Italy: two adjacent tiles in UTM zone 32N and an overlapping tile
+represented in UTM zone 33N."""
     ),
     code(
         """SCENE = ("https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/"
@@ -424,9 +821,14 @@ print(dict(east.sizes), "| frames:", west.rf.reference_frame.identifier,
       east.rf.reference_frame.identifier, next_zone.rf.reference_frame.identifier)"""
     ),
     md(
-        """Neighbouring tiles in one CRS share a frame. Define a new 15 km canvas directly in UTM
-coordinates, straddling the seam between the tiles, and paint both onto it; only the few
-internal tiles under the canvas are fetched."""
+        """The two zone-32N tiles share a coordinate reference system (CRS), represented by a common frame.
+The example defines a 15 km × 15 km target grid in UTM coordinates, straddling the seam between
+the tiles, and resamples each tile onto it using nearest-neighbour interpolation.
+`combine_first` retains values from the eastern tile and fills missing values from the western
+tile.
+
+Remote access retrieves the storage blocks required by the operation rather than downloading the
+complete scenes. The plots use easting and northing in kilometres."""
     ),
     code(
         """utm32 = east.rf.reference_frame
@@ -453,35 +855,33 @@ for ax, (shown, title) in zip(axes, [(east_only, "east tile"), (mosaic, "east an
 plt.show()"""
     ),
     md(
-        """The zone-33 scene covers the same ground in a different projection. Mixing them is refused;
-reprojecting between UTM zones needs a nonlinear transform, which is on the roadmap."""
+        """The zone-33N tile uses a different projected CRS. Addition to the zone-32N tile raises
+`ValueError` because the frames differ. The mapping between these CRSs is nonlinear and cannot
+be represented by an `AffineTransform`. Built-in support for geographic reprojection is planned."""
     ),
     code(
         """try:
     east + next_zone
 except ValueError as error:
-    print("refused:", error)"""
+    print("ValueError:", error)"""
     ),
+    md("""Contains modified Copernicus Sentinel data 2023."""),
     md(
-        """The same situations in popular geospatial extensions (reproduced by
-`tools/geo_failure_modes.py`):
+        """## 6. Scalar-field resampling under a Lorentz transformation
 
-| Operation | rioxarray 0.23 / rasterix 0.2 / xproj 0.2 | xarrayrf |
-|---|---|---|
-| Strided selection, then locate a pixel | wrong location (rioxarray) | correct |
-| Add rasters in different CRSs | silently keeps one CRS (rioxarray) | refused |
-| Join rasters | CRS lost; a missing CRS matches anything (rasterix) | frame kept |
-| `join="override"` across CRSs | CRS rewritten (xproj) | refused |
+This synthetic example represents a scalar profile that is constant in time in an object's rest
+frame. Coordinates are `(ct, x)`, both in metres. A Lorentz boost maps points from a laboratory
+frame into the rest frame for a relative velocity of 0.8c.
 
-<sub>Contains modified Copernicus Sentinel data 2023.</sub>"""
-    ),
-    md(
-        """## 9. Physics: the same machinery in spacetime
+The laboratory slice `ct=0` spans a range of rest-frame times, so the source field is sampled
+over an extended `ct` range. `resample_to` evaluates the field on this laboratory slice using
+cubic interpolation. On this slice, the spatial profile is contracted by a factor of 1/γ, where
+γ = 1/√(1−β²) and β = 0.8. The diagnostic compares γ with the ratio of profile widths, defined
+here as twice the intensity-weighted standard deviation of position. Finite sampling and
+interpolation can affect the numerical agreement.
 
-Nothing above is specific to images. A reference frame can be an inertial frame and a transform a
-Lorentz boost. Take an object of arbitrary shape, at rest in its own frame, and ask what a
-laboratory observer measures at one instant while it flies past at 0.8 c. `resample_to` does the
-work; relativity of simultaneity is handled by the geometry."""
+The example transforms the sampling coordinates of a scalar field. It does not apply a density
+normalization or a vector/tensor component transformation."""
     ),
     code(
         """spacetime = xrf.CoordinateSystem(("ct", "x"), ("m", "m"))
@@ -516,42 +916,60 @@ print(f"length ratio {width(rest_profile) / width(measured):.6f}   Lorentz facto
     code(
         """fig, ax = plt.subplots(figsize=(6.4, 3.2))
 ax.plot(x_rest, shape, color=BLUE, lw=2, label="at rest")
-ax.plot(measured.x, measured, color=ORANGE, lw=2, label="measured in the lab at 0.8 c")
+ax.plot(measured.x, measured, color=ORANGE, lw=2, label="Laboratory slice (β=0.8)")
 ax.legend(loc="upper left", frameon=False, fontsize=8)
-ax.set(xlabel="x (m)", ylabel="density", xlim=(-6, 6), ylim=(0, 1.12))
-ax.set_title("Same object, contracted by 1/γ")  # noqa: RUF001 (Lorentz factor)
+ax.set(xlabel="x (m)", ylabel="Scalar field value (arbitrary units)", xlim=(-6, 6), ylim=(0, 1.12))
+ax.set_title("Scalar profiles in rest and laboratory frames")
 plt.show()"""
     ),
     md(
-        """## 10. Save and reload
+        """## 7. Serialization of reference-frame bindings
 
-`rf.encode()` stores the binding as ordinary attributes, so framed arrays round-trip through
-Zarr or netCDF with any xarray backend; `rf.decode()` restores and validates it."""
+`rf.encode()` represents the frame binding in serializable array attributes. The following
+example writes the encoded array to Zarr, reopens it with xarray, and uses `rf.decode()` to
+reconstruct and validate the binding. The printed comparison checks that the coordinate
+transform is preserved.
+
+The binding also round-trips through netCDF (tested with the scipy engine); only Zarr is
+demonstrated here."""
     ),
     code(
         """image.rf.encode().to_dataset().to_zarr(workdir / "image.zarr", mode="w", consolidated=False)
 restored = xr.open_zarr(workdir / "image.zarr", consolidated=False).section.rf.decode()
-print("same placement after the round trip:", restored.rf.coordinate_transform == image.rf.coordinate_transform)"""
+print("coordinate transform preserved after Zarr round trip:", restored.rf.coordinate_transform == image.rf.coordinate_transform)"""
     ),
     md(
-        """## Where it stands
+        """## Implementation status and limitations
 
-xarrayrf is early and unreleased. It builds on xarray's custom-index machinery; a few operations
-need small fixes to xarray that we maintain as a patch series for upstream submission (this
-notebook runs with them). Known gaps are tracked openly, and geographic longitude/latitude and
-celestial coordinates are next on the design list. Pixel-free grids, declared slice thickness,
-anatomical reformatting and anonymous frames are in place.
+xarrayrf is in development and unreleased. Some operations depend on fixes to xarray maintained
+as a patch series for upstream submission; the environment commands at the beginning of the
+notebook install the pinned patched dependency.
 
-**Try it**
+The examples demonstrate affine geometry, explicit frame relationships, geometric queries,
+resampling, and serialization. Built-in support for geographic (longitude/latitude) coordinates,
+geographic reprojection, and celestial coordinate systems is not yet implemented. Plans and
+known limitations are documented in the repository.
 
-```sh
-git clone https://github.com/matthiasschabel/xarrayrf && cd xarrayrf
-uv sync --extra dev --group patched --group docs
-uv run --group patched --group docs --with jupyterlab jupyter lab examples/xarrayrf_tour.ipynb
-```
+Further documentation: [README](../README.md), [interface reference](../docs/core_interface.md),
+and [design](../docs/design.md)."""
+    ),
+    md(
+        """## Appendix A. Selected geospatial compatibility observations
 
-More detail: the [README](../README.md), the [interface reference](../docs/core_interface.md) and
-the [design](../docs/design.md)."""
+The following library observations were reproduced with `tools/geo_failure_modes.py` using
+the versions shown. The xarrayrf column summarizes corresponding geometry and compatibility
+behavior, covered by the GeoTIFF tests. Later releases may behave differently. These cases
+concern metadata and coordinate behavior, rather than overall package capabilities.
+
+| Operation | Library and version | Observed outcome | xarrayrf outcome |
+|---|---|---|---|
+| Strided `isel`, then locate a pixel with the stored affine | rioxarray 0.23.0 | Stored affine retains the original pixel spacing | Geometry retains the selected source pixel's position |
+| Arithmetic across different projected CRSs | rioxarray 0.23.0 | Result retains the first operand's CRS | Raises `ValueError` |
+| Join or concatenate raster indexes | rasterix 0.2.2 | CRS is lost; the CRS-less joined index matches a different CRS | Join retains the frame; concatenation of framed geometry axes raises `ValueError` |
+| `join="override"` across different projected CRSs | xproj 0.2.1 | The second operand's CRS is replaced by the first | Raises `ValueError` |
+
+The angular-CRS override case in the reproducer is separate: xarrayrf currently rejects angular
+CRSs at import, before alignment."""
     ),
 ]
 

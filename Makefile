@@ -23,7 +23,7 @@ test-pinned:
 
 # Rebuild and execute the tour notebook (examples/xarrayrf_tour.ipynb).
 tour:
-	cd examples && UV_PROJECT_ENVIRONMENT=../.venv-patched $(UV) run --extra dev --group patched --group docs python ../tools/build_tour.py xarrayrf_tour.ipynb
+	cd examples && UV_PROJECT_ENVIRONMENT="$(CURDIR)/.venv-patched" $(UV) run --extra dev --group patched --group docs python ../tools/build_tour.py xarrayrf_tour.ipynb
 
 # Rebuild and execute the relativity notebook (examples/relativity.ipynb).
 relativity:
