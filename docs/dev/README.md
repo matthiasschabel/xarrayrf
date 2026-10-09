@@ -13,6 +13,9 @@ reasons. The stable documents are [the design](../design.md),
 
 ## architecture/
 
+- [geometry_tolerance_integration_notes.md](architecture/geometry_tolerance_integration_notes.md):
+  existing configurable sampling queries, tolerance ownership, and deferred pirana integration.
+
 - [core_model_design.md](architecture/core_model_design.md): frames and coordinate systems,
   identity and equivalence, roles, orientation, the `Transform` protocol, units, affine classes.
 - [geometry_and_resampling_design.md](architecture/geometry_and_resampling_design.md): the
