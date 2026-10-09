@@ -1,12 +1,13 @@
 # Curved spacetime as a test of the core
 
 **Status:** Active (assessment; no implementation planned)
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-09
 **Scope:** Whether the frame, transform and sampling model can carry data on a curved,
 pseudo-Riemannian spacetime (general relativity) without redesign; which layers already fit,
 which assumptions break, and the smallest changes that would make it first class. Companion to
 [the special-relativity note](relativity_notes.md), which covers the flat affine case, and to
-[the nonlinear geometry plan](nonlinear_geometry_plan.md).
+[the nonlinear geometry plan](nonlinear_geometry_plan.md), whose structural rules answer the gaps
+below.
 
 ## Context
 
@@ -68,17 +69,18 @@ implicitly in exactly two places, listed under gaps.
 
 ### Where it breaks
 
-1. **Frame identity is affine-chart identity.** `is_equivalent_frame`,
-   `with_coordinate_system` and `coordinate_system_change` assume two coordinate systems of one
-   frame differ by a signed permutation without rescaling; `rf.assume_frame` and adapter
-   `frame=` refuse a non-affine system change explicitly. In GR the invariant object is the
-   manifold and the chart is incidental, so a nonlinear chart change forces the manifold
-   identity to be dropped and two charts of one spacetime become two unrelated worlds. This is
-   the one architectural gap: the model has no notion of "same manifold, different chart" beyond
-   signed permutations.
-2. **Euclid is assumed where "rigid" and "spacing" are computed.** `affine_class` tests
-   `M^T M = I` for the rotation, rigid and similarity classes; `Lattice.spacing` takes column
-   norms. A Lorentz boost is an isometry of `eta = diag(-1, 1, 1, 1)` (`M^T eta M = eta`) and
+1. **Chart changes are derived and adopted only when affine.** Identity itself survives a
+   change of coordinate system: `with_coordinate_system` keeps identifier, definition and
+   context, and `is_equivalent_frame` ignores the coordinate system. What is missing is the
+   rest: `coordinate_system_change` derives only signed permutations, `rf.assume_frame` and
+   adapter `frame=` adopt only affine changes, and there is no chart declaration to carry a
+   chart's parameters or domain. A nonlinear transition between two charts of one spacetime
+   therefore has nowhere to live. (An earlier version of this note said identity was lost; the
+   2026-10-08 review corrected that from `src/xarrayrf/_frame.py`.)
+2. **Euclid is assumed where "rigid", "spacing" and "direction" are computed.** `affine_class`
+   tests `M^T M = I` for the rotation, rigid and similarity classes; `Lattice.spacing` takes
+   column norms; `CoordinateSystem.axis_codes` takes norms and angles. Spacing and axis codes
+   refuse mixed units, but `(ct, x)` in metres passes. A Lorentz boost is an isometry of `eta = diag(-1, 1, 1, 1)` (`M^T eta M = eta`) and
    classifies as a generic `affine`. Harmless for storage, wrong for any geometric query. Any
    future world-distance or nearest-in-world query (named in [the design](../../design.md) §7
    as requiring a metric) inherits the same problem.
@@ -105,16 +107,18 @@ true; the cost is that there is nothing to extend from when a metric is wanted.
 
 ### Smallest changes for first-class support
 
-None of these touch `Grid`, `Geometry`, the binding or `resample`, which is the evidence that
-the layering is sound.
+None of these touch `Grid`, `Geometry`, the binding or `resample` as long as they are offered as
+standalone operations. Tensor-aware resampling would touch `resample` and the binding (component
+metadata, and the order of conversion and interpolation), so the layering claim holds for that
+scope only.
 
 | Gap | Minimal change |
 |---|---|
-| 1 | Let a frame keep its identity across a user-supplied nonlinear chart transition (for example `with_coordinate_system(system, transition=...)`), with the signed-permutation derivation kept as the fast path. Composition rules and the `ArrayCoordinates`-only-at-ends rule are unchanged. |
-| 2 | An optional constant or field metric on a frame (`eta` for Minkowski, identity implied when absent); `affine_class` tests isometry against it. The special-relativity note rejected "a metric nothing reads"; `affine_class` and `Lattice.spacing` are the readers. |
+| 1 | Chart declarations carrying projection and domain parameters, and explicit transition transforms between charts of one frame, with the signed-permutation derivation kept as the fast path; no transition registry. Designed with stage 2 of the [nonlinear geometry plan](nonlinear_geometry_plan.md). |
+| 2 | An optional constant or field metric on a frame, tied to a chart (`eta` for Minkowski; identity as a coordinate-space convention when absent, refused on angular axes). `affine_class` stays numeric and a separate query tests metric preservation; `Lattice.spacing` and future distance queries are the readers. See the plan's metric rule. |
 | 3 | The angular representation and declared-domain stages already listed in [the special-relativity note](relativity_notes.md). |
 | 4 | Specify quantity rules as `tensor(values, indices=("up", "down", ...))` over trailing component axes, with `J` evaluated per sample from the geometry. |
-| 5 | Decide whether fibre maps are a second transform kind or a separate value object; either way, `check_transform`'s rule needs an explicit exception. |
+| 5 | A separate `FrameField` value object, so `check_transform`'s rule needs no exception. |
 
 ## Alternatives Considered
 
@@ -127,13 +131,10 @@ the layering is sound.
 
 ## Deferred Work
 
-- Whether gap 1 is worth solving before any user needs it. The nonlinear geometry plan's
-  deformable-registration stage does not need it: a displacement field relates two frames.
-  Geographic and celestial charts (lon/lat to projected, ICRS to galactic) do, so it is likely to
-  arrive from that direction rather than from relativity.
-- Whether gap 2's metric belongs on `ReferenceFrame` or on `CoordinateSystem`. A metric is a
-  property of the space, expressed in the chart, which suggests the frame holds it and a
-  coordinate system change transforms it.
+- Gap 1 arrives with stage 2 of the nonlinear geometry plan (lon/lat ↔ Earth-centred
+  Cartesian), not from relativity. Stage 1 (displacement fields) does not need it.
+- Gap 2's metric belongs to the frame, tied to a chart (decided in the plan; the rule itself is
+  an open decision there).
 - Any demonstrator (a Schwarzschild field resampled between two charts through public APIs)
   waits for the angular-representation stage.
 

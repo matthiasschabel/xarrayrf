@@ -24,8 +24,12 @@ reasons. The stable documents are [the design](../design.md),
   xarray-free geometry core, and the private contracts another array binding would use.
 - [grid_plan.md](architecture/grid_plan.md): implemented freestanding `Grid` rationale, its doors,
   declared intervals, anatomy on grids, and complete versus anonymous frames.
-- [nonlinear_geometry_plan.md](architecture/nonlinear_geometry_plan.md): draft staging for
-  nonlinear geometry and the plan for displacement-field transforms.
+- [nonlinear_geometry_plan.md](architecture/nonlinear_geometry_plan.md): staging for nonlinear
+  geometry and the structural rules (chart identity, metrics, angular axes, tensors) every stage
+  respects.
+- [field_transform_design.md](architecture/field_transform_design.md): stage 1, displacement,
+  position and B-spline transforms, declared inverse pairs, per-point validity and importers
+  built on nitransforms.
 - [persistence_design.md](architecture/persistence_design.md): schema 1 of `encode`/`decode`,
   provisional until frozen.
 - [cross_domain_cases.md](architecture/cross_domain_cases.md): the DICOM, OME-NGFF, astronomy

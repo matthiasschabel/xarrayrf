@@ -52,11 +52,12 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   itself is done (`Grid`, [grid plan](architecture/grid_plan.md)).
 - **Framed concat along a geometry dimension** (stitching slabs that share a transform), if a
   consumer needs it; overlapping labels would stack samples at the same place.
-- **Nonlinear geometry**, staged in the
-  [draft plan](architecture/nonlinear_geometry_plan.md): field-backed transforms for deformable
-  registration, then angular coordinate systems with a minimal CF reader (rectilinear GCM and
-  celestial grids), then curvilinear coordinate fields, then provider adapters (pyproj, Astropy).
-  Angular systems change core value objects and need their own reviewed plan.
+- **Nonlinear geometry**, staged in the [plan](architecture/nonlinear_geometry_plan.md):
+  field-backed transforms for deformable registration
+  ([design](architecture/field_transform_design.md); Pirana is the consumer), then angular charts
+  with chart transitions and a minimal CF reader (rectilinear GCM and celestial grids), then
+  curvilinear coordinate fields, then provider adapters (pyproj, Astropy). Angular charts change
+  core value objects and need their own reviewed design.
 - **Small follow-ups.** DICOM localizer (mixed-orientation) splitting and a NIfTI writer on top
   of `nifti.to_header`, when a consumer needs them. `DuckArray` already uses a local protocol.
 
