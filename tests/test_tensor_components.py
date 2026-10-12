@@ -699,7 +699,7 @@ def test_a_stale_array_coordinates_basis_cannot_be_unframed_or_encoded(
     stale = velocity.rename(j="row")
     with pytest.raises(ValueError, match="own coordinates, which need the binding"):
         stale.rf.unframe()
-    with pytest.raises(ValueError, match="no longer this array's binding source"):
+    with pytest.raises(ValueError, match="no longer belongs to this array's binding"):
         stale.rf.encode()
     assert stale.rf.clear_tensor_components().rf.encode().rf.decode().rf.is_framed
 

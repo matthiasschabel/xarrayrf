@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-10-12] — Independent QA of value geometry stage 4 (FrameField)
+
+- **Problem**: Review pointwise bases (`c8d704b`) for regressions, edge cases and error paths
+  beyond the Codex rounds.
+- **Resolution**: Probes confirmed pickling, `isel`, Dataset membership, persistence and lazy
+  component resampling. Three gaps fixed. (1) A per-sample change of basis put the geometry
+  dimensions among the core dimensions, so a Dask array chunked along them (spatially chunked
+  wind) raised xarray's core-dimension error: the maps are now passed as their own inputs over
+  the geometry dimensions, which stay loop dimensions. (2) An undeclared scalar with a frame
+  field as `from_basis` failed with an unrelated "two different ArrayCoordinates" message; the
+  constant basis map now refuses fields with the reason. (3) After `assume_frame`, the stale
+  basis error named only `ArrayCoordinates`; it now covers frame fields. Regression tests for
+  each.
+- **Verification**: stock 2,500 passed plus 47 xfailed; patched 2,547; upstream 2,505 plus 42
+  xfailed; ruff and mypy pass.
+- **Files affected**: `src/xarrayrf/_tensor_components.py`, `src/xarrayrf/native.py`,
+  `tests/test_frame_fields.py`, `tests/test_tensor_components.py`, `docs/core_interface.md`.
+- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`) applying QAEngineer.
+
 ## [2026-10-12] — Value geometry stage 4: pointwise bases (FrameField)
 
 - **Problem**: Component bases were constant (a frame or the binding's array coordinates), so

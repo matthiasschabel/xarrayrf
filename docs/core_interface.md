@@ -509,7 +509,9 @@ array's sample points; such a transform must start or end at the array's frame, 
 direction rule above (its Jacobian is evaluated at the sample's location in its source frame).
 East/north/up to its own Earth-centred chart uses the directions directly, so pole rows
 convert too; conversions through the chart basis refuse pole samples, naming them. Constant
-changes evaluate nothing. Only `EastNorthUp` is persisted; `encode` refuses a declaration with
+changes evaluate nothing. Dask inputs stay lazy, including when chunked along geometry
+dimensions; the sample points themselves are computed (coordinates only, never pixels).
+Undeclared scalars change only between constant bases. Only `EastNorthUp` is persisted; `encode` refuses a declaration with
 a user field.
 
 **Packed symmetric components.** A symmetric order-2 type can hold its `n(n+1)/2` independent

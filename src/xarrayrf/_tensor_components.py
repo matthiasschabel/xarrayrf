@@ -422,6 +422,12 @@ def basis_map(
     ``C @ B`` and ``S -> A`` is ``B^-1 @ C`` with ``C: S -> F``. Every map is square and
     passes the equilibrated invertibility test: a passive change of basis is a bijection.
     """
+    if (isinstance(source, FrameField) or isinstance(target, FrameField)) and source != target:
+        raise ValueError(
+            "a frame-field basis varies by position, so this change needs a framed array's "
+            "declared components (rf.declare_tensor_components); undeclared scalars change "
+            "only between constant bases"
+        )
     if source == target:
         matrix = np.eye(len(source.axes))
     elif isinstance(source, ArrayCoordinates) and isinstance(target, ReferenceFrame):
@@ -593,18 +599,19 @@ def change_basis(
         maps, geometry_dims = _sample_maps(
             array, declaration.bases, targets, binding=binding, transform=transform
         )
-        core = [*geometry_dims, *dims]
+        check_common_map(tensor_type, maps)
+        _check_units(declaration.bases, targets, units)
+        result = _apply_pointwise(array, declaration, maps, geometry_dims, dims)
     else:
         maps = [
             basis_map(source, target, binding_transform=binding_transform, transform=transform)
             for source, target in zip(declaration.bases, targets, strict=True)
         ]
-        core = dims
-    check_common_map(tensor_type, maps)
-    _check_units(declaration.bases, targets, units)
-    result = _apply_over(
-        array, lambda values: transform_declared_components(values, declaration, maps), core
-    )
+        check_common_map(tensor_type, maps)
+        _check_units(declaration.bases, targets, units)
+        result = _apply_over(
+            array, lambda values: transform_declared_components(values, declaration, maps), dims
+        )
     result = result.drop_indexes(list(index.axes)).drop_vars(list(index.axes))
     labelled = result.assign_coords(
         {
@@ -678,6 +685,44 @@ def _sample_maps(
             )
         maps.append(matrix)
     return maps, tuple(geometry.dims)
+
+
+def _apply_pointwise(
+    array: xr.DataArray,
+    declaration: TensorComponentDeclaration,
+    maps: Sequence[npt.NDArray[np.float64]],
+    geometry_dims: Sequence[str],
+    dims: Sequence[str],
+) -> xr.DataArray:
+    """Apply per-sample maps, passed as their own arrays over the geometry dims.
+
+    Passing the maps as inputs keeps the geometry dims loop dims, so a Dask array chunked
+    along them stays chunked; xarray broadcasts the maps against the values' loop dims, which
+    is the batch alignment the kernel expects.
+    """
+    if array.dtype.kind not in "iufc":
+        raise TypeError(
+            f"components must hold real integer, floating or complex numbers, got dtype "
+            f"{array.dtype}"
+        )
+    matrix_dims = ["__basis_row__", "__basis_column__"]
+    operands = [xr.DataArray(matrix, dims=[*geometry_dims, *matrix_dims]) for matrix in maps]
+
+    def apply(values: npt.NDArray[Any], *matrices: npt.NDArray[np.float64]) -> npt.NDArray[Any]:
+        return transform_declared_components(values, declaration, list(matrices))
+
+    result = xr.apply_ufunc(
+        apply,
+        array,
+        *operands,
+        input_core_dims=[list(dims), *([matrix_dims] * len(operands))],
+        output_core_dims=[list(dims)],
+        dask="parallelized",
+        output_dtypes=[np.result_type(array.dtype, np.float64)],
+        keep_attrs=True,
+    )
+    transposed: xr.DataArray = result.transpose(*array.dims)
+    return transposed
 
 
 def _first_failing_sample(

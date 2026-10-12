@@ -802,9 +802,10 @@ class _ReferenceFrameAccessor:
             )
         if components is not None and stale_array_bases(components, index):
             raise ValueError(
-                "the tensor components are declared in ArrayCoordinates that are no longer this "
-                "array's binding source (a source axis was renamed or the binding changed); "
-                "call rf.clear_tensor_components() and declare them again"
+                "the tensor components are declared in ArrayCoordinates or a frame field that no "
+                "longer belongs to this array's binding (a source axis was renamed, or the "
+                "binding or its frame changed); call rf.clear_tensor_components() and declare "
+                "them again"
             )
         result = self._array
         if components is not None:

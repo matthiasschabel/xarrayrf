@@ -570,3 +570,31 @@ def test_a_zero_callable_reorientation_is_refused() -> None:
             output_component_basis=ENU,
             component_reorientation=lambda push: 0.0 * np.asarray(push),
         )
+
+
+def test_pointwise_changes_keep_dask_chunks_along_geometry_dims() -> None:
+    wind = declared(solid_body_enu(points_of(grid())), grid(), ENU)
+    lazy = wind.chunk({"lon": 4, "lat": 3})
+    converted = lazy.rf.change_component_basis(ECEF, transform=TO_ECEF)
+    assert converted.chunks is not None and len(converted.chunksizes["lon"]) == 3
+    eager = wind.rf.change_component_basis(ECEF, transform=TO_ECEF)
+    assert_allclose(ordered(converted), ordered(eager), atol=0, rtol=0)
+
+
+def test_undeclared_scalars_change_only_between_constant_bases() -> None:
+    wind = declared(solid_body_enu(points_of(grid())), grid(), ENU)
+    scalar = wind.isel(component=0, drop=True)
+    with pytest.raises(ValueError, match="frame-field basis varies by position"):
+        scalar.rf.change_component_basis(
+            EARTH,
+            tensor_type=xrf.TensorType((), determinant_exponent=-1.0),
+            from_basis=ENU,
+            units="x",
+        )
+
+
+def test_a_field_basis_goes_stale_when_the_frame_changes() -> None:
+    wind = declared(solid_body_enu(points_of(grid())), grid(), ENU)
+    moved = wind.rf.assume_frame(xrf.ReferenceFrame.local(EARTH.coordinate_system))
+    with pytest.raises(ValueError, match="frame field that no longer belongs"):
+        moved.rf.encode()
