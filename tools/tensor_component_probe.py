@@ -57,6 +57,7 @@ def _outcome(value: object, original: xrf.TensorComponentDeclaration) -> tuple[s
     same = all(
         array.rf.tensor_component_declaration.tensor_type == original.tensor_type
         and array.rf.tensor_component_declaration.bases == original.bases
+        and array.rf.tensor_component_declaration.packing == original.packing
         for array in declared
     )
     return "kept", same
@@ -186,6 +187,41 @@ def run() -> dict[str, object]:
         ("encode_decode", lambda: wind.rf.encode().rf.decode(), "keep"),
     ]
     rows = [_measure(name, call, original, requirement) for name, call, requirement in cases]
+
+    mandel = xrf.SymmetricPacking.mandel(3)
+    stress = xr.DataArray(
+        np.zeros((2, 6)), dims=("time", "component"), coords={"time": [0, 1]}
+    ).rf.declare_tensor_components(
+        xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+        component_dims=("component",),
+        bases=ENU,
+        packing=mandel,
+    )
+    voigt_stress = stress.rf.clear_tensor_components().rf.declare_tensor_components(
+        xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+        component_dims=("component",),
+        bases=ENU,
+        packing=xrf.SymmetricPacking.voigt(3),
+    )
+    packed = stress.rf.tensor_component_declaration
+    packed_cases: list[tuple[str, Callable[[], object], str]] = [
+        ("packed_isel_identity", lambda: stress.isel(component=list(range(6))), "keep"),
+        ("packed_isel_subset", lambda: stress.isel(component=[0, 1, 2]), "drop"),
+        ("packed_isel_permutation", lambda: stress.isel(component=[5, 4, 3, 2, 1, 0]), "drop"),
+        ("packed_rename", lambda: stress.rename(component="entry"), "keep"),
+        ("packed_add_equal", lambda: stress + stress, "keep"),
+        ("packed_add_other_packing", lambda: stress + voigt_stress, "refuse"),
+        ("packed_concat_component", lambda: xr.concat([stress, stress], "component"), "refuse"),
+        ("packed_encode_decode", lambda: stress.rf.encode().rf.decode(), "keep"),
+        (
+            "packed_unpack_repack",
+            lambda: stress.rf.unpack_symmetric_components(
+                component_dims=("row", "column")
+            ).rf.pack_symmetric_components(mandel, component_dim="component"),
+            "keep",
+        ),
+    ]
+    rows += [_measure(name, call, packed, requirement) for name, call, requirement in packed_cases]
     rows.append(
         _measure(
             "resample_to", lambda: image.rf.resample_to(image.rf.grid), image_declaration, "refuse"

@@ -63,6 +63,8 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
         atol=1e-12,
     )
     np.testing.assert_allclose(xrf.polar_orthogonal_factor(np.diag([2.0, 3.0])), np.eye(2))
+    packing = xrf.SymmetricPacking.mandel(2)
+    np.testing.assert_allclose(packing.unpack(packing.pack(np.eye(2))), np.eye(2))
     assert not any(name.split(".")[0] == "scipy" for name in sys.modules)
     for indexer, expected in (
         (1, {"i": 1}),

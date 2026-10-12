@@ -260,6 +260,18 @@ SECOND_ORDER_CONTRAVARIANT_TENSOR: Final = TensorType(("contravariant", "contrav
 """Two contravariant indices, transforming as ``J T J^T``; stress and diffusion tensors are
 usually declared this way."""
 
+SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR: Final = TensorType(
+    ("contravariant", "contravariant"), index_symmetry="symmetric"
+)
+"""A symmetric ``J T J^T`` tensor, such as stress, diffusion or a covariance; packable with a
+:class:`~xarrayrf.SymmetricPacking`."""
+
+SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR: Final = TensorType(
+    ("covariant", "covariant"), index_symmetry="symmetric"
+)
+"""A symmetric ``J^-T T J^-1`` tensor, such as a metric or a small strain read as a bilinear
+form; packable with a :class:`~xarrayrf.SymmetricPacking`."""
+
 CROSS_PRODUCT_PSEUDOVECTOR: Final = TensorType(
     ("covariant",), reflection_parity="odd", determinant_exponent=1.0
 )

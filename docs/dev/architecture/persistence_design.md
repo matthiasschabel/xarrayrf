@@ -96,6 +96,7 @@ value geometry component declaration sits beside the binding record, whose field
 |---|---|
 | `direction_vocabulary`, `coordinate_system`, `reference_frame`, `array_coordinates`, `affine_transform`, `composite_transform`, `grid` | schema 1 (unreleased) |
 | `tensor_type`, `tensor_component_declaration` | schema 1, value geometry stage 2 (unreleased) |
+| `symmetric_packing`, `packed_tensor_component_declaration` | schema 1, value geometry stage 2b (unreleased) |
 
 ## Alternatives Considered
 

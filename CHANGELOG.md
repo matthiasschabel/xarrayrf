@@ -90,6 +90,16 @@
 
 ### Added
 
+- Packed symmetric tensor components: `SymmetricPacking` states the component order and the
+  off-diagonal scale (constructors `voigt`, `mandel`, `upper_triangular`, `lower_triangular`,
+  or explicit pairs), with NumPy `pack` and `unpack`; `pack` refuses asymmetric matrices beyond
+  `SYMMETRY_TOLERANCE`. `declare_tensor_components(..., packing=)` declares one packed
+  dimension, `change_component_basis` unpacks, transforms and repacks, and the accessor gains
+  `unpack_symmetric_components` and `pack_symmetric_components`. New constants
+  `SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR` and `SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR`.
+  New persistence kinds `symmetric_packing` and `packed_tensor_component_declaration`; unpacked
+  declarations encode as before. `TensorComponentDeclaration.labels` now takes a position in
+  `component_dims` (the same as the slot when unpacked).
 - Tensor components on xarray variables: `TensorComponentDeclaration` names the component
   dimension and basis of each index of a `TensorType`, and the `.rf` accessor gains
   `declare_tensor_components`, `tensor_component_declaration`, `has_tensor_components`,

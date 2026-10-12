@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import pickle
 from pathlib import Path
 from typing import Any, cast
@@ -719,3 +720,386 @@ def test_mixed_variance_slots_each_change_by_their_own_map(source: xrf.ArrayCoor
     expected = np.einsum("ab,dc,jibd->jiac", SPACING, np.linalg.inv(shear), field.values)
     assert_close(changed.values, expected)
     assert changed.rf.tensor_component_declaration.bases == (PLANE, PLANE)
+
+
+# Packed symmetric components (stage 2b).
+
+SHEAR = np.array([[2.0, 0.7, 0.0], [0.0, 0.5, 0.0], [0.3, 0.0, 3.0]])
+"""A shear with anisotropic scaling: contravariant and covariant laws differ under it."""
+
+SHEARED = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("p", "q", "r"), ("m", "m", "m")))
+SHEAR_MAP = xrf.AffineTransform.from_matrix(
+    source=ENU, target=SHEARED, matrix=SHEAR, translation=(0.0, 0.0, 0.0)
+)
+
+
+def symmetric_matrices(batch: int = 4) -> npt.NDArray[np.float64]:
+    matrices = np.random.default_rng(3).normal(size=(batch, 3, 3))
+    return matrices + np.swapaxes(matrices, -1, -2)
+
+
+MANDEL = xrf.SymmetricPacking.mandel(3)
+
+
+def packed_field(
+    packing: xrf.SymmetricPacking = MANDEL,
+    tensor_type: xrf.TensorType = xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+) -> xr.DataArray:
+    raw = xr.DataArray(
+        packing.pack(symmetric_matrices()),
+        dims=("time", "component"),
+        coords={"time": [0, 1, 2, 3], "station": "A"},
+        attrs={"units": "Pa"},
+    )
+    return cast(
+        xr.DataArray,
+        raw.rf.declare_tensor_components(
+            tensor_type, component_dims=("component",), bases=ENU, packing=packing
+        ),
+    )
+
+
+def test_a_packed_declaration_labels_its_entries() -> None:
+    field = packed_field(xrf.SymmetricPacking.voigt(3))
+    assert field.component.values.tolist() == ["ee", "nn", "uu", "nu", "eu", "en"]
+    declaration = field.rf.tensor_component_declaration
+    assert declaration.packing == xrf.SymmetricPacking.voigt(3)
+    assert declaration.component_dims == ("component",)
+    assert declaration.bases == (ENU, ENU)
+    assert "packing=SymmetricPacking" in repr(declaration)
+    assert (
+        declaration != packed_field(xrf.SymmetricPacking.mandel(3)).rf.tensor_component_declaration
+    )
+
+
+@pytest.mark.parametrize(
+    ("tensor_type", "expected"),
+    [
+        (
+            xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+            lambda t: np.einsum("ai,...ij,bj->...ab", SHEAR, t, SHEAR),
+        ),
+        (
+            xrf.SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR,
+            lambda t: np.einsum(
+                "ia,...ij,jb->...ab", np.linalg.inv(SHEAR), t, np.linalg.inv(SHEAR)
+            ),
+        ),
+        (
+            xrf.TensorType(
+                ("contravariant", "contravariant"),
+                index_symmetry="symmetric",
+                determinant_exponent=-1.0,
+            ),
+            lambda t: np.einsum("ai,...ij,bj->...ab", SHEAR, t, SHEAR) / abs(np.linalg.det(SHEAR)),
+        ),
+    ],
+    ids=["contravariant", "covariant", "density"],
+)
+def test_packed_components_change_through_the_full_matrix(
+    tensor_type: xrf.TensorType, expected: Any
+) -> None:
+    packing = xrf.SymmetricPacking.mandel(3)
+    field = packed_field(packing, tensor_type)
+    changed = field.rf.change_component_basis(SHEARED, transform=SHEAR_MAP)
+    assert changed.component.values.tolist() == ["pp", "qq", "rr", "qr", "pr", "pq"]
+    assert changed.rf.tensor_component_declaration.packing == packing
+    assert_close(packing.unpack(changed.values), expected(symmetric_matrices()))
+    assert changed.attrs == {"units": "Pa"}
+    assert changed.station.item() == "A"
+
+
+def test_voigt_and_mandel_give_the_same_tensor() -> None:
+    results = [
+        packing.unpack(
+            packed_field(packing).rf.change_component_basis(SHEARED, transform=SHEAR_MAP).values
+        )
+        for packing in (xrf.SymmetricPacking.voigt(3), xrf.SymmetricPacking.mandel(3))
+    ]
+    assert_close(results[0], results[1])
+
+
+def test_a_mapping_target_on_the_packed_dimension_sets_both_slots() -> None:
+    field = packed_field()
+    by_mapping = field.rf.change_component_basis({"component": SHEARED}, transform=SHEAR_MAP)
+    assert by_mapping.identical(field.rf.change_component_basis(SHEARED, transform=SHEAR_MAP))
+    assert by_mapping.rf.tensor_component_declaration.bases == (SHEARED, SHEARED)
+
+
+def test_packed_components_under_the_binding_use_its_matrix() -> None:
+    packing = xrf.SymmetricPacking.voigt(2)
+    matrices = np.random.default_rng(4).normal(size=(2, 3, 2, 2))
+    matrices = matrices + np.swapaxes(matrices, -1, -2)
+    source = xrf.ArrayCoordinates(("j", "i"), ("1", "1"))
+    field = framed_field({"component": 3}, packing.pack(matrices)).rf.declare_tensor_components(
+        xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+        component_dims=("component",),
+        bases=source,
+        packing=packing,
+    )
+    changed = field.rf.change_component_basis(PLANE, units="mm2")
+    expected = np.einsum("ai,...ij,bj->...ab", SPACING, matrices, SPACING)
+    assert_close(packing.unpack(changed.values), expected)
+    assert changed.component.values.tolist() == ["xx", "yy", "xy"]
+
+
+def test_packed_basis_changes_stay_lazy() -> None:
+    field = packed_field()
+    lazy = field.chunk({"time": 2}).rf.change_component_basis(SHEARED, transform=SHEAR_MAP)
+    assert isinstance(lazy.data, da.Array)
+    assert_close(lazy.values, field.rf.change_component_basis(SHEARED, transform=SHEAR_MAP).values)
+
+
+def test_selection_keeps_or_drops_a_packed_declaration() -> None:
+    field = packed_field()
+    assert field.isel(component=list(range(6))).rf.has_tensor_components
+    assert field.isel(time=0).rf.has_tensor_components
+    assert not field.isel(component=[0, 1, 2]).rf.has_tensor_components
+    assert not field.isel(component=[5, 4, 3, 2, 1, 0]).rf.has_tensor_components
+    assert not field.sel(component="en").rf.has_tensor_components
+    renamed = field.rename(component="entry").rf.tensor_component_declaration
+    assert renamed.component_dims == ("entry",)
+    assert renamed.packing == xrf.SymmetricPacking.mandel(3)
+
+
+def test_packed_and_unpacked_operands_do_not_combine() -> None:
+    voigt, mandel = packed_field(xrf.SymmetricPacking.voigt(3)), packed_field()
+    with pytest.raises(ValueError, match="the components are packed differently"):
+        voigt + mandel
+    unpacked = mandel.rf.unpack_symmetric_components(component_dims=("row", "column"))
+    with pytest.raises(ValueError, match=r"conflicting indexes|cannot combine declared"):
+        xr.align(unpacked.rename(row="component"), mandel, join="inner")
+    with pytest.raises(ValueError, match="cannot concatenate along a component dimension"):
+        xr.concat([mandel, mandel], "component")
+
+
+def test_unpacking_and_packing_round_trip() -> None:
+    field = packed_field()
+    unpacked = field.rf.unpack_symmetric_components(component_dims=("row", "column"))
+    assert unpacked.dims == ("time", "row", "column")
+    assert_close(unpacked.values, symmetric_matrices())
+    declaration = unpacked.rf.tensor_component_declaration
+    assert declaration.packing is None
+    assert declaration.component_dims == ("row", "column")
+    assert declaration.tensor_type == xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR
+    assert unpacked.row.values.tolist() == ["e", "n", "u"]
+    assert unpacked.attrs == {"units": "Pa"} and unpacked.station.item() == "A"
+    repacked = unpacked.rf.pack_symmetric_components(
+        xrf.SymmetricPacking.mandel(3), component_dim="component"
+    )
+    assert repacked.identical(field)
+
+
+@pytest.mark.parametrize("lazy", [False, True], ids=["eager", "dask"])
+@pytest.mark.parametrize("name", ["row", "column"])
+def test_packing_may_reuse_a_replaced_dimension_name(name: str, lazy: bool) -> None:
+    unpacked = packed_field().rf.unpack_symmetric_components(component_dims=("row", "column"))
+    unpacked = unpacked.assign_coords(row_weight=("row", [1.0, 2.0, 3.0]))
+    source = unpacked.chunk({"time": 2}) if lazy else unpacked
+    packed = source.rf.pack_symmetric_components(MANDEL, component_dim=name).compute()
+    assert packed.dims == ("time", name)
+    assert packed[name].values.tolist() == ["ee", "nn", "uu", "nu", "eu", "en"]
+    assert "row_weight" not in packed.coords
+    assert packed.rf.tensor_component_declaration.component_dims == (name,)
+    assert_close(packed.values, packed_field().values)
+
+
+def test_packing_places_the_packed_dimension_first_of_the_pair() -> None:
+    field = packed_field().rf.unpack_symmetric_components(component_dims=("row", "column"))
+    moved = field.transpose("row", "time", "column")
+    packed = moved.rf.pack_symmetric_components(
+        xrf.SymmetricPacking.upper_triangular(3), component_dim="entry"
+    )
+    assert packed.dims == ("entry", "time")
+    assert packed.entry.values.tolist() == ["ee", "en", "eu", "nn", "nu", "uu"]
+
+
+def test_unpacking_and_packing_keep_the_binding() -> None:
+    packing = xrf.SymmetricPacking.voigt(2)
+    matrices = np.ones((2, 3, 2, 2))
+    source = xrf.ArrayCoordinates(("j", "i"), ("1", "1"))
+    field = framed_field({"component": 3}, packing.pack(matrices)).rf.declare_tensor_components(
+        xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+        component_dims=("component",),
+        bases=source,
+        packing=packing,
+    )
+    unpacked = field.rf.unpack_symmetric_components(component_dims=("row", "column"))
+    assert unpacked.rf.coordinate_transform == field.rf.coordinate_transform
+    repacked = unpacked.rf.pack_symmetric_components(packing, component_dim="component")
+    assert repacked.rf.coordinate_transform == field.rf.coordinate_transform
+    assert repacked.identical(field)
+
+
+@pytest.mark.parametrize(
+    ("call", "error", "match"),
+    [
+        (
+            lambda f: f.rf.unpack_symmetric_components(component_dims=("time", "column")),
+            ValueError,
+            r"\['time'\] already name",
+        ),
+        (
+            lambda f: f.rf.unpack_symmetric_components(component_dims=("station", "column")),
+            ValueError,
+            r"\['station'\] already name",
+        ),
+        (
+            lambda f: f.rf.unpack_symmetric_components(component_dims=("component", "column")),
+            ValueError,
+            "already name",
+        ),
+        (
+            lambda f: f.rf.unpack_symmetric_components(component_dims=("row",)),
+            ValueError,
+            "one dimension per component index",
+        ),
+        (
+            lambda f: f.rf.pack_symmetric_components(
+                xrf.SymmetricPacking.voigt(3), component_dim="entry"
+            ),
+            ValueError,
+            "already packed",
+        ),
+    ],
+)
+def test_invalid_unpacking_is_refused(call: Any, error: type[Exception], match: str) -> None:
+    with pytest.raises(error, match=match):
+        call(packed_field())
+
+
+@pytest.mark.parametrize(
+    ("call", "error", "match"),
+    [
+        (
+            lambda f: f.rf.pack_symmetric_components(
+                xrf.SymmetricPacking.voigt(3), component_dim="time"
+            ),
+            ValueError,
+            r"\['time'\] already name",
+        ),
+        (
+            lambda f: f.rf.pack_symmetric_components(
+                xrf.SymmetricPacking.voigt(3), component_dim="station"
+            ),
+            ValueError,
+            r"\['station'\] already name",
+        ),
+        (
+            lambda f: f.rf.pack_symmetric_components(
+                xrf.SymmetricPacking.voigt(2), component_dim="entry"
+            ),
+            ValueError,
+            "2-dimensional, but the basis has 3 axes",
+        ),
+        (
+            lambda f: f.rf.pack_symmetric_components("voigt", component_dim="entry"),
+            TypeError,
+            "SymmetricPacking",
+        ),
+        (
+            lambda f: f.rf.unpack_symmetric_components(component_dims=("a", "b")),
+            ValueError,
+            "not packed",
+        ),
+    ],
+)
+def test_invalid_packing_is_refused(call: Any, error: type[Exception], match: str) -> None:
+    unpacked = packed_field().rf.unpack_symmetric_components(component_dims=("row", "column"))
+    with pytest.raises(error, match=match):
+        call(unpacked)
+
+
+def test_only_a_symmetric_declaration_can_be_packed(wind: xr.DataArray) -> None:
+    raw = xr.DataArray(np.ones((3, 3)), dims=("row", "column"))
+    general = raw.rf.declare_tensor_components(
+        xrf.SECOND_ORDER_CONTRAVARIANT_TENSOR, component_dims=("row", "column"), bases=ENU
+    )
+    with pytest.raises(ValueError, match="only a symmetric order-2 type can be packed"):
+        general.rf.pack_symmetric_components(xrf.SymmetricPacking.voigt(3), component_dim="c")
+    with pytest.raises(ValueError, match="declares no tensor components"):
+        raw.rf.pack_symmetric_components(xrf.SymmetricPacking.voigt(3), component_dim="c")
+
+
+@pytest.mark.parametrize(
+    "entry", [0.5, np.nan, np.inf], ids=["finite asymmetry", "one-sided NaN", "one-sided inf"]
+)
+def test_packing_refuses_asymmetric_values_eagerly_and_lazily(entry: float) -> None:
+    unpacked = packed_field().rf.unpack_symmetric_components(component_dims=("row", "column"))
+    broken = unpacked.copy(deep=True)
+    broken[1, 0, 1] = broken[1, 0, 1] + entry
+    packing = xrf.SymmetricPacking.voigt(3)
+    with pytest.raises(ValueError, match="not symmetric"):
+        broken.rf.pack_symmetric_components(packing, component_dim="component")
+    lazy = broken.chunk({"time": 2}).rf.pack_symmetric_components(
+        packing, component_dim="component"
+    )
+    assert isinstance(lazy.data, da.Array)
+    with pytest.raises(ValueError, match="not symmetric"):
+        lazy.compute()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "error", "match"),
+    [
+        (
+            {"tensor_type": xrf.SECOND_ORDER_CONTRAVARIANT_TENSOR},
+            ValueError,
+            "only a symmetric order-2 type can be packed",
+        ),
+        ({"component_dims": ("row", "column")}, ValueError, "names one component dimension"),
+        ({"packing": "voigt"}, TypeError, "SymmetricPacking"),
+        ({"packing": xrf.SymmetricPacking.voigt(2)}, ValueError, "2-dimensional"),
+    ],
+)
+def test_invalid_packed_declarations_are_refused(
+    arguments: dict[str, Any], error: type[Exception], match: str
+) -> None:
+    options: dict[str, Any] = {
+        "tensor_type": xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+        "component_dims": ("component",),
+        "bases": ENU,
+        "packing": xrf.SymmetricPacking.voigt(3),
+    }
+    options.update(arguments)
+    with pytest.raises(error, match=match):
+        xrf.TensorComponentDeclaration(
+            options["tensor_type"],
+            options["component_dims"],
+            options["bases"],
+            packing=options["packing"],
+        )
+
+
+def test_a_packed_dimension_of_the_wrong_length_is_refused() -> None:
+    raw = xr.DataArray(np.ones((2, 5)), dims=("time", "component"))
+    with pytest.raises(ValueError, match="the packing holds 6 components"):
+        raw.rf.declare_tensor_components(
+            xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+            component_dims=("component",),
+            bases=ENU,
+            packing=xrf.SymmetricPacking.voigt(3),
+        )
+
+
+def test_a_packed_declaration_round_trips_through_encoding() -> None:
+    field = packed_field()
+    encoded = field.rf.encode()
+    record = json.loads(encoded.attrs["xarrayrf_tensor_components"])["value"]
+    assert record["kind"] == "packed_tensor_component_declaration"
+    assert record["packing"]["kind"] == "symmetric_packing"
+    decoded = encoded.rf.decode()
+    assert decoded.identical(field)
+    assert decoded.rf.tensor_component_declaration.packing.off_diagonal_scale == math.sqrt(2.0)
+
+
+def test_unpacking_docstring_example_runs() -> None:
+    import doctest
+
+    from xarrayrf.native import _ReferenceFrameAccessor
+
+    finder, runner = doctest.DocTestFinder(), doctest.DocTestRunner()
+    for test in finder.find(_ReferenceFrameAccessor.unpack_symmetric_components):
+        runner.run(test)
+    results = runner.summarize(verbose=False)
+    assert results.attempted > 0 and results.failed == 0

@@ -212,6 +212,21 @@ def test_encode_refuses_values_it_cannot_encode() -> None:
         xrf.encode(object())
 
 
+PACKING = xrf.SymmetricPacking.voigt(3)
+PACKED = xrf.TensorComponentDeclaration(
+    xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+    ("component",),
+    xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y", "z"), ("m", "m", "m"))),
+    packing=PACKING,
+)
+
+
+def test_packings_and_packed_declarations_round_trip() -> None:
+    for value in (PACKING, xrf.SymmetricPacking.mandel(2), PACKED):
+        decoded = xrf.decode(json.loads(json.dumps(xrf.encode(value))))
+        assert decoded == value and hash(decoded) == hash(value)
+
+
 def envelope(value: object) -> dict[str, Any]:
     return {"xarrayrf": xrf.SCHEMA_VERSION, "value": value}
 
@@ -254,6 +269,50 @@ def envelope(value: object) -> dict[str, Any]:
             xrf.MalformedDataError,
             "JSON array",
             id="field-type",
+        ),
+        pytest.param(
+            envelope({**xrf.encode(PACKING)["value"], "index_pairs": [[0, 0], 1]}),
+            xrf.MalformedDataError,
+            "JSON array",
+            id="packing-pairs",
+        ),
+        pytest.param(
+            envelope({**xrf.encode(PACKING)["value"], "index_pairs": [[0.0, 0]]}),
+            xrf.MalformedDataError,
+            "not a valid declaration",
+            id="packing-index-type",
+        ),
+        pytest.param(
+            envelope({**xrf.encode(PACKING)["value"], "off_diagonal_scale": True}),
+            xrf.MalformedDataError,
+            "must be a number",
+            id="packing-scale",
+        ),
+        pytest.param(
+            envelope({**xrf.encode(PACKED)["value"], "packing": xrf.encode(ARRAY)["value"]}),
+            xrf.MalformedDataError,
+            "must be a symmetric packing",
+            id="packed-packing",
+        ),
+        pytest.param(
+            envelope({**xrf.encode(PACKED)["value"], "tensor_type": xrf.encode(ARRAY)["value"]}),
+            xrf.MalformedDataError,
+            "must be a tensor type",
+            id="packed-type",
+        ),
+        pytest.param(
+            envelope({**xrf.encode(PACKED)["value"], "component_dim": ["component"]}),
+            xrf.MalformedDataError,
+            "component_dim must be a string",
+            id="packed-dim",
+        ),
+        pytest.param(
+            envelope(
+                {**xrf.encode(PACKED)["value"], "tensor_type": xrf.encode(xrf.VECTOR)["value"]}
+            ),
+            xrf.MalformedDataError,
+            "only a symmetric order-2 type can be packed",
+            id="packed-unsymmetric",
         ),
     ],
 )
@@ -346,6 +405,13 @@ def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
         xrf.Grid(affine, {"i": ("i", [0, 1])}),
         xrf.CROSS_PRODUCT_PSEUDOVECTOR,
         xrf.TensorComponentDeclaration(xrf.COVECTOR, ("component",), frame),
+        xrf.SymmetricPacking.mandel(2),
+        xrf.TensorComponentDeclaration(
+            xrf.SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR,
+            ("component",),
+            frame,
+            packing=xrf.SymmetricPacking.upper_triangular(1),
+        ),
     ):
         encoded = xrf.encode(value)["value"]
         kind = encoded["kind"]

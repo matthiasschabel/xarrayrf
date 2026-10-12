@@ -343,7 +343,9 @@ A `TensorType` declares the three ingredients:
 
 Shortcuts: `SCALAR`, `PSEUDOSCALAR`, `VECTOR`, `COVECTOR`, `SECOND_ORDER_CONTRAVARIANT_TENSOR`
 (`J T Jᵀ`), `CROSS_PRODUCT_PSEUDOVECTOR`, `TWO_FORM_DUAL_PSEUDOVECTOR` and
-`ORTHOGONAL_PSEUDOVECTOR`. **A pseudovector has two laws.** A cross product of vectors (torque,
+`ORTHOGONAL_PSEUDOVECTOR`, plus the symmetric `SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR`
+(stress, diffusion, covariance) and `SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR` (a metric).
+**A pseudovector has two laws.** A cross product of vectors (torque,
 angular momentum) transforms as `det(J) J⁻ᵀ b`; the dual of a 2-form (magnetic flux density)
 as `det(J)⁻¹ J b`. They agree only for rotations and reflections, so `ORTHOGONAL_PSEUDOVECTOR`
 refuses any other map and names the two explicit types.
@@ -398,6 +400,39 @@ pseudoscalars) have no component dimension: pass `tensor_type=` and `from_basis=
 `resample` and `rf.resample_to` refuse a declared source until resampling of components is
 defined. `rf.encode` writes the declaration to its own `xarrayrf_tensor_components` attribute,
 beside the binding's.
+
+**Packed symmetric components.** A symmetric order-2 type can hold its `n(n+1)/2` independent
+components along one dimension. `SymmetricPacking(index_pairs, *, off_diagonal_scale=1.0)`
+states which matrix entry each packed component holds and the factor on off-diagonals, because
+conventions differ in both:
+
+| Constructor | 3-D order | Off-diagonal scale |
+|---|---|---|
+| `SymmetricPacking.voigt(n)` | `11, 22, 33, 23, 13, 12` (2-D: `11, 22, 12`) | 1; pass 2 for engineering shear strain |
+| `SymmetricPacking.mandel(n)` | Voigt order | `√2`, so the packed norm is the Frobenius norm |
+| `SymmetricPacking.upper_triangular(n)` | `11, 12, 13, 22, 23, 33` (FSL, `numpy.triu_indices`) | 1 by default |
+| `SymmetricPacking.lower_triangular(n)` | `11, 21, 22, 31, 32, 33` (NIfTI `SYM_MATRIX`) | 1 by default |
+
+Other orders (MRtrix's `11, 22, 33, 12, 13, 23`, Abaqus's contracted order) are explicit pairs.
+`pack` and `unpack` work on NumPy arrays; `pack` refuses mirrored entries that disagree beyond
+`SYMMETRY_TOLERANCE`, in missingness, or in an infinity. Declare packed components with
+`packing=`; labels are `axes[i] + axes[j]`:
+
+```python
+stress = stress.rf.declare_tensor_components(
+    xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+    component_dims=("component",),
+    bases=frame,
+    packing=xrf.SymmetricPacking.voigt(3),
+)  # labels xx, yy, zz, yz, xz, xy
+matrices = stress.rf.unpack_symmetric_components(component_dims=("row", "column"))
+mandel = matrices.rf.pack_symmetric_components(
+    xrf.SymmetricPacking.mandel(3), component_dim="component"
+)
+```
+
+`change_component_basis` unpacks, transforms and repacks; it never transforms packed components
+as a vector. Differently packed operands do not combine.
 
 **The declaration is advisory with respect to values.** It is enforced on selection (a scalar,
 subset or permutation of components drops it), alignment and concatenation between declared

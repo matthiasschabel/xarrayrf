@@ -1,7 +1,7 @@
 # Value geometry: vectors, tensors, pseudovectors and densities
 
-**Status:** Active (stages 1 and 2 implemented; packing and stage 3 next)
-**Last updated:** 2026-10-11
+**Status:** Active (stages 1, 2 and 2b implemented; stage 3 next)
+**Last updated:** 2026-10-12
 **Scope:** Core: a tensor type and transform law for basis-dependent values, a component
 index carrying it, passive basis change, resampling of component variables and persistence.
 Supersedes the quantity-rule and component-binding sections of
@@ -89,7 +89,7 @@ operand's attrs, so a vector plus a covector would keep a valid-looking wrong ty
   coordinate; one custom xarray index spans the variable's component coordinates (one per
   slot, or one packed coordinate for two symmetric slots) and declares, per slot, its
   variance and basis, plus `reflection_parity`, `determinant_exponent`, `requires_orthogonal_map`, `index_symmetry` and
-  `packing_convention`. Slots are named, so
+  `packing`. Slots are named, so
   transpose cannot exchange variance. Equality includes the whole declaration, so aligning or
   combining two variables with different declarations over the same dimensions refuses
   (as conflicting bindings do, including the binding's `join` compatibility and
@@ -110,9 +110,11 @@ operand's attrs, so a vector plus a covector would keep a valid-looking wrong ty
   distinct from conservative remapping, which is deferred: the box methods average over
   covered target support and over overlapping sources, and mapping intervals applies no
   determinant factor, so they give support integration but no conservation guarantee.
-- **Symmetric packing**: a packed component coordinate with labels `xx, yy, zz, xy, xz, yz` and
-  a declared `packing_convention`, `"voigt"` (plain) or `"mandel"` (off-diagonals scaled by sqrt 2).
-  Unpack, transform, repack; never transform packed components directly.
+- **Symmetric packing**: a packed component coordinate labelled `axes[i] + axes[j]`, with a
+  declared `SymmetricPacking` giving the entry order and the off-diagonal scale explicitly
+  (Voigt, Mandel and triangular constructors); conventions differ in both, so a convention
+  name alone is ambiguous ([stage 2b plan](value_geometry_stage2b_plan.md)). Unpack, transform,
+  repack; never transform packed components directly.
 - **Units.** `J` includes unit conversion (affine basis vectors already do). A basis change
   whose basis units differ rewrites the variable's `units` only when the caller supplies the
   output unit; otherwise refuses.
@@ -151,7 +153,8 @@ after angular charts (nonlinear plan stage 2); the kernel already accepts pointw
 
 One new schema kind: the component index declaration (per-slot variance and basis,
 `reflection_parity`, `determinant_exponent`, `requires_orthogonal_map`, `index_symmetry`,
-`packing_convention`), encoded like the binding; dropping
+`packing`), encoded like the binding (a packed declaration is its own kind,
+`packed_tensor_component_declaration`); dropping
 `requires_orthogonal_map` would decode `ORTHOGONAL_PSEUDOVECTOR` as an unrestricted odd vector. Order-0 declarations are call
 arguments and do not persist. Custom reorientation callables do not persist. Subject to the same
 schema-1 freeze rule as transform edge semantics: the freeze records whether additive kinds may
@@ -241,4 +244,5 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 2. Stage 2 ([plan](value_geometry_stage2_plan.md); additive record kinds may land within schema 1,
    decided 2026-10-11) adds the component index, `rf.change_component_basis`, the `resample` guard,
    persistence and the operation probe.
-3. Stage 3 after stage 2's probe passes on the patched lane.
+3. Stage 2b, symmetric packing ([plan](value_geometry_stage2b_plan.md)). Done.
+4. Stage 3 after stage 2's probe passes on the patched lane.

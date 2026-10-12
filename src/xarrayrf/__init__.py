@@ -12,7 +12,8 @@ The core is NumPy-only and useful for arrays, meshes, point sets and tables alik
   :meth:`CoordinateSystem.axis_codes` names a vector's direction.
 - :func:`affine_class` classifies a constant affine transform or lattice by its matrix geometry.
 - :class:`TensorType` declares how a value's components respond to a change of basis, and
-  :func:`transform_tensor_components` applies that law to arrays under a linear map.
+  :func:`transform_tensor_components` applies that law to arrays under a linear map;
+  :class:`SymmetricPacking` packs symmetric matrices into ``n(n+1)/2`` components.
 
 :class:`Geometry` is the xarray integration: a read-through view answering where an
 array's current samples sit, given a transform the caller supplies at each construction. It
@@ -49,6 +50,7 @@ from ._frame import LOCAL_NAMESPACE, ReferenceFrame, Role
 from ._grid import Grid
 from ._lattice import Lattice
 from ._orientation import coordinate_system_change
+from ._symmetric_packing import SYMMETRY_TOLERANCE, SymmetricPacking
 from ._tensor_component_declaration import TensorComponentDeclaration
 from ._tensor_type import (
     COVECTOR,
@@ -58,6 +60,8 @@ from ._tensor_type import (
     PSEUDOSCALAR,
     SCALAR,
     SECOND_ORDER_CONTRAVARIANT_TENSOR,
+    SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+    SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR,
     TWO_FORM_DUAL_PSEUDOVECTOR,
     VECTOR,
     TensorType,
@@ -90,6 +94,9 @@ __all__ = [
     "SCALAR",
     "SCHEMA_VERSION",
     "SECOND_ORDER_CONTRAVARIANT_TENSOR",
+    "SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR",
+    "SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR",
+    "SYMMETRY_TOLERANCE",
     "TWO_FORM_DUAL_PSEUDOVECTOR",
     "VECTOR",
     "AffineClass",
@@ -113,6 +120,7 @@ __all__ = [
     "SupportsInverse",
     "SupportsJacobian",
     "SupportsPoints",
+    "SymmetricPacking",
     "TensorComponentDeclaration",
     "TensorType",
     "Transform",

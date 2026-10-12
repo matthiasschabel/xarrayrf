@@ -316,8 +316,8 @@ Deferred Work points here for the second index.
 
 ## Deferred Work
 
-- Symmetric packing (`packing_convention`, Voigt and Mandel): a stage 2b, before resampling,
-  with unpack, transform, repack; the index then owns one packed coordinate for two slots.
+- Symmetric packing: implemented as stage 2b ([plan](value_geometry_stage2b_plan.md)), with an
+  explicit `SymmetricPacking` in place of a `packing_convention` name.
 - Pointwise maps for `change_component_basis` (non-affine bindings and transforms).
 - **A data-borne carrier** (duck array wrapping the components, with the same
   `TensorComponentDeclaration`), giving the strict invariant; its own design. The door is kept
@@ -347,5 +347,5 @@ refusals the plan implied but the first cut missed: a supplied transform that do
 hop, framing a declared component dimension as geometry, and unframing or encoding a stale
 array-coordinate basis. Suites pass on stock, upstream and patched xarray.
 
-Next, before stage 3: symmetric packing (stage 2b, Deferred Work), then resampling of
-declared components (design section 3).
+Symmetric packing followed as stage 2b ([plan](value_geometry_stage2b_plan.md)); next,
+resampling of declared components (design section 3).

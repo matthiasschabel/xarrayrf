@@ -22,6 +22,7 @@ from ._grid import Coordinate, Grid
 from ._resample import Method, _resample_with_intervals
 from ._resampling import BOX_METHODS, Support, check_box_values, check_support
 from ._sampling import Domain
+from ._symmetric_packing import SymmetricPacking
 from ._tensor_component_declaration import ComponentBasis, TensorComponentDeclaration
 from ._tensor_components import (
     DECLARATION_ATTR,
@@ -32,8 +33,10 @@ from ._tensor_components import (
     declaration_of,
     declared_coordinates,
     detach,
+    pack_components,
     refuse_component_geometry,
     stale_array_bases,
+    unpack_components,
 )
 from ._tensor_type import TensorType
 from ._transform import SupportsPoints
@@ -818,6 +821,7 @@ class _ReferenceFrameAccessor:
         *,
         component_dims: Sequence[str],
         bases: ComponentBasis | Sequence[ComponentBasis],
+        packing: SymmetricPacking | None = None,
     ) -> xr.DataArray:
         """Declare which dimensions hold this array's tensor components, and in which bases.
 
@@ -839,10 +843,17 @@ class _ReferenceFrameAccessor:
         coordinate adopts it. Sums, differences and scalings of equal declarations are
         correct.
 
+        A symmetric order-2 type can be declared packed: ``packing`` gives the order and
+        off-diagonal scale of the ``n(n+1)/2`` components along one dimension, labelled
+        ``axes[i] + axes[j]``. ``rf.change_component_basis`` unpacks, transforms and repacks;
+        ``rf.unpack_symmetric_components`` and ``rf.pack_symmetric_components`` convert.
+
         Args:
             tensor_type: The transformation law; order at least 1.
-            component_dims: One array dimension per component index, in index order.
+            component_dims: One array dimension per component index, in index order; with
+                ``packing``, the one dimension holding the packed components.
             bases: One basis per component index, or one for all of them.
+            packing: The packing of a symmetric order-2 type, or ``None``.
 
         Returns:
             A DataArray sharing this array's data, with an index on the component
@@ -878,8 +889,72 @@ class _ReferenceFrameAccessor:
                 f"array carries an encoded declaration in attrs[{DECLARATION_ATTR!r}]; call "
                 "rf.decode() to restore it, or drop the attribute before declaring"
             )
-        declaration = TensorComponentDeclaration(tensor_type, component_dims, bases)
+        declaration = TensorComponentDeclaration(
+            tensor_type, component_dims, bases, packing=packing
+        )
         return attach(array, declared_coordinates(array, declaration, _binding(array)))
+
+    def unpack_symmetric_components(self, *, component_dims: Sequence[str]) -> xr.DataArray:
+        """Expand packed symmetric components into two component dimensions.
+
+        The two new dimensions take the packed dimension's place, in order, and are declared
+        unpacked in the same bases and type. Coordinates on other dimensions, attrs and the
+        frame binding are kept; coordinates along the packed dimension other than its labels
+        are dropped.
+
+        Args:
+            component_dims: The names of the two new dimensions, neither an existing
+                dimension or coordinate.
+
+        Raises:
+            ValueError: If the array declares no packed components or a name is taken.
+
+        Example:
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> import xarrayrf as xrf
+            >>> import xarrayrf.native
+            >>> frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("m", "m")))
+            >>> stress = xr.DataArray(np.array([1.0, 3.0, 2.0]), dims=("component",))
+            >>> stress = stress.rf.declare_tensor_components(
+            ...     xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+            ...     component_dims=("component",),
+            ...     bases=frame,
+            ...     packing=xrf.SymmetricPacking.voigt(2),
+            ... )
+            >>> stress.component.values.tolist()
+            ['xx', 'yy', 'xy']
+            >>> stress.rf.unpack_symmetric_components(component_dims=("row", "column")).values
+            array([[1., 2.],
+                   [2., 3.]])
+        """
+        index = self._require_components()
+        return unpack_components(self._array, index, component_dims, binding=_binding(self._array))
+
+    def pack_symmetric_components(
+        self, packing: SymmetricPacking, *, component_dim: str
+    ) -> xr.DataArray:
+        """Pack the two component dimensions of a symmetric declaration into one.
+
+        The packed dimension takes the place of the first of the two. Mirrored entries must
+        agree as :meth:`SymmetricPacking.pack` requires; under Dask the check runs, and may
+        refuse, at compute time. Coordinates on other dimensions, attrs and the frame binding
+        are kept.
+
+        Args:
+            packing: The order and off-diagonal scale of the packed components.
+            component_dim: The packed dimension's name: one of the two it replaces, or a name
+                that is not a dimension or coordinate.
+
+        Raises:
+            TypeError: If ``packing`` is not a ``SymmetricPacking``.
+            ValueError: If the declaration is not an unpacked symmetric one, the packing does
+                not fit the basis, the name is taken, or a matrix is not symmetric.
+        """
+        index = self._require_components()
+        return pack_components(
+            self._array, index, packing, component_dim, binding=_binding(self._array)
+        )
 
     def clear_tensor_components(self) -> xr.DataArray:
         """Remove the tensor component declaration; the labels stay as ordinary coordinates.
@@ -966,12 +1041,14 @@ class _ReferenceFrameAccessor:
             unknown = set(basis) - set(dims)
             if unknown:
                 raise ValueError(f"{sorted(unknown)} are not component dimensions {dims}")
+            # A packed dimension holds both slots, so its target sets both.
+            slot_dims = dims * len(index.declaration.bases) if len(dims) == 1 else dims
             targets = tuple(
                 basis.get(dim, current)
-                for dim, current in zip(dims, index.declaration.bases, strict=True)
+                for dim, current in zip(slot_dims, index.declaration.bases, strict=True)
             )
         else:
-            targets = (basis,) * len(dims)
+            targets = (basis,) * len(index.declaration.bases)
         return change_basis(
             self._array, index, targets, binding=binding, transform=transform, units=units
         )

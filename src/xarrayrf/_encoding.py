@@ -24,6 +24,7 @@ from ._composite import CompositeTransform
 from ._coordinate_system import CoordinateSystem
 from ._frame import ReferenceFrame
 from ._grid import Coordinate, Grid
+from ._symmetric_packing import SymmetricPacking
 from ._tensor_component_declaration import TensorComponentDeclaration
 from ._tensor_type import TensorType
 from ._transform import Endpoint, SupportsPoints, check_transform
@@ -91,6 +92,8 @@ _BUILT_IN: Final = frozenset(
         "grid",
         "tensor_type",
         "tensor_component_declaration",
+        "symmetric_packing",
+        "packed_tensor_component_declaration",
     }
 )
 
@@ -102,7 +105,8 @@ def encode(value: object) -> dict[str, Any]:
         value: A :class:`DirectionVocabulary`, :class:`CoordinateSystem`,
             :class:`ReferenceFrame`, :class:`ArrayCoordinates`, :class:`AffineTransform`,
             :class:`CompositeTransform`, :class:`Grid`, :class:`TensorType`,
-            :class:`TensorComponentDeclaration`, or a user-defined transform implementing
+            :class:`SymmetricPacking`, :class:`TensorComponentDeclaration`, or a user-defined
+            transform implementing
             :class:`SupportsEncoding`.
 
     Returns:
@@ -231,6 +235,21 @@ def _encode(value: object) -> dict[str, Any]:
             "determinant_exponent": value.determinant_exponent,
             "index_symmetry": value.index_symmetry,
             "requires_orthogonal_map": value.requires_orthogonal_map,
+        }
+    if isinstance(value, SymmetricPacking):
+        return {
+            "kind": "symmetric_packing",
+            "index_pairs": [list(pair) for pair in value.index_pairs],
+            "off_diagonal_scale": value.off_diagonal_scale,
+        }
+    if isinstance(value, TensorComponentDeclaration) and value.packing is not None:
+        # Its own kind, so a release without packing refuses it rather than misreading it.
+        return {
+            "kind": "packed_tensor_component_declaration",
+            "tensor_type": _encode(value.tensor_type),
+            "component_dim": value.component_dims[0],
+            "basis": _encode(value.bases[0]),
+            "packing": _encode(value.packing),
         }
     if isinstance(value, TensorComponentDeclaration):
         return {
@@ -361,6 +380,8 @@ _FIELDS: Final = {
         "requires_orthogonal_map",
     },
     "tensor_component_declaration": {"tensor_type", "component_dims", "bases"},
+    "symmetric_packing": {"index_pairs", "off_diagonal_scale"},
+    "packed_tensor_component_declaration": {"tensor_type", "component_dim", "basis", "packing"},
 }
 
 _EXTENSION_FIELDS: Final = {"version", "source", "target", "data"}
@@ -543,6 +564,31 @@ class _Decoder:
         bases = [self._endpoint(item) for item in self._list(fields["bases"], "bases")]
         return TensorComponentDeclaration(
             tensor_type, self._list(fields["component_dims"], "component_dims"), bases
+        )
+
+    def symmetric_packing(self, fields: Mapping[str, Any]) -> SymmetricPacking:
+        pairs = self._list(fields["index_pairs"], "index_pairs")
+        for pair in pairs:
+            self._list(pair, "index_pairs entries")
+        scale = fields["off_diagonal_scale"]
+        if isinstance(scale, bool) or not isinstance(scale, int | float):
+            raise MalformedDataError(f"off_diagonal_scale must be a number, got {scale!r}")
+        return SymmetricPacking([tuple(pair) for pair in pairs], off_diagonal_scale=scale)
+
+    def packed_tensor_component_declaration(
+        self, fields: Mapping[str, Any]
+    ) -> TensorComponentDeclaration:
+        tensor_type = self.value(fields["tensor_type"])
+        if not isinstance(tensor_type, TensorType):
+            raise MalformedDataError("a declaration's tensor_type must be a tensor type")
+        packing = self.value(fields["packing"])
+        if not isinstance(packing, SymmetricPacking):
+            raise MalformedDataError("a packed declaration's packing must be a symmetric packing")
+        dim = fields["component_dim"]
+        if not isinstance(dim, str):
+            raise MalformedDataError(f"component_dim must be a string, got {dim!r}")
+        return TensorComponentDeclaration(
+            tensor_type, (dim,), self._endpoint(fields["basis"]), packing=packing
         )
 
     def composite_transform(self, fields: Mapping[str, Any]) -> CompositeTransform:

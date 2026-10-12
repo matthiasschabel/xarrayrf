@@ -9,7 +9,7 @@ measured boundary is in ``docs/dev/architecture/value_geometry_stage2_plan.md``.
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -22,6 +22,7 @@ from ._array_coordinates import ArrayCoordinates
 from ._binding import BindingIndex
 from ._frame import ReferenceFrame
 from ._orientation import coordinate_system_change
+from ._symmetric_packing import SymmetricPacking
 from ._tensor_component_declaration import ComponentBasis, TensorComponentDeclaration
 from ._tensor_type import TensorType, transform_tensor_components
 from ._transform import SupportsAffine, SupportsPoints
@@ -58,7 +59,7 @@ class TensorComponentIndex(xr.Index):
             created.update(index.create_variables(source))
         return created
 
-    def _slot_of(self, name: str) -> int:
+    def _position_of(self, name: str) -> int:
         return self.declaration.component_dims.index(str(self.axes[name].dim))
 
     def sel(
@@ -84,7 +85,7 @@ class TensorComponentIndex(xr.Index):
             # A scalar, a subset or a permutation of components is not this tensor: drop the
             # whole declaration and leave the labels as plain coordinates.
             if reduced is None or tuple(reduced.index) != self.declaration.labels(
-                self._slot_of(name)
+                self._position_of(name)
             ):
                 return None
             axes[name] = reduced
@@ -125,6 +126,11 @@ class TensorComponentIndex(xr.Index):
             return (
                 "the components are in different bases; express one in the other's with "
                 "rf.change_component_basis"
+            )
+        if mine.packing != theirs.packing:
+            return (
+                f"the components are packed differently ({mine.packing!r} and "
+                f"{theirs.packing!r}); unpack both with rf.unpack_symmetric_components"
             )
         return "the component labels differ; select them in basis order"
 
@@ -191,7 +197,10 @@ class TensorComponentIndex(xr.Index):
         if dims == self.declaration.component_dims and all(a == b for a, b in names.items()):
             return self
         declaration = TensorComponentDeclaration(
-            self.declaration.tensor_type, dims, self.declaration.bases
+            self.declaration.tensor_type,
+            dims,
+            self.declaration.bases,
+            packing=self.declaration.packing,
         )
         axes = {
             names[name]: index.rename(name_dict, dims_dict)  # type: ignore[no-untyped-call]
@@ -243,9 +252,9 @@ def declared_coordinates(
     """Validate a declaration against an array and build its labelled, indexed coordinates."""
     geometry_dims = binding.dims if binding is not None else ()
     variables: dict[str, xr.Variable] = {}
-    for slot, dim in enumerate(declaration.component_dims):
-        basis = declaration.bases[slot]
-        labels = declaration.labels(slot)
+    for position, dim in enumerate(declaration.component_dims):
+        basis = declaration.bases[position]
+        labels = declaration.labels(position)
         if dim not in array.dims:
             raise ValueError(f"component dimension {dim!r} is not a dimension of the array")
         if dim in geometry_dims:
@@ -254,9 +263,13 @@ def declared_coordinates(
                 "components need a dimension of their own"
             )
         if array.sizes[dim] != len(labels):
+            held = (
+                f"the packing holds {len(labels)} components"
+                if declaration.packing is not None
+                else f"its basis has {len(labels)} axes"
+            )
             raise ValueError(
-                f"component dimension {dim!r} has length {array.sizes[dim]}, but its basis has "
-                f"{len(labels)} axes"
+                f"component dimension {dim!r} has length {array.sizes[dim]}, but {held}"
             )
         if isinstance(basis, ArrayCoordinates) and (
             binding is None or basis != binding.transform.source
@@ -431,8 +444,9 @@ def change_basis(
     """Re-express the declared components in ``targets``, one basis per slot."""
     declaration = index.declaration
     tensor_type = declaration.tensor_type
+    packing = declaration.packing
     new_declaration = TensorComponentDeclaration(
-        tensor_type, declaration.component_dims, tuple(targets)
+        tensor_type, declaration.component_dims, tuple(targets), packing=packing
     )
     maps = [
         basis_map(source, target, binding=binding, transform=transform)
@@ -448,6 +462,11 @@ def change_basis(
     dims = list(declaration.component_dims)
 
     def apply(values: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        if packing is not None:
+            # Never transform packed components directly: unpack, transform, repack. The
+            # result is symmetric up to rounding, which the repack averages away.
+            matrices = transform_tensor_components(packing.unpack(values), maps[0], tensor_type)
+            return packing.pack_symmetric_part(matrices)
         if common:
             return transform_tensor_components(values, maps[0], tensor_type)
         order = tensor_type.order
@@ -464,7 +483,10 @@ def change_basis(
     result = _apply_over(array, apply, dims)
     result = result.drop_indexes(list(index.axes)).drop_vars(list(index.axes))
     labelled = result.assign_coords(
-        {dim: (dim, np.asarray(target.axes)) for dim, target in zip(dims, targets, strict=True)}
+        {
+            dim: (dim, np.asarray(new_declaration.labels(position)))
+            for position, dim in enumerate(dims)
+        }
     )
     for dim in dims:
         if dim in array.coords and array.coords[dim].attrs:
@@ -514,21 +536,121 @@ def _check_units(
         raise TypeError(f"units must be a string, got {type(units).__name__}")
 
 
-def _apply_over(array: xr.DataArray, function: Any, dims: Sequence[str]) -> xr.DataArray:
+def unpack_components(
+    array: xr.DataArray,
+    index: TensorComponentIndex,
+    component_dims: Sequence[str],
+    *,
+    binding: BindingIndex | None,
+) -> xr.DataArray:
+    """Replace a packed component dimension by two, declared unpacked in the same bases."""
+    declaration = index.declaration
+    packing = declaration.packing
+    if packing is None:
+        raise ValueError("the components are not packed; there is nothing to unpack")
+    unpacked = TensorComponentDeclaration(
+        declaration.tensor_type, component_dims, declaration.bases
+    )
+    (packed_dim,) = declaration.component_dims
+    _refuse_taken_names(array, unpacked.component_dims, replaced=())
+    n = packing.dimension
+    plain = _without_components(array, index)
+    result = _apply_over(
+        plain,
+        packing.unpack,
+        [packed_dim],
+        output_dims=list(unpacked.component_dims),
+        output_sizes=dict.fromkeys(unpacked.component_dims, n),
+    )
+    at = array.dims.index(packed_dim)
+    order = [*array.dims[:at], *unpacked.component_dims, *array.dims[at + 1 :]]
+    result = result.transpose(*order)
+    return attach(result, declared_coordinates(result, unpacked, binding))
+
+
+def pack_components(
+    array: xr.DataArray,
+    index: TensorComponentIndex,
+    packing: SymmetricPacking,
+    component_dim: str,
+    *,
+    binding: BindingIndex | None,
+) -> xr.DataArray:
+    """Replace the two dimensions of a symmetric declaration by one packed dimension."""
+    declaration = index.declaration
+    if declaration.packing is not None:
+        raise ValueError("the components are already packed; unpack them first to repack")
+    if not isinstance(packing, SymmetricPacking):
+        raise TypeError(f"packing must be a SymmetricPacking, got {type(packing).__name__}")
+    packed = TensorComponentDeclaration(
+        declaration.tensor_type, (component_dim,), declaration.bases, packing=packing
+    )
+    rows, columns = declaration.component_dims
+    _refuse_taken_names(array, packed.component_dims, replaced=(rows, columns))
+    plain = _without_components(array, index)
+    result = _apply_over(
+        plain,
+        packing.pack,
+        [rows, columns],
+        output_dims=[component_dim],
+        output_sizes={component_dim: packing.component_count},
+    )
+    first = min(array.dims.index(rows), array.dims.index(columns))
+    kept = [dim for dim in array.dims if dim not in (rows, columns)]
+    order = [*kept[:first], component_dim, *kept[first:]]
+    result = result.transpose(*order)
+    return attach(result, declared_coordinates(result, packed, binding))
+
+
+def _refuse_taken_names(
+    array: xr.DataArray, names: Sequence[str], *, replaced: Sequence[str]
+) -> None:
+    taken = sorted(
+        name
+        for name in names
+        if name not in replaced and (name in array.dims or name in array.coords)
+    )
+    if taken:
+        raise ValueError(
+            f"{taken} already name a dimension or coordinate of the array; choose new component "
+            "dimension names"
+        )
+
+
+def _without_components(array: xr.DataArray, index: TensorComponentIndex) -> xr.DataArray:
+    """The array without its component label coordinates or their index."""
+    names = list(index.axes)
+    return array.drop_indexes(names).drop_vars(names)
+
+
+def _apply_over(
+    array: xr.DataArray,
+    function: Any,
+    dims: Sequence[str],
+    *,
+    output_dims: Sequence[str] | None = None,
+    output_sizes: Mapping[str, int] | None = None,
+) -> xr.DataArray:
     if array.dtype.kind not in "iufc":
         raise TypeError(
             f"components must hold real integer, floating or complex numbers, got dtype "
             f"{array.dtype}"
         )
     dtype = np.result_type(array.dtype, np.float64)
+    outputs = list(dims) if output_dims is None else list(output_dims)
     result = xr.apply_ufunc(
         function,
         array,
         input_core_dims=[list(dims)],
-        output_core_dims=[list(dims)],
+        output_core_dims=[outputs],
         dask="parallelized",
         output_dtypes=[dtype],
+        dask_gufunc_kwargs={"output_sizes": dict(output_sizes)} if output_sizes else None,
+        # Packing may reuse a replaced dimension's name at a new size.
+        exclude_dims=set(dims) & set(outputs) if output_dims is not None else frozenset(),
         keep_attrs=True,
     )
+    if output_dims is not None:
+        return cast(xr.DataArray, result)
     transposed: xr.DataArray = result.transpose(*array.dims)
     return transposed
