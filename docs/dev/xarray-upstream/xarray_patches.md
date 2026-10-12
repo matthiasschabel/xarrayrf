@@ -1,7 +1,7 @@
 # Maintained xarray patches
 
 **Status:** Active
-**Last updated:** 2026-10-08
+**Last updated:** 2026-10-12
 **Scope:** The local xarray patch series that implements xarrayrf's native-operation contract,
 its pin in `pyproject.toml`, and its validation.
 
@@ -138,7 +138,11 @@ Symptom: custom scalar index `tag=10` vs plain `tag=20` keeps 10 silently throug
 | merge + alignment, any dims | 7 | selection leftovers (`orig + orig[0, 0]`), `Coordinates.merge` with scalar `x=nan`, dask `dot`, stacked round trip, zarr `test_region_write`, two error-precedence tests |
 | merge + alignment, same dims only | 2 | zarr `test_region_write` (lazy coordinate read: 6 store reads, 5 allowed); `test_merge_multiindex_level` (error precedence) |
 
-Upstream status: issue #11607 (links #2996), no PR, pending maintainer feedback.
+Upstream status: issue #11607 (links #2996). A maintainer asked for a PR (2026-10-12) and
+suggested a deprecation first. Branch `pr/index-coord-conflict-warning` in `xarray-upstream`
+(not yet pushed) emits a `FutureWarning` in `Aligner._get_indexes_and_vars`, where the index is
+assigned. It does not cover the `join="exact", copy=False` fast path (`apply_ufunc`, `where`,
+`merge` under the new combine defaults), which is left as an open question for maintainers.
 
 ## Alternatives Considered
 
@@ -149,8 +153,8 @@ Upstream status: issue #11607 (links #2996), no PR, pending maintainer feedback.
 
 ## Deferred Work
 
-- A default-on fix for #11607 (lazy comparison without store reads, `merge(compat="override")`
-  aligning first, error precedence) waits for maintainer feedback. The opt-in hook catches
+- #11607: the warning PR leaves the exact/no-copy path (`merge_collected`'s `TODO(shoyer)`
+  branch) and the eventual raise for follow-ups, pending maintainer review. The opt-in hook catches
   unindexed conflicts for `BindingIndex`.
 - No hosted CI lane runs the patched pin yet.
 - Retirement: re-evaluate each patch once a released xarray contains the fix and xarrayrf's
