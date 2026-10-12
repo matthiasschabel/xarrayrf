@@ -217,5 +217,6 @@ of a `longitude_start` parameter on operations that produce longitudes.
 ## Next Steps
 
 1. Stage 1 per [its design](field_transform_design.md).
-2. Stage 2 per the [angular charts design](angular_charts_design.md) (reviewed 2026-10-12).
+2. Stage 2 per the [angular charts design](angular_charts_design.md): implemented 2026-10-12
+   (declarations, transitions, seam and pole resampling, a minimal CF reader).
 3. Before stage 3, the binding probe with the operation inventory.

@@ -23,6 +23,9 @@
   exactly for nonuniform, descending and float32 labels; regional grids found from another
   branch) and interpolates across the poles of global grids with antipodal longitudes. Labels
   stay literal. Declared components do not cross poles yet; box methods do not wrap.
+- `xarrayrf.cf`: frames a CF variable of an xarray Dataset on its longitude/latitude grid, with
+  the earth figure from a `latitude_longitude` grid mapping and bounds as intervals
+  (`frame_variable`, `from_dataset`). No extra dependency.
 
 ### Changed
 

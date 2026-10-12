@@ -196,7 +196,8 @@ roles when either is angular, and matches angular axes by role otherwise; conver
 Cartesian charts are the chart transitions below. NGFF export refuses angular frames, since NGFF axes carry no
 representation and degree units would read back as refused Cartesian axes; NIfTI export already
 requires an oriented patient frame. Resampling wraps at the longitude seam and crosses the poles
-(see Resampling); labels themselves are never wrapped. A CF reader follows.
+(see Resampling); labels themselves are never wrapped. `xarrayrf.cf` frames CF datasets (see
+Adapters).
 
 **`ReferenceFrame`**: identifier, `coordinate_system`, optional `role`, `definition`, `context`,
 `display`; constructed by `ReferenceFrame.local(coordinate_system, ...)`,
@@ -1127,7 +1128,8 @@ read from different formats compare equal; the core itself never relabels a unit
 ## Adapters
 
 Format adapters are optional subpackages of the xarrayrf distribution, each with an extra
-(`xarrayrf[dicom]`, `xarrayrf[nifti]`, `xarrayrf[ngff]`, `xarrayrf[geotiff]`). They share
+(`xarrayrf[dicom]`, `xarrayrf[nifti]`, `xarrayrf[ngff]`, `xarrayrf[geotiff]`; `xarrayrf.cf` needs
+none). They share
 `xarrayrf.native.frame_array` (duck-array and shape check, then framing on the imported
 `Grid`), `index_coordinate`, and the `CoordinateSpec`,
 `Report` and `DuckArray` aliases.
@@ -1358,6 +1360,38 @@ authority codes share identity (`("epsg", code)` for EPSG); CRSs without an exac
 mint anonymous frames containing WKT. Axis names and linear units come from pyproj. The affine
 locates rasterio pixel centres for both `AREA_OR_POINT=Area` and `Point`; Area declares centred
 cells, while Point declares point samples. Angular, compound and vertical CRSs are refused.
+
+**CF longitude/latitude import:** `xarrayrf.cf.from_dataset(dataset, variable, *, frame=None) ->
+CfGeometry` reads a Dataset already opened by xarray (netCDF, Zarr, OPeNDAP) without reading
+data; `frame_variable(dataset, variable, *, frame=None)` returns the variable framed on that
+grid, keeping its other coordinates, attributes and lazy data. `CfGeometry` holds `grid`,
+`frame`, `longitude`, `latitude` and `report`. No extra is needed.
+
+```python
+import xarrayrf.cf as rfcf
+
+tas = rfcf.frame_variable(xr.open_dataset("tas_Amon_model.nc"), "tas")
+other = rfcf.frame_variable(xr.open_dataset("tas_Amon_model_2.nc"), "tas", frame=tas)
+```
+
+- Longitude and latitude are the variable's one-dimensional coordinates (dimension or
+  auxiliary) whose `standard_name` or `units` says so; exactly one of each, on different
+  dimensions. Two-dimensional (curvilinear) coordinates and rotated poles are refused.
+- The frame is anonymous and geodetic (a sphere is zero flattening), with axes named after the
+  coordinates in units `degrees_east`/`degrees_north` (or `rad`). West and south units keep
+  their labels: the transform negates them.
+- The figure comes from a `latitude_longitude` grid mapping (`earth_radius`, or
+  `semi_major_axis` with `inverse_flattening` and/or `semi_minor_axis`, which must agree) into
+  the definition keys `figure`, `semi_major_axis`, `inverse_flattening`, `length_unit` (`"m"`),
+  `datum_name` (from `horizontal_datum_name`) and `ellipsoid_name` (from
+  `reference_ellipsoid_name`). Without a figure, `frame=` is required. A shared figure never
+  shares identity; pass `frame=` to put two files in one frame (its unit spellings must match).
+  Projected mappings, the extended grid-mapping syntax and a nonzero prime meridian are refused.
+- Bounds become `Grid` intervals with one derived sample offset; bounds placing labels at varying
+  positions in their cells (Gaussian latitudes) are dropped and reported. Missing bounds are not
+  inferred. Declared bounds decide global longitude coverage for resampling exactly.
+- Report codes: `figure`, `figure-ignored`, `west-longitude`, `south-latitude`, `no-bounds`,
+  `bounds-off-centre`.
 
 Application policy stays in the application: multi-image series assembly, pixel handling,
 regions of interest, display conventions and the choice of resampling targets.

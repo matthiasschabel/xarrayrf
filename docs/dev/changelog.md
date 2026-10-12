@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-10-12] — Angular charts stage 4: a minimal CF reader
+
+- **Problem**: A CF longitude/latitude dataset had no import path: users built the frame, its
+  figure and the `Grid` by hand.
+- **Resolution**: `xarrayrf.cf` (`from_dataset`, `frame_variable`) identifies one-dimensional
+  longitude and latitude (dimension or auxiliary) by `standard_name` or `units`, reads the figure
+  from a `latitude_longitude` grid mapping into the reserved definition keys (with
+  `datum_name` and `ellipsoid_name` kept apart), keeps west/south labels through a negating
+  transform, converts bounds to intervals with one derived offset (dropping and reporting
+  off-centre bounds), mints an anonymous geodetic frame, and adopts `frame=` when given (required
+  when no figure is declared). Refuses rotated poles, curvilinear coordinates, projected
+  mappings, the extended grid-mapping syntax and a nonzero prime meridian.
+- **Verification**: stock 2,466 passed plus 47 xfailed; ruff and mypy pass; import-boundary
+  test extended to `cf`.
+- **Files affected**: `src/xarrayrf/cf/__init__.py`, `tests/test_cf.py`,
+  `tests/test_import_boundary.py`, `docs/core_interface.md`, `CHANGELOG.md`, design and plan
+  notes.
+- **Reviewed by**: Codex (gpt-6-sol, high), plan and implementation.
+
 ## [2026-10-12] — Angular charts stage 3: seam- and pole-aware resampling
 
 - **Problem**: Resampling treated longitude/latitude labels literally: a target at 358.75° on a

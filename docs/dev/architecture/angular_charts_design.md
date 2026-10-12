@@ -1,6 +1,6 @@
 # Angular charts and chart transitions
 
-**Status:** Active (design; plan review converged 2026-10-12, Codex gpt-6-sol; not started)
+**Status:** Implemented (2026-10-12; stages 1 to 4 per their plans; section 4 amended by stage 3)
 **Last updated:** 2026-10-12
 **Scope:** Stage 2 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): angular coordinate
 systems (longitude/latitude, the celestial sphere), transitions between charts of one frame,
@@ -315,4 +315,5 @@ Each gets a short plan reviewed before implementation, as for value geometry.
    Done.
 2. Stage 2, transitions ([plan](angular_charts_stage2_plan.md)). Done.
 3. Stage 3, seam- and pole-aware resampling ([plan](angular_charts_stage3_plan.md)). Done.
-4. Stage 4 plan: the minimal CF reader (section 5).
+4. Stage 4, the minimal CF reader ([plan](angular_charts_stage4_plan.md)). Done. All stages
+   of this design are implemented; value geometry stage 4 (`FrameField`) is unblocked.

@@ -187,7 +187,7 @@ def import_names(source: str) -> set[str]:
 
 
 def forbidden_core_imports(source: str) -> set[str]:
-    forbidden = {"anatomy", "nifti", "dicom", "ngff", "geotiff"}
+    forbidden = {"anatomy", "nifti", "dicom", "ngff", "geotiff", "cf"}
     return {
         name
         for name in import_names(source)
@@ -205,6 +205,7 @@ def forbidden_sampling_imports(source: str) -> set[str]:
         "dicom",
         "ngff",
         "geotiff",
+        "cf",
     }
     names = import_names(source)
     for node in ast.walk(ast.parse(source)):
@@ -218,7 +219,7 @@ def forbidden_sampling_imports(source: str) -> set[str]:
 
 
 def test_sampling_import_scan_can_fail() -> None:
-    for name in sorted(INTEGRATION_MODULES | {"native", "nifti", "dicom", "ngff", "geotiff"}):
+    for name in sorted(INTEGRATION_MODULES | {"native", "nifti", "dicom", "ngff", "geotiff", "cf"}):
         assert forbidden_sampling_imports(f"def f():\n    from .{name} import value\n") == {
             f".{name}"
         }
@@ -321,6 +322,22 @@ def forbidden_geotiff_imports(source: str) -> set[str]:
     }
 
 
+def forbidden_cf_imports(source: str) -> set[str]:
+    """Allow only core, numpy and xarray: the CF reader needs no format library."""
+    allowed = sys.stdlib_module_names | {"numpy", "xarray"}
+    return {
+        name
+        for name in import_names(source)
+        if not (
+            name.split(".")[0] in allowed
+            or name == "xarrayrf"
+            or name == "xarrayrf.native"
+            or name.startswith("xarrayrf._")
+            or (name.startswith(".") and not name.startswith(".."))
+        )
+    }
+
+
 def test_core_never_imports_anatomy_or_nifti() -> None:
     package = Path(xarrayrf.__file__).parent
     core = [package / "__init__.py", *package.glob("_*.py")]
@@ -354,6 +371,10 @@ def test_adapter_imports_stay_within_their_boundaries() -> None:
     assert {name: imports for name, imports in ngff_offenders.items() if imports} == {}
     geotiff_offenders = {path.name: forbidden_geotiff_imports(path.read_text()) for path in geotiff}
     assert {name: imports for name, imports in geotiff_offenders.items() if imports} == {}
+    cf = sorted((package / "cf").glob("*.py"))
+    assert cf, "no cf modules found; the check would pass vacuously"
+    cf_offenders = {path.name: forbidden_cf_imports(path.read_text()) for path in cf}
+    assert {name: imports for name, imports in cf_offenders.items() if imports} == {}
 
 
 def test_adapter_import_scan_can_fail() -> None:
@@ -372,3 +393,6 @@ def test_adapter_import_scan_can_fail() -> None:
     assert forbidden_ngff_imports("from ome_zarr_models.v06 import scene\n") == set()
     assert forbidden_geotiff_imports("import rasterio\nimport pyproj\nimport dask\n") == set()
     assert forbidden_geotiff_imports("import nibabel\n") == {"nibabel"}
+    assert forbidden_core_imports("import xarrayrf.cf\n") == {"xarrayrf.cf"}
+    assert forbidden_cf_imports("import pyproj\n") == {"pyproj"}
+    assert forbidden_cf_imports("import xarray\nfrom xarrayrf.native import Report\n") == set()

@@ -1,6 +1,6 @@
 # Value geometry: vectors, tensors, pseudovectors and densities
 
-**Status:** Active (stages 1 to 3 implemented; stage 4, pointwise bases, after angular charts)
+**Status:** Active (stages 1 to 3 implemented; stage 4, pointwise bases, next: angular charts are implemented)
 **Last updated:** 2026-10-12
 **Scope:** Core: a tensor type and transform law for basis-dependent values, a component
 index carrying it, passive basis change, resampling of component variables and persistence.
@@ -147,8 +147,10 @@ is a policy hook, not core; linear interpolation of SPD components stays SPD, cu
 ### 4. Pointwise bases
 
 Components in a basis that varies per point (east/north wind on a sphere, a tetrad) need a
-`FrameField` (base chart, component bases, pointwise matrices; not a `Transform`). Deferred to
-after angular charts (nonlinear plan stage 2); the kernel already accepts pointwise maps.
+`FrameField` (base chart, component bases, pointwise matrices; not a `Transform`). Deferred until
+angular charts existed (nonlinear plan stage 2, implemented 2026-10-12); the kernel already
+accepts pointwise maps. Seam and pole resampling of declared components waits for it: polar-cap
+targets stay outside until components can change basis there.
 
 ### 5. Persistence
 
@@ -235,7 +237,7 @@ rationale):
 
 | Item | Waits for | Source |
 |---|---|---|
-| Pointwise bases (`FrameField`), stage 4 | angular charts ([design](angular_charts_design.md), nonlinear plan stage 2) | this design, section 4 |
+| Pointwise bases (`FrameField`), stage 4 | nothing: angular charts are implemented ([design](angular_charts_design.md)) | this design, section 4 |
 | Non-affine bindings in `change_component_basis` and resampling (pointwise `M_in`, `M_out`) | stage 4 | stages 2 and 3 |
 | A data-borne (duck-array) carrier giving the strict invariant | a consumer that needs it; its own design | stage 2 |
 | Patched-lane hooks: `check_roll`/`check_shift`, refusing bare-dimension adoption | the xarray hook proposal | stage 2 |
@@ -258,4 +260,4 @@ rationale):
    persistence and the operation probe. Done.
 3. Stage 2b, symmetric packing ([plan](value_geometry_stage2b_plan.md)). Done.
 4. Stage 3, resampling declared components ([plan](value_geometry_stage3_plan.md)). Done.
-5. Stage 4, pointwise bases, after angular charts (nonlinear plan stage 2).
+5. Stage 4, pointwise bases: next, since angular charts are implemented.
