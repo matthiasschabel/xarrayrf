@@ -1,7 +1,7 @@
 # Data-only persistence of the core value objects
 
 **Status:** Active
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-11
 **Scope:** `xarrayrf.encode` and `xarrayrf.decode` for vocabularies, coordinate systems, frames,
 array coordinates, grids, affine and composite transforms, and user-defined transforms. Native binding
 persistence wraps this encoding; NGFF, CF and NIfTI formats are adapters.
@@ -72,6 +72,28 @@ than `"1"`, including `None`) and axis types. Composite endpoints and non-affine
 refuse export.
 
 Schema 1 remains provisional and is not frozen. Freezing it is an explicit maintainer decision.
+
+### Schema evolution
+
+Decided by the maintainer on 2026-10-11, and applying before and after any freeze:
+
+1. **New kinds are added within schema 1.** An older release refuses a record of a kind it does
+   not know with `UnknownKindError` ("not a kind this release knows"), so nothing is half-read,
+   and every existing record keeps decoding unchanged. Each kind's introducing release is listed
+   below.
+2. **Any change to an existing kind bumps the version:** a field added or removed, or a changed
+   meaning. The decoder's refusal of unknown fields is what makes silent truncation impossible.
+3. **A field is never reused or reinterpreted** under the same kind.
+
+The envelope's `"xarrayrf": 1` therefore promises that every record a reader recognises decodes as
+documented, not that a given release recognises every record in the file. New declarations
+attach as their own kinds next to the records they qualify, never as fields inside them: the
+value geometry component declaration sits beside the binding record, whose fields stay exactly
+`transform`, `dims` and `intervals`.
+
+| Kind | Introduced |
+|---|---|
+| `direction_vocabulary`, `coordinate_system`, `reference_frame`, `array_coordinates`, `affine_transform`, `composite_transform`, `grid` | schema 1 (unreleased) |
 
 ## Alternatives Considered
 

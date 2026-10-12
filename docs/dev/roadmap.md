@@ -30,8 +30,9 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 2. A native-operation audit beyond the 93-case probe, concentrating on paths that could return
    a valid-looking incorrect binding.
 3. Persistence schema 1 frozen ([persistence design](architecture/persistence_design.md)).
-   Freezing is an explicit maintainer decision. The freeze records whether additive record kinds (such as the planned
-   transform edge wrapper) may land after it.
+   Freezing is an explicit maintainer decision, not scheduled. Additive record kinds may land
+   within schema 1 before or after a freeze (decided 2026-10-11; see the persistence design's
+   schema evolution rule).
 4. All supported dependency-floor CI lanes pass. This criterion is met on `da5f627`:
    [hosted run 37668735524](https://github.com/matthiasschabel/xarrayrf/actions/runs/37668735524)
    passes locked, minimum-core, minimum-resample and current. Hosted validation of the patched
