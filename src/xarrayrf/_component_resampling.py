@@ -229,9 +229,17 @@ def resample_components(
                     jacobian_map.jacobian(target_frame_points(start, stop)), dtype=np.float64
                 )
                 block = (slice(None),) * len(leading) + (slice(start, stop),)
-                out[block] = transform_declared_components(
-                    flat[block], declaration, compose(_push(jacobians))
-                )
+                try:
+                    push = _push(jacobians)
+                except ValueError as error:
+                    # The inverse names a block-relative index; report the target sample.
+                    sample = _first_singular(jacobians, start, shape, target_dims)
+                    raise ValueError(
+                        f"the frame map's Jacobian is singular or not finite at target sample "
+                        f"{sample}, so components there have no image; a folding or "
+                        "undefined registration cannot carry tensor components"
+                    ) from error
+                out[block] = transform_declared_components(flat[block], declaration, compose(push))
             return out.reshape(values.shape)
 
         mapped = _apply(result, apply_pointwise, [*target_dims, *dims], dtype)
@@ -270,6 +278,22 @@ def _push(jacobian: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
             "and target frames of one dimension"
         )
     return equilibrated_inverse(jacobian)
+
+
+def _first_singular(
+    jacobians: npt.NDArray[np.float64],
+    start: int,
+    shape: tuple[int, ...],
+    target_dims: Sequence[str],
+) -> dict[str, int]:
+    """The target sample of the first Jacobian in a block that cannot be inverted."""
+    for offset, matrix in enumerate(jacobians):
+        try:
+            equilibrated_inverse(matrix)
+        except ValueError:
+            position = np.unravel_index(start + offset, shape) if shape else ()
+            return {str(dim): int(index) for dim, index in zip(target_dims, position, strict=True)}
+    return {}
 
 
 def _reorient(

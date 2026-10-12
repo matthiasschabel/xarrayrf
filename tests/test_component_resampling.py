@@ -360,6 +360,56 @@ def test_mixed_variance_slots_in_different_bases_map_per_point(lazy: bool) -> No
         assert_close(values[:, k], np.broadcast_to(expected, values[:, k].shape))
 
 
+class Fold(Bend):
+    """A registration that folds space at x = 0.5: its Jacobian is singular there."""
+
+    def jacobian(self, at: npt.ArrayLike | None = None) -> npt.NDArray[np.float64]:
+        result = super().jacobian(at)
+        values = np.asarray(at, dtype=np.float64)
+        result[..., 0, 0] = np.where(np.isclose(values[..., 0], 0.5), 0.0, 1.0)
+        return result
+
+
+def test_a_singular_jacobian_names_the_target_sample() -> None:
+    with pytest.raises(ValueError, match=r"target sample \{'k': 2, 'j': 0, 'i': 0\}"):
+        xrf.resample(
+            constant_field(VECTOR_VALUE).rf.geometry,
+            TARGET.rf.grid,
+            transform=Fold(),
+            output_component_basis=FIXED,
+            component_reorientation="jacobian",
+            block_points=5,
+        )
+
+
+def test_box_methods_average_components_and_keep_the_declaration() -> None:
+    from test_box_resample import slab_grid
+
+    source_grid = slab_grid(np.arange(6)[:, None] + [0, 1])
+    frame = source_grid.transform.target
+    plain = xr.DataArray(
+        np.arange(6.0)[:, None],
+        dims=(*source_grid.dims, "component"),
+        coords={"component": list(frame.axes)},
+    )
+    source = cast(xr.DataArray, plain.rf.frame(source_grid))
+    declared = source.rf.declare_tensor_components(
+        xrf.VECTOR, component_dims=("component",), bases=frame
+    )
+    result, coverage = declared.rf.resample_to(
+        slab_grid([[0, 2], [2, 6]]),
+        method="overlap_mean",
+        support="average",
+        return_coverage=True,
+        output_component_basis=frame,
+        component_reorientation="jacobian",
+    )
+    assert_close(result.transpose(..., "component").values[:, 0], [0.5, 3.5])
+    assert result.rf.tensor_component_declaration.bases == (frame,)
+    assert_close(coverage.values, [1.0, 1.0])
+    assert not coverage.rf.has_tensor_components
+
+
 def test_a_callable_reorientation_result_is_applied() -> None:
     result = resample(constant_field(VECTOR_VALUE), SHEAR, component_reorientation=lambda m: 2 * m)
     at_every_target(result, 2 * np.linalg.inv(SHEAR) @ VECTOR_VALUE)

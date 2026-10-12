@@ -1,5 +1,28 @@
 # Changelog
 
+## [2026-10-12] — Independent QA of value geometry stages 1 to 3
+
+- **Problem**: Review the value geometry work (tensor types and kernel, component declarations,
+  symmetric packing, resampling of declared components) for root-cause soundness, regression
+  risk, edge cases and coverage before it is considered done.
+- **Resolution**: The transform law, per-slot composition and pushforward direction hold;
+  probes confirmed equivalent-frame resampling without a transform (derived coordinate-system
+  change), pickling of packed declarations and arrays, and float output for integer nearest
+  sources. Two gaps fixed. (1) A singular or non-finite frame-map Jacobian (a folding
+  registration) raised the block-relative stack index from the inverse, with "zero row"
+  wording for NaN, so the reported location was wrong for any block after the first; it now
+  names the target sample by dimension. (2) Box methods (`overlap_mean` with
+  `return_coverage`) on declared components had no test; one now checks averaged values, the
+  output declaration and an undeclared coverage array. Residual, accepted: one singular
+  Jacobian anywhere in the target aborts the whole resampling (explicit failure rather than
+  per-sample fill); stage 1 and 2 behaviour is unchanged.
+- **Verification**: stock 2,291 passed plus 47 xfailed; patched 2,338 passed; upstream 409 on
+  the tensor, packing and resampling files; ruff and mypy pass. Each stage was also reviewed by
+  Codex (gpt-6-astra, high) at plan and implementation.
+- **Files affected**: `src/xarrayrf/_component_resampling.py`,
+  `tests/test_component_resampling.py`.
+- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`) applying QAEngineer.
+
 ## [2026-10-07] — Independent QA of the core layering refactor
 
 - **Problem**: Verify that moving resampling planning, frame adoption, `Grid.isel`, binding
