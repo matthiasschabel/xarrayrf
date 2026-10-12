@@ -35,7 +35,7 @@ reasons. The stable documents are [the design](../design.md),
   pseudovectors and densities: one transform law, the component index carrying it, passive
   basis change, resampling of component variables, staged.
 - [value_geometry_stage1_plan.md](architecture/value_geometry_stage1_plan.md): stage 1 of the
-  value geometry design: `QuantityType`, the NumPy kernel `transform_components`,
+  value geometry design: `TensorType`, the NumPy kernel `transform_components`,
   `polar_rotation`, its broadcasting and determinant contracts, and the test oracles.
 - [field_transform_design.md](architecture/field_transform_design.md): stage 1, displacement,
   position and B-spline transforms on `Grid`, declared inverse pairs, a Jacobian-determinant

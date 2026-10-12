@@ -32,7 +32,7 @@ not own identity, change notification, storage, element topology or any viewer a
 | Placement of a grid of samples | `Grid`, `Geometry`, the `.rf` binding on `DataArray` | implemented; `Dataset`-level `.rf` is new work |
 | Transforms between frames, with meaning | `AffineTransform`, `CompositeTransform`; the edge wrapper with role, accuracy, validity region, provenance (P1) | transforms implemented; P1 direction agreed, design note pending |
 | Resampling onto a target grid | `da.rf.resample_to`, `resample` | implemented for scalars; component variables in value geometry stage 3 |
-| Value transformation law | `QuantityType` and `transform_components(values, linear_map, quantity_type, *, component_axes)` in the geometry core; the component index and `rf.express_in` (P2) | staged in the value geometry design |
+| Value transformation law | `TensorType` and `transform_components(values, linear_map, tensor_type, *, component_axes)` in the geometry core; the component index and `rf.express_in` (P2) | staged in the value geometry design |
 | Axis roles | reserved `axis_types` values `coordinate`, `local`, `component` (P3) | to document in the core interface |
 | Placement of a point set (mesh vertices, landmarks) | value-positioned point sets, viewer boundary plan item 6 | planned; ragged geometry excluded |
 | Format geometry | `dicom`, `nifti`, `ngff`, `geotiff` readers | implemented |
@@ -68,7 +68,7 @@ sample sets and nothing else:
 
 The viewer model never implements value transformation itself. Inside xarrayrf, the xarray
 binding resolves which bases are involved, reads the component index for rank >= 1 or the
-per-call `quantity=` for rank 0, and hands the geometry core a numeric map:
+per-call `tensor_type=` for rank 0, and hands the geometry core a numeric map:
 `transform_components` for a change of basis, and the private resampling plan and execute
 interfaces for `resample`. Upward, the model uses only public xarrayrf API. The
 dependency rule is no upward concrete dependency; the model may register callbacks on its own

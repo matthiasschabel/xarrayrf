@@ -1,8 +1,8 @@
-# Value geometry stage 1: quantity type, transform law, NumPy kernel
+# Value geometry stage 1: tensor type, transform law, NumPy kernel
 
 **Status:** Active (plan reviewed; not started)
 **Last updated:** 2026-10-11
-**Scope:** Geometry core only: a new `_quantity` module, a batched form of the equilibrated
+**Scope:** Geometry core only: a new `_tensor_type` module, a batched form of the equilibrated
 inverse, tests, the core interface section on quantity rules, the changelog. Implements stage 1
 of [the value geometry design](value_geometry_design.md) (sections 1 and 7).
 
@@ -13,7 +13,7 @@ The design fixes one law,
     T' = sign(det J)^[parity odd] * |det J|^w * (J on each up slot)(J^-T on each down slot) T
 
 with `J[a, b] = d target_a / d source_b`, and stages its delivery. Stage 1 is the law alone: a
-value object declaring a quantity's type and a NumPy function applying the law to arrays. It
+value object declaring a value's tensor type and a NumPy function applying the law to arrays. It
 changes no binding, `resample`, persistence or format adapter, and must stay importable and
 runnable without xarray.
 
@@ -21,47 +21,47 @@ runnable without xarray.
 
 ### Module and layer
 
-New `src/xarrayrf/_quantity.py`, geometry-core layer (NumPy only). `tests/test_import_boundary.py`
+New `src/xarrayrf/_tensor_type.py`, geometry-core layer (NumPy only). `tests/test_import_boundary.py`
 already treats every module outside its integration list as core, so the import rule applies
 automatically. Add a `transform_components` call to its `CORE_WITHOUT_XARRAY` subprocess so the
 guarantee covers execution, not only imports.
 
-### `QuantityType`
+### `TensorType`
 
 Frozen, slotted dataclass with exact structural equality and hashing, like the other value
 objects:
 
 | Field | Type | Validation |
 |---|---|---|
-| `slots` | `tuple[Literal["up", "down"], ...]` | any sequence of those strings, normalised to a tuple; empty means scalar |
+| `variance` | `tuple[Literal["up", "down"], ...]` | any sequence of those strings, normalised to a tuple; empty means scalar |
 | `parity` | `Literal["even", "odd"]` | default `"even"` |
 | `det_power` | `float` | finite real, not `bool`; default `0.0`; stored as `float` so `-1` and `-1.0` are equal and hash equal |
 | `symmetry` | `Literal["symmetric", "antisymmetric"] \| None` | default `None`; only with exactly two slots of equal variance, else `ValueError` naming the shear counterexample |
 
-Properties: `rank` (`len(slots)`). No `basis` field: bases belong to the stage-2 component
+Properties: `rank` (`len(variance)`). No `basis` field: bases belong to the stage-2 component
 index, never to the type.
 
-Shortcuts, as module constants of plain `QuantityType` values (not persisted categories):
+Shortcuts, as module constants of plain `TensorType` values (not persisted categories):
 
-| Constant | slots | parity | `det_power` |
+| Constant | variance | parity | `det_power` |
 |---|---|---|---|
 | `SCALAR` | `()` | even | 0 |
 | `PSEUDOSCALAR` | `()` | odd | 0 |
 | `VECTOR` | `("up",)` | even | 0 |
-| `COVARIANT_VECTOR` | `("down",)` | even | 0 |
+| `COVECTOR` | `("down",)` | even | 0 |
 | `SECOND_RANK_TENSOR` | `("up", "up")` | even | 0 |
 | `CROSS_PRODUCT_VECTOR` | `("down",)` | odd | 1 |
 | `TWO_FORM_DUAL` | `("up",)` | odd | -1 |
 | `PSEUDOVECTOR` | `("up",)` | odd | 0, orthogonal maps only |
 
-A scalar density is spelled `QuantityType((), det_power=-1)`; no constant, since the exponent
+A scalar density is spelled `TensorType((), det_power=-1)`; no constant, since the exponent
 depends on what is counted per volume. `PSEUDOVECTOR` needs a refusal the others do not, so
-`QuantityType` carries one more field, `orthogonal_only: bool = False`, set only by this constant
+`TensorType` carries one more field, `orthogonal_only: bool = False`, set only by this constant
 (and by any caller declaring the same restriction). It participates in equality.
 
 ### `transform_components`
 
-    transform_components(values, linear_map, quantity_type, *, component_axes=None)
+    transform_components(values, linear_map, tensor_type, *, component_axes=None)
         -> NDArray
 
 - `values`: array-like of real integer, floating or complex dtype. A masked array is refused
@@ -118,7 +118,7 @@ the rest of the kernel.
 
 Distinct bases per slot (stage 2, e.g. an up slot in a frame and a down slot in array
 coordinates) need no per-slot map argument: the caller first converts each slot to a common
-basis with a rank-one call on that axis (`QuantityType(("up",))` or `(("down",))` with
+basis with a rank-one call on that axis (`TensorType(("up",))` or `(("down",))` with
 `component_axes=(axis,)`), then applies the common map. Stage 2 documents this route.
 
 Symmetry: the kernel does not check that symmetric input is symmetric (that is a carrier
@@ -137,7 +137,7 @@ helper and is needed for the oracle.
 
 ### Public API
 
-Export from `xarrayrf`: `QuantityType`, the eight constants, `transform_components`,
+Export from `xarrayrf`: `TensorType`, the eight constants, `transform_components`,
 `polar_rotation`, `ORTHOGONALITY_TOLERANCE`. A NumPy-only user (meshes, point clouds, tables)
 needs the kernel directly; that is the core's stated audience. The specified-but-unimplemented
 `rule(transform, values, *, at)` callables in `core_interface.md` are replaced, not implemented:
@@ -145,21 +145,21 @@ evaluating `transform.jacobian(at)` is the caller's one line, and choosing betwe
 `polar_rotation(J)` is exactly the policy decision the design moved out of the type. `point`
 was never a value law and stays `transform_point`.
 
-No encoding: persisting `QuantityType` is the stage-2 component-index kind. `QuantityType` does
+No encoding: persisting `TensorType` is the stage-2 component-index kind. `TensorType` does
 not implement `SupportsEncoding` in stage 1.
 
-### Tests (`tests/test_quantity.py`)
+### Tests (`tests/test_tensor_type.py`)
 
 Oracles, `assert_allclose` with `rtol=1e-12, atol=1e-12` (a few float64 operations on O(1)
 numbers):
 
-1. Shear `J = [[1,1,0],[0,1,0],[0,0,1]]`: `COVARIANT_VECTOR (1,0,0) -> (1,-1,0)` (matches ITK);
+1. Shear `J = [[1,1,0],[0,1,0],[0,0,1]]`: `COVECTOR (1,0,0) -> (1,-1,0)` (matches ITK);
    `VECTOR (0,1,0) -> (1,1,0)`; `SECOND_RANK_TENSOR diag(3,2,1) -> [[5,2,0],[2,2,0],[0,0,1]]`
    (deliberately not ITK's `diag(3,2,1)`); `polar_rotation` of the same shear applied as a
    second-rank tensor to `diag(2,3,1)` gives upper triangle `[2.2, 0.4, 0, 2.8, 0, 1]`
    (prior-art oracle 4; these values are exact: `R = [[2,1,0],[-1,2,0],[0,0,√5]]/√5`).
 2. Rotation: `SECOND_RANK_TENSOR` under a rotation equals `R T R^T`. Mixed tensor
-   `QuantityType(("up", "down"))` under the shear equals `J T J^-1` (ITK's symmetric-tensor
+   `TensorType(("up", "down"))` under the shear equals `J T J^-1` (ITK's symmetric-tensor
    formula, reachable only by declaring mixed variance). Rank 3 `("up", "down", "down")` on a
    seeded random map equals an explicit `einsum("ai,bj,ck,ibc->ajk", J, Jinv, Jinv, T)`
    (written per index, independent of the kernel's matmul route).
@@ -196,7 +196,7 @@ numbers):
 Refusals, one test per raised error, asserting type and message fragment: masked values;
 boolean and object values; non-integer and `bool` `component_axes`; non-`bool`
 `orthogonal_only`; invalid slot string;
-non-sequence slots; bad parity; non-finite or `bool` `det_power`; symmetry on rank != 2;
+non-sequence variance; bad parity; non-finite or `bool` `det_power`; symmetry on rank != 2;
 symmetry on mixed variance; non-square map; mismatched `n`; wrong number of `component_axes`;
 duplicate or out-of-range axes; non-finite map; singular map where required (single and batched,
 naming the index); `orthogonal_only` with a shear; `polar_rotation` of a singular map.
@@ -204,12 +204,12 @@ naming the index); `orthogonal_only` with a shear; `polar_rotation` of a singula
 Import boundary: the xarray-blocked subprocess calls `transform_components` and
 `polar_rotation`.
 
-Equality and hashing: `QuantityType(("up",)) == VECTOR`; `det_power=-1` vs `-1.0` hash equal;
-`orthogonal_only` distinguishes `PSEUDOVECTOR` from `QuantityType(("up",), parity="odd")`.
+Equality and hashing: `TensorType(("up",)) == VECTOR`; `det_power=-1` vs `-1.0` hash equal;
+`orthogonal_only` distinguishes `PSEUDOVECTOR` from `TensorType(("up",), parity="odd")`.
 
 ### Documentation
 
-- `docs/core_interface.md` "Quantity rules": replace the specified callables with the law, the
+- `docs/core_interface.md` "Quantity rules" (renamed "Tensor transformation"): replace the specified callables with the law, the
   type, the kernel signature and the two-pseudovector warning, with a short executed example.
 - `CHANGELOG.md` "Added".
 - Docstrings with a worked example each (reflection of a vector and a pseudovector).
@@ -224,7 +224,7 @@ Equality and hashing: `QuantityType(("up",)) == VECTOR`; `det_power=-1` vs `-1.0
 - **Old rule callables `rule(transform, values, *, at)`.** Rejected: they bind the type to a
   transform and hide the choice of map (`J` versus its polar factor), which the design moved to
   the caller. Wrappers can be added later if a consumer wants them.
-- **Classmethod constructors (`QuantityType.vector()`).** Rejected for constants: the shortcuts
+- **Classmethod constructors (`TensorType.vector()`).** Rejected for constants: the shortcuts
   have no parameters, and constants read like `CARTESIAN`.
 - **A parity-only pseudovector valid for all maps.** Rejected by the design: the two physical
   origins differ under shear.
@@ -237,7 +237,7 @@ Equality and hashing: `QuantityType(("up",)) == VECTOR`; `det_power=-1` vs `-1.0
 
 - Voigt/Mandel packing helpers: stage 2, where the packed component coordinate lives.
 - Dask-aware application (`map_blocks`): stage 2 with the binding.
-- Persistence of `QuantityType`: stage 2 schema kind.
+- Persistence of `TensorType`: stage 2 schema kind.
 
 ## Settled in review
 
@@ -250,7 +250,7 @@ factor including reflections; the private inverse helper is generalised rather t
 
 ## Next Steps
 
-1. Implement `_quantity.py` and the batched inverse with tests, narrowest first
-   (`pytest tests/test_quantity.py tests/test_affine.py tests/test_import_boundary.py`), then the
+1. Implement `_tensor_type.py` and the batched inverse with tests, narrowest first
+   (`pytest tests/test_tensor_type.py tests/test_affine.py tests/test_import_boundary.py`), then the
    full suite, ruff and mypy.
 2. Documentation as above; mark stage 1 implemented in the design.

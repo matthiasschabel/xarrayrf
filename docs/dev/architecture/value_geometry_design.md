@@ -2,7 +2,7 @@
 
 **Status:** Active (design; not started)
 **Last updated:** 2026-10-11
-**Scope:** Core: a quantity type and transform law for basis-dependent values, a component
+**Scope:** Core: a tensor type and transform law for basis-dependent values, a component
 index carrying it, passive basis change, resampling of component variables and persistence.
 Supersedes the quantity-rule and component-binding sections of
 [the core model design](core_model_design.md), gaps 4 and 5 of
@@ -36,11 +36,11 @@ checked numerically. The design was refined with a Codex reviewer (gpt-6-astra, 
 effort high) over two passes: five blocking findings and one introduced in revision, all
 accepted; no open disagreements.
 
-### 1. Quantity type and one transform law
+### 1. Tensor type and one transform law
 
-A `QuantityType` value object declares, per variable:
+A `TensorType` value object declares, per variable:
 
-- `slots`: tuple of `"up"` / `"down"`, one per component index (empty = scalar);
+- `variance`: tuple of `"up"` / `"down"`, one per component index (empty = scalar);
 - `parity`: `"even"` or `"odd"`;
 - `det_power`: real `w`;
 - `symmetry`: `None`, `"symmetric"` or `"antisymmetric"`: rank 2 only, and only for two
@@ -52,8 +52,8 @@ With `J` the components of the linear map from the source basis to the target ba
 
     T' = sign(det J)^[parity odd] * |det J|^w * (J on each up slot) (J^-T on each down slot) T
 
-The existing named rules become shortcuts: `vector = (up,)`, `covariant_vector = (down,)`,
-`second_rank_tensor = (up, up)`; mass density = scalar with `w = -1`.
+The existing named rules become shortcuts: `VECTOR = (up,)`, `COVECTOR = (down,)`,
+`SECOND_RANK_TENSOR = (up, up)`; mass density = scalar with `w = -1`.
 
 **Pseudovectors are not one law under non-orthogonal maps.** Using
 `(Mx) x (My) = det(M) M^-T (x x y)`: a cross product of two vectors (torque, angular momentum)
@@ -67,10 +67,10 @@ categories. A pseudoscalar with `w = 0` is `sign(det J)` for any invertible map.
 
 `polar_rotation` is not a type: it is a choice of which linear map to apply (the rotation of
 `J`'s polar decomposition, i.e. the finite-strain reorientation). The kernel therefore takes
-`(values, linear_map, quantity_type)`; callers or policies choose `J`, `polar(J)` or a domain
+`(values, linear_map, tensor_type)`; callers or policies choose `J`, `polar(J)` or a domain
 policy (PPD, downstream).
 
-Kernel: `transform_components(values, linear_map, quantity_type, *, component_axes)` in the
+Kernel: `transform_components(values, linear_map, tensor_type, *, component_axes)` in the
 NumPy-only geometry core, vectorised over leading axes and over pointwise maps
 (`linear_map` shape `(..., n, n)`), chunk-friendly. Refuses singular maps where a down slot or
 nonzero `w` needs `det`/inverse.
@@ -82,11 +82,11 @@ operand's attrs, so a vector plus a covector would keep a valid-looking wrong ty
 `resample` copies attrs today. Component metadata therefore uses the binding's mechanism.
 
 - **Rank >= 1: a component index.** Each slot is a named component dimension with a label
-  coordinate; one custom xarray index spans the quantity's component coordinates (one per
+  coordinate; one custom xarray index spans the variable's component coordinates (one per
   slot, or one packed coordinate for two symmetric slots) and declares, per slot, its
   variance and basis, plus parity, `det_power`, `orthogonal_only` and symmetry/packing. Slots are named, so
   transpose cannot exchange variance. Equality includes the whole declaration, so aligning or
-  combining two quantities with different declarations over the same dimensions refuses
+  combining two variables with different declarations over the same dimensions refuses
   (as conflicting bindings do, including the binding's `join` compatibility and
   `check_override` refusals, not equality alone), and dropping or resetting the index leaves plain labels with
   no claimed type. In a Dataset, variables sharing component dimensions share their type
@@ -100,7 +100,7 @@ operand's attrs, so a vector plus a covector would keep a valid-looking wrong ty
 - **Rank 0 (scalar densities, pseudoscalars): per-call declaration.** No dimension exists to
   hold an index, and an attr would be advisory only, so no carrier is claimed. Operations
   that would change their values (`express_in` with `det J != 1` or improper `J`, `resample`
-  through a volume-changing or orientation-reversing map) take `quantity=` explicitly; an
+  through a volume-changing or orientation-reversing map) take `tensor_type=` explicitly; an
   undeclared scalar is an ordinary scalar. Point sampling with the `|det J|^w` factor is
   distinct from conservative remapping, which is deferred: the box methods average over
   covered target support and over overlapping sources, and mapping intervals applies no
@@ -173,7 +173,7 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 
 ### Stages
 
-1. `QuantityType`, the law and the NumPy kernel with shortcuts; tests above that need no
+1. `TensorType`, the law and the NumPy kernel with shortcuts; tests above that need no
    binding. No binding or `resample` change.
 2. Component index, `rf.express_in`, the `resample` guard, persistence; an operation probe
    for the component index on the same lanes as the binding inventory.
@@ -182,6 +182,13 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 
 ## Alternatives Considered
 
+- **Naming the type `QuantityType`.** Rejected: pint's and astropy's `Quantity` (and
+  xarrayrf's own `units` module) mean a value with units, so the name suggests dimensional
+  analysis. "A tensor of type (p, q)" is the standard term; densities and pseudotensors are
+  tensor types with a determinant power and odd parity. The per-slot field is `variance`,
+  not `indices`, because "component index" already names the xarray index that carries
+  the type. `det_power` is kept rather than "weight", whose sign convention varies by
+  author.
 - **Attrs as the type carrier.** Rejected for the reason the binding design rejected them:
   arithmetic keeps the first operand's attrs, so a vector plus a covector keeps a
   valid-looking wrong type, and `resample` copies attrs. Rank >= 1 uses an index instead.
@@ -192,7 +199,7 @@ Stage 4: GRIB grid-relative to earth-relative wind.
   need.
 - **A tensor-density "weight".** Rejected for `det_power`, an explicit exponent of `|det J|`,
   because the literature's weight sign conventions conflict.
-- **`polar_rotation` as a quantity type.** Rejected: it selects which linear map to apply
+- **`polar_rotation` as a tensor type.** Rejected: it selects which linear map to apply
   (finite-strain reorientation), so it is a reorientation policy beside `"jacobian"`.
 - **Diffusion PPD or another fixed tensor-reorientation strategy in core.** Rejected, as
   before: competing strategies are domain policy, supplied through `reorientation=`.
@@ -217,7 +224,7 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 
 ## Next Steps
 
-1. Stage 1: `QuantityType`, the law, the NumPy kernel and shortcuts, with the stage-1
+1. Stage 1: `TensorType`, the law, the NumPy kernel and shortcuts, with the stage-1
    acceptance cases as tests. No binding change, so it does not wait on the schema freeze.
    Planned and reviewed in [the stage 1 plan](value_geometry_stage1_plan.md).
 2. Before stage 2: the schema-1 freeze decision records whether additive record kinds may land
