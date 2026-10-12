@@ -29,9 +29,10 @@ from ._chart_transitions import (
 from ._composite import CompositeTransform
 from ._coordinate_system import CARTESIAN, CoordinateSystem
 from ._frame import ReferenceFrame
+from ._frame_field import EastNorthUp, FrameField
 from ._grid import Coordinate, Grid
 from ._symmetric_packing import SymmetricPacking
-from ._tensor_component_declaration import TensorComponentDeclaration
+from ._tensor_component_declaration import ComponentBasis, TensorComponentDeclaration
 from ._tensor_type import TensorType
 from ._transform import Endpoint, SupportsPoints, check_transform
 from ._vocabulary import DirectionVocabulary
@@ -99,6 +100,7 @@ _BUILT_IN: Final = frozenset(
         "cartesian_to_spherical",
         "geodetic_to_cartesian",
         "cartesian_to_geodetic",
+        "east_north_up",
         "grid",
         "tensor_type",
         "tensor_component_declaration",
@@ -270,6 +272,23 @@ def _encode(value: object) -> dict[str, Any]:
             "index_pairs": [list(pair) for pair in value.index_pairs],
             "off_diagonal_scale": value.off_diagonal_scale,
         }
+    if isinstance(value, EastNorthUp):
+        geodetic = value.base.coordinate_system.representation != "spherical"
+        return {
+            "kind": "east_north_up",
+            "base": _encode(value.base),
+            "axes": list(value.axes),
+            "semi_major_axis": value.semi_major_axis if geodetic else None,
+            "inverse_flattening": value.inverse_flattening if geodetic else None,
+            "length_unit": value.length_unit,
+        }
+    if isinstance(value, TensorComponentDeclaration):
+        for basis in value.bases:
+            if isinstance(basis, FrameField) and not isinstance(basis, EastNorthUp):
+                raise TypeError(
+                    f"the declaration's basis {type(basis).__name__} is a user frame field, "
+                    "which cannot be encoded yet; only EastNorthUp is persisted"
+                )
     if isinstance(value, TensorComponentDeclaration) and value.packing is not None:
         # Its own kind, so a release without packing refuses it rather than misreading it.
         return {
@@ -399,6 +418,7 @@ _FIELDS: Final = {
     "array_coordinates": {"axes", "units", "axis_types", "sample_offset"},
     "affine_transform": {"source", "target", "matrix", "translation"},
     "composite_transform": {"transforms"},
+    "east_north_up": {"base", "axes", "semi_major_axis", "inverse_flattening", "length_unit"},
     "spherical_to_cartesian": {"source", "target", "longitude_start"},
     "cartesian_to_spherical": {"source", "target", "longitude_start"},
     "geodetic_to_cartesian": {
@@ -620,7 +640,7 @@ class _Decoder:
         tensor_type = self.value(fields["tensor_type"])
         if not isinstance(tensor_type, TensorType):
             raise MalformedDataError("a declaration's tensor_type must be a tensor type")
-        bases = [self._endpoint(item) for item in self._list(fields["bases"], "bases")]
+        bases = [self._basis(item) for item in self._list(fields["bases"], "bases")]
         return TensorComponentDeclaration(
             tensor_type, self._list(fields["component_dims"], "component_dims"), bases
         )
@@ -647,8 +667,29 @@ class _Decoder:
         if not isinstance(dim, str):
             raise MalformedDataError(f"component_dim must be a string, got {dim!r}")
         return TensorComponentDeclaration(
-            tensor_type, (dim,), self._endpoint(fields["basis"]), packing=packing
+            tensor_type, (dim,), self._basis(fields["basis"]), packing=packing
         )
+
+    def east_north_up(self, fields: Mapping[str, Any]) -> EastNorthUp:
+        base = self.value(fields["base"])
+        if not isinstance(base, ReferenceFrame):
+            raise MalformedDataError("an east/north/up field's base must be a reference frame")
+        return EastNorthUp(
+            base,
+            semi_major_axis=fields["semi_major_axis"],
+            inverse_flattening=fields["inverse_flattening"],
+            length_unit=fields["length_unit"],
+            axes=tuple(self._list(fields["axes"], "axes")),
+        )
+
+    def _basis(self, data: object) -> ComponentBasis:
+        basis = self.value(data)
+        if not isinstance(basis, ReferenceFrame | ArrayCoordinates | EastNorthUp):
+            raise MalformedDataError(
+                "a component basis must be a reference frame, array coordinates or an "
+                f"east/north/up field, got {type(basis).__name__}"
+            )
+        return basis
 
     def composite_transform(self, fields: Mapping[str, Any]) -> CompositeTransform:
         members = [self.value(item) for item in self._list(fields["transforms"], "transforms")]

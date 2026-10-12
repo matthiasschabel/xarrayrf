@@ -23,6 +23,12 @@
   exactly for nonuniform, descending and float32 labels; regional grids found from another
   branch) and interpolates across the poles of global grids with antipodal longitudes. Labels
   stay literal. Declared components do not cross poles yet; box methods do not wrap.
+- Bases that vary by position: a `FrameField` protocol and the built-in `EastNorthUp` (local
+  east/north/up on geodetic and spherical charts), usable as component bases.
+  `change_component_basis` and component resampling evaluate such bases, and chart transitions
+  passed as `transform=`, at each sample; east/north/up converts to Earth-centred components
+  even on pole rows. Components in a constant Cartesian basis now cross the poles when
+  resampling.
 - `xarrayrf.cf`: frames a CF variable of an xarray Dataset on its longitude/latitude grid, with
   the earth figure from a `latitude_longitude` grid mapping and bounds as intervals
   (`frame_variable`, `from_dataset`). No extra dependency.
@@ -32,7 +38,8 @@
 - NGFF export refuses angular frames: NGFF axes carry no representation, and degree units would
   read back as refused Cartesian axes.
 - Resampling declared tensor components now also names the target sample when the frame map's
-  Jacobian raises (a chart transition on the polar axis), not only when it is singular.
+  Jacobian or a frame-field basis raises (a pole), not only when it is singular.
+  `change_component_basis` accepts non-affine transforms with a Jacobian.
 
 - Cubic resampling refuses NaN in the source samples it reads, including onto a coincident
   grid. The spline prefilter spread one NaN along its whole line, while the same-grid gather

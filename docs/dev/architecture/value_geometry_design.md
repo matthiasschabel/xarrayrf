@@ -1,6 +1,6 @@
 # Value geometry: vectors, tensors, pseudovectors and densities
 
-**Status:** Active (stages 1 to 3 implemented; stage 4, pointwise bases, next: angular charts are implemented)
+**Status:** Implemented (stages 1 to 4; pending work tabled under Deferred Work)
 **Last updated:** 2026-10-12
 **Scope:** Core: a tensor type and transform law for basis-dependent values, a component
 index carrying it, passive basis change, resampling of component variables and persistence.
@@ -147,10 +147,10 @@ is a policy hook, not core; linear interpolation of SPD components stays SPD, cu
 ### 4. Pointwise bases
 
 Components in a basis that varies per point (east/north wind on a sphere, a tetrad) need a
-`FrameField` (base chart, component bases, pointwise matrices; not a `Transform`). Deferred until
-angular charts existed (nonlinear plan stage 2, implemented 2026-10-12); the kernel already
-accepts pointwise maps. Seam and pole resampling of declared components waits for it: polar-cap
-targets stay outside until components can change basis there.
+`FrameField` (base chart, component bases, pointwise matrices; not a `Transform`). Implemented in
+[stage 4](value_geometry_stage4_plan.md) (2026-10-12): a protocol, the built-in `EastNorthUp`,
+pointwise maps in `change_component_basis` and resampling, and pole crossing for constant
+Cartesian bases.
 
 ### 5. Persistence
 
@@ -237,8 +237,8 @@ rationale):
 
 | Item | Waits for | Source |
 |---|---|---|
-| Pointwise bases (`FrameField`), stage 4 | nothing: angular charts are implemented ([design](angular_charts_design.md)) | this design, section 4 |
-| Non-affine bindings in `change_component_basis` and resampling (pointwise `M_in`, `M_out`) | stage 4 | stages 2 and 3 |
+| Non-affine bindings (`ArrayCoordinates` bases under field-backed transforms) | nonlinear plan stage 1 | stages 2 to 4 |
+| East/north pole halos (sign flips), 2-D east/north into 3-D, persisting user frame fields, fields over another chart | a consumer | [stage 4](value_geometry_stage4_plan.md) |
 | A data-borne (duck-array) carrier giving the strict invariant | a consumer that needs it; its own design | stage 2 |
 | Patched-lane hooks: `check_roll`/`check_shift`, refusing bare-dimension adoption | the xarray hook proposal | stage 2 |
 | Undeclared scalar densities through `resample` (`tensor_type=`) | a consumer | stage 3 |
@@ -260,4 +260,4 @@ rationale):
    persistence and the operation probe. Done.
 3. Stage 2b, symmetric packing ([plan](value_geometry_stage2b_plan.md)). Done.
 4. Stage 3, resampling declared components ([plan](value_geometry_stage3_plan.md)). Done.
-5. Stage 4, pointwise bases: next, since angular charts are implemented.
+5. Stage 4, pointwise bases ([plan](value_geometry_stage4_plan.md)). Done.

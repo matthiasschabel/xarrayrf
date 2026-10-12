@@ -1,5 +1,28 @@
 # Changelog
 
+## [2026-10-12] — Value geometry stage 4: pointwise bases (FrameField)
+
+- **Problem**: Component bases were constant (a frame or the binding's array coordinates), so
+  eastward/northward wind, the most common earth-system vector, could not be declared, and
+  declared components could not cross the poles when resampling.
+- **Resolution**: `FrameField` protocol (`_frame_field.py`) and `EastNorthUp` (scaled role
+  permutation `S⁻¹` into the chart basis; meridian limit at the poles; `directions` in
+  Earth-centred axes). Shared tangent-frame and figure checks factored out of
+  `_chart_transitions.py`. `change_component_basis` assembles per-sample maps through the
+  array's frame (`point_basis_map`), including chart transitions as `transform=` with today's
+  direction rule, and maps east/north/up to its own Earth-centred chart by its directions so
+  pole rows convert; failures name the sample. Component resampling evaluates field bases at
+  `T(y)` and `y`, with an identity shortcut for one frame and one basis. Pole halos extend to
+  components in constant Cartesian bases. `east_north_up` persists; user fields are refused.
+- **Verification**: stock 2,494 passed plus 47 xfailed; patched 2,541; upstream 2,499 plus 42
+  xfailed; ruff and mypy pass.
+- **Files affected**: `src/xarrayrf/_frame_field.py`, `_chart_transitions.py`,
+  `_tensor_components.py`, `_tensor_component_declaration.py`, `_component_resampling.py`,
+  `_resample.py`, `_encoding.py`, `__init__.py`; `tests/test_frame_fields.py`,
+  `tests/test_encoding.py`, `tests/test_component_resampling.py`; `docs/core_interface.md`,
+  `CHANGELOG.md`, the value geometry design and stage 4 plan.
+- **Reviewed by**: Codex (gpt-6-sol, high), plan and implementation.
+
 ## [2026-10-12] — Angular charts stage 4: a minimal CF reader
 
 - **Problem**: A CF longitude/latitude dataset had no import path: users built the frame, its

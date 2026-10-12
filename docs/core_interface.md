@@ -479,11 +479,38 @@ wind = wind.rf.declare_tensor_components(xrf.VECTOR, component_dims=("component"
 `rf.change_component_basis(basis, *, transform=None, units=None)` re-expresses the components at
 the same samples: between the array coordinates and the bound frame through the binding matrix
 or its inverse, between coordinate systems of one frame by `coordinate_system_change`, and
-between frames through `transform`. Every map must be square and invertible and, for now,
-constant. `units=` is required exactly when the basis units change. Scalars (densities,
-pseudoscalars) have no component dimension: pass `tensor_type=` and `from_basis=` instead.
-`rf.encode` writes the declaration to its own `xarrayrf_tensor_components` attribute,
-beside the binding's.
+between frames through `transform`. Every map must be square and invertible. `units=` is
+required exactly when the basis units change. Scalars (densities, pseudoscalars) have no
+component dimension: pass `tensor_type=` and `from_basis=` instead. `rf.encode` writes the
+declaration to its own `xarrayrf_tensor_components` attribute, beside the binding's.
+
+**Bases that vary by position.** A basis may also be a `FrameField`: a protocol whose `base`
+is a chart, with `axes`, `units`, and `matrix(at)`/`inverse_matrix(at)` giving the basis
+vectors in the chart's coordinate basis at points (implement it for a tetrad; nothing is
+registered). `EastNorthUp(base, *, semi_major_axis=None, inverse_flattening=None,
+length_unit=None, axes=None)` is the built-in one: the local orthonormal east, north and up of a
+geodetic chart (with or without height; the figure is required and checked against the frame
+definition) or a spherical chart with a radius axis, in the length unit. Its components are
+ordered by role whatever the chart's axis order. At a pole it is the limit along the sample's
+meridian (how pole rows are stored); the chart's own basis does not exist there, so `matrix`
+raises, while `directions(at)`, the vectors in Earth-centred axes, does not.
+
+```python
+enu = xrf.EastNorthUp(earth, semi_major_axis=6378137.0, inverse_flattening=298.257223563)
+wind = wind.rf.declare_tensor_components(xrf.VECTOR, component_dims=("component",), bases=enu)
+earth_centred = wind.rf.change_component_basis(
+    ecef, transform=xrf.GeodeticToCartesian(earth, ecef, ...)
+)
+```
+
+A field basis must be over the array's frame in its own coordinate system. Changes involving a
+field, or a `transform` without a constant matrix (a chart transition), are evaluated at the
+array's sample points; such a transform must start or end at the array's frame, and keeps the
+direction rule above (its Jacobian is evaluated at the sample's location in its source frame).
+East/north/up to its own Earth-centred chart uses the directions directly, so pole rows
+convert too; conversions through the chart basis refuse pole samples, naming them. Constant
+changes evaluate nothing. Only `EastNorthUp` is persisted; `encode` refuses a declaration with
+a user field.
 
 **Packed symmetric components.** A symmetric order-2 type can hold its `n(n+1)/2` independent
 components along one dimension. `SymmetricPacking(index_pairs, *, off_diagonal_scale=1.0)`
@@ -535,7 +562,11 @@ slot, `M_out · R(L) · M_in` applies by the slot's law. `M_in` takes the source
 source frame (the binding matrix for `ArrayCoordinates`), `L = (D T(y))⁻¹` pushes the source
 frame to the target frame (`T` maps target-frame points to source-frame points), and `M_out`
 takes the target frame to `output_component_basis`: the target frame, an equivalent frame, or
-(for `rf.resample_to`) the target's `ArrayCoordinates`. `component_reorientation` chooses `R`:
+(for `rf.resample_to`) the target's `ArrayCoordinates` or a frame field over the target frame.
+With a frame-field basis, `M_in` is evaluated at the source point `T(y)` and `M_out` at `y`.
+When source and target share one frame and the output basis is the source basis, every map is
+the identity and nothing is evaluated, which keeps east/north components defined on pole
+rows. `component_reorientation` chooses `R`:
 `"jacobian"` (`L` itself, for fluxes and displacements), `"polar_orthogonal_factor"` (its
 rotation or reflection, as diffusion tensors are usually reoriented; one unit on every frame
 axis, and not for densities), or a callable taking maps shaped `(..., n, n)`. A non-affine
@@ -932,8 +963,12 @@ literal; only where a target is found changes. Box methods do neither.
 - **Poles**: on a global grid whose longitudes come in antipodal pairs, latitude continues
   across a pole on the meridian half a turn away, for a pole sample (±90) or cell-centred rows
   (±89.5 on a 1° grid). Targets in the polar cap are interpolated rather than filled; beyond
-  ±90 they are outside. Declared tensor components never cross a pole (their east and north
-  reverse there); their polar-cap targets stay outside until pointwise bases exist.
+  ±90 they are outside. Declared tensor components cross a pole only in a constant Cartesian
+  basis (Earth-centred x, y, z), where they are continuous; in east/north or the chart basis
+  they reverse there, so their polar-cap targets stay outside. For a polar cap, change
+  east/north/up to the Earth-centred basis (`change_component_basis(ecef,
+  transform=GeodeticToCartesian(...))`), resample, and change back. A 2-D (surface) east/north
+  field has no square Earth-centred counterpart yet, so its polar caps stay outside.
 - **Cost**: such sources take the general per-point path rather than the separable lattice
   path, without cropping, and cubic interpolation reads 24 extra samples on each side of the
   seam.

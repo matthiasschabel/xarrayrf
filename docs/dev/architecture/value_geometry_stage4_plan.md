@@ -1,6 +1,6 @@
 # Value geometry stage 4: pointwise bases (`FrameField`)
 
-**Status:** Active (plan; review round 1 addressed)
+**Status:** Implemented (2026-10-12; plan reviewed by Codex gpt-6-sol)
 **Last updated:** 2026-10-12
 **Scope:** Core and binding: a `FrameField` protocol for component bases that vary by position,
 one built-in field (`EastNorthUp` on longitude/latitude charts), pointwise basis maps in
@@ -38,9 +38,9 @@ registration:
 ```python
 class FrameField(Protocol):
     @property
-    def base(self) -> ReferenceFrame: ...      # the chart the field is defined over
+    def base(self) -> ReferenceFrame: ...  # the chart the field is defined over
     @property
-    def axes(self) -> tuple[str, ...]: ...     # component labels
+    def axes(self) -> tuple[str, ...]: ...  # component labels
     @property
     def units(self) -> tuple[str | None, ...]: ...  # one per basis vector
     def matrix(self, at: npt.ArrayLike) -> npt.NDArray[np.float64]: ...

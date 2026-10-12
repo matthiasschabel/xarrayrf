@@ -6,20 +6,22 @@ from collections.abc import Sequence
 
 from ._array_coordinates import ArrayCoordinates
 from ._frame import ReferenceFrame
+from ._frame_field import FrameField
 from ._symmetric_packing import SymmetricPacking
 from ._tensor_type import TensorType
 from ._validation import check_names
 
-type ComponentBasis = ReferenceFrame | ArrayCoordinates
+type ComponentBasis = ReferenceFrame | ArrayCoordinates | FrameField
 
 
 class TensorComponentDeclaration:
     """A tensor type with the dimension and basis of each of its component indices.
 
     The components along ``component_dims[k]`` are the coordinates of slot ``k`` in
-    ``bases[k]``: along a :class:`~xarrayrf.ReferenceFrame`'s axes, or per unit of each
-    coordinate value of :class:`~xarrayrf.ArrayCoordinates`. The labels of each component
-    dimension are the basis axis names, in order.
+    ``bases[k]``: along a :class:`~xarrayrf.ReferenceFrame`'s axes, per unit of each
+    coordinate value of :class:`~xarrayrf.ArrayCoordinates`, or along a
+    :class:`~xarrayrf.FrameField`'s basis vectors, which vary by position (east/north/up). The
+    labels of each component dimension are the basis axis names, in order.
 
     A symmetric order-2 type may instead be packed: one component dimension holds both indices
     in the order and off-diagonal scale of a :class:`~xarrayrf.SymmetricPacking`, labelled
@@ -86,13 +88,14 @@ class TensorComponentDeclaration:
                 f"component_dims must name one dimension per component index; got {len(dims)} "
                 f"for a type of order {tensor_type.order}",
             )
-        if isinstance(bases, ReferenceFrame | ArrayCoordinates):
+        if isinstance(bases, ReferenceFrame | ArrayCoordinates | FrameField):
             entries: tuple[object, ...] = (bases,) * tensor_type.order
         elif isinstance(bases, Sequence) and not isinstance(bases, str):
             entries = tuple(bases)
         else:
             raise TypeError(
-                "bases must be a ReferenceFrame, ArrayCoordinates or a sequence of them, got "
+                "bases must be a ReferenceFrame, ArrayCoordinates, FrameField or a sequence of "
+                "them, got "
                 f"{type(bases).__name__}",
             )
         if len(entries) != tensor_type.order:
@@ -101,9 +104,9 @@ class TensorComponentDeclaration:
                 f"of order {tensor_type.order}",
             )
         for basis in entries:
-            if not isinstance(basis, ReferenceFrame | ArrayCoordinates):
+            if not isinstance(basis, ReferenceFrame | ArrayCoordinates | FrameField):
                 raise TypeError(
-                    f"each basis must be a ReferenceFrame or ArrayCoordinates, got "
+                    f"each basis must be a ReferenceFrame, ArrayCoordinates or FrameField, got "
                     f"{type(basis).__name__}",
                 )
         checked: tuple[ComponentBasis, ...] = entries  # type: ignore[assignment]

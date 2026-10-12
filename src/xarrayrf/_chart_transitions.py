@@ -15,6 +15,7 @@ along it.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import ClassVar, Final
 
 import numpy as np
@@ -35,6 +36,90 @@ def _check_real(value: object, *, field: str) -> float:
     if not math.isfinite(number):
         raise ValueError(f"{field} must be finite, got {number!r}")
     return number
+
+
+def latitude_trig(
+    latitude: npt.NDArray[np.float64], scale: float, pole: float
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """cos φ and sin φ of latitudes in a declared unit, exact at the poles.
+
+    Raises:
+        ValueError: If a latitude lies beyond a pole, naming the first such point.
+    """
+    outside = np.abs(latitude) > pole
+    if outside.any():
+        index = tuple(int(i) for i in np.argwhere(outside)[0])
+        raise ValueError(
+            f"latitude outside ±{pole:g} at point {index}; it is bounded by the poles",
+        )
+    # Exact poles land exactly on the axis rather than cos(π/2) ≈ 6e-17 beside it.
+    at_pole = np.abs(latitude) == pole
+    radians = latitude * scale
+    return (
+        np.where(at_pole, 0.0, np.cos(radians)),
+        np.where(at_pole, np.sign(latitude), np.sin(radians)),
+    )
+
+
+def local_frame(
+    longitude: npt.NDArray[np.float64],
+    cos_lat: npt.NDArray[np.float64],
+    sin_lat: npt.NDArray[np.float64],
+    height: npt.NDArray[np.float64] | float,
+    a: float,
+    b2: float,
+) -> tuple[npt.NDArray[np.float64], ...]:
+    """East, north and up unit vectors in Earth-centred axes, and the east and north scales.
+
+    ``longitude`` is in radians; ``a`` is the semi-major axis and ``b2`` is ``1 - e²`` (both 0
+    and 1 for the spherical chart, whose radius is then ``height``). The scales are the lengths
+    of the longitude and latitude coordinate vectors per radian: ``(N + h) cos φ`` and ``M + h``.
+    The directions are defined at the poles too (the limit along the meridian).
+    """
+    denominator = cos_lat**2 + b2 * sin_lat**2  # 1 - e² sin²φ without cancellation
+    n = a / np.sqrt(denominator)
+    m = a * b2 / denominator**1.5
+    cos_lon, sin_lon = np.cos(longitude), np.sin(longitude)
+    zero = np.zeros_like(cos_lon)
+    east = np.stack((-sin_lon, cos_lon, zero), axis=-1)
+    north = np.stack((-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat), axis=-1)
+    up = np.stack((cos_lat * cos_lon, cos_lat * sin_lon, sin_lat), axis=-1)
+    return east, north, up, (n + height) * cos_lat, m + height
+
+
+def check_figure_definition(
+    definition: Mapping[str, object],
+    semi_major_axis: float,
+    inverse_flattening: float,
+    length_unit: str | None,
+    *,
+    what: str,
+) -> None:
+    """Refuse a figure that disagrees with the reserved keys of a frame definition."""
+    if "figure" not in definition:
+        return
+    sphere = inverse_flattening == 0.0
+    expected: dict[str, object] = {
+        "figure": "sphere" if sphere else "ellipsoid",
+        "semi_major_axis": semi_major_axis,
+        "length_unit": length_unit,
+    }
+    if not sphere:
+        expected["inverse_flattening"] = inverse_flattening
+    for key in FIGURE_KEYS:
+        declared = definition.get(key)
+        if key not in expected:
+            if key in definition:
+                raise ValueError(
+                    f"the frame definition declares {key}={declared!r}, but a sphere has none; "
+                    f"the {what}'s figure disagrees with the frame",
+                )
+            continue
+        if key not in definition or declared != expected[key]:
+            raise ValueError(
+                f"the frame definition declares {key}={declared!r}, but the {what}'s figure has "
+                f"{expected[key]!r}; a {what} must use the frame's figure",
+            )
 
 
 class _AngularChart:
@@ -193,21 +278,10 @@ class _ChartTransition:
         """Validate angular-chart points; return λ, cos φ, sin φ (radians) and the height."""
         chart = self._chart
         longitude = values[..., chart.longitude] * chart.longitude_scale
-        latitude = values[..., chart.latitude]
-        height = values[..., chart.height]
-        pole = chart.pole
-        outside = np.abs(latitude) > pole
-        if outside.any():
-            raise ValueError(
-                f"latitude outside ±{pole:g} at point {self._first(outside)}; it is bounded by "
-                "the poles",
-            )
-        # Exact poles land exactly on the axis rather than cos(π/2) ≈ 6e-17 beside it.
-        at_pole = np.abs(latitude) == pole
-        radians = latitude * chart.latitude_scale
-        cos_lat = np.where(at_pole, 0.0, np.cos(radians))
-        sin_lat = np.where(at_pole, np.sign(latitude), np.sin(radians))
-        return longitude, cos_lat, sin_lat, height
+        cos_lat, sin_lat = latitude_trig(
+            values[..., chart.latitude], chart.latitude_scale, chart.pole
+        )
+        return longitude, cos_lat, sin_lat, values[..., chart.height]
 
     def _forward(self, values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         a, _, b2 = self._figure()
@@ -318,20 +392,15 @@ class _ChartTransition:
         a, _, b2 = self._figure()
         chart = self._chart
         longitude, cos_lat, sin_lat, height = self._angles(angular)
-        denominator = cos_lat**2 + b2 * sin_lat**2  # 1 - e² sin²φ without cancellation
-        n = a / np.sqrt(denominator)
-        m = a * b2 / denominator**1.5
-        cos_lon, sin_lon = np.cos(longitude), np.sin(longitude)
-        zero = np.zeros_like(cos_lon)
-        east = np.stack((-sin_lon, cos_lon, zero), axis=-1)
-        north = np.stack((-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat), axis=-1)
-        up = np.stack((cos_lat * cos_lon, cos_lat * sin_lon, sin_lat), axis=-1)
+        east, north, up, east_scale, north_scale = local_frame(
+            longitude, cos_lat, sin_lat, height, a, b2
+        )
         scales = np.empty((*longitude.shape, 3))
         directions = np.empty((*longitude.shape, 3, 3))
         for column, vector, scale in (
-            (chart.longitude, east, (n + height) * cos_lat * chart.longitude_scale),
-            (chart.latitude, north, (m + height) * chart.latitude_scale),
-            (chart.height, up, np.ones_like(cos_lon)),
+            (chart.longitude, east, east_scale * chart.longitude_scale),
+            (chart.latitude, north, north_scale * chart.latitude_scale),
+            (chart.height, up, np.ones_like(east_scale)),
         ):
             directions[..., :, column] = vector
             scales[..., column] = scale
@@ -474,31 +543,13 @@ class _Geodetic(_ChartTransition):
         self._check_definition()
 
     def _check_definition(self) -> None:
-        definition = self._source.definition
-        if "figure" not in definition:
-            return
-        sphere = self._inverse_flattening == 0.0
-        expected: dict[str, object] = {
-            "figure": "sphere" if sphere else "ellipsoid",
-            "semi_major_axis": self._semi_major_axis,
-            "length_unit": self._chart.length_unit,
-        }
-        if not sphere:
-            expected["inverse_flattening"] = self._inverse_flattening
-        for key in FIGURE_KEYS:
-            declared = definition.get(key)
-            if key not in expected:
-                if key in definition:
-                    raise ValueError(
-                        f"the frame definition declares {key}={declared!r}, but a sphere has "
-                        "none; the transition's figure disagrees with the frame",
-                    )
-                continue
-            if key not in definition or declared != expected[key]:
-                raise ValueError(
-                    f"the frame definition declares {key}={declared!r}, but the transition's "
-                    f"figure has {expected[key]!r}; a transition must use the frame's figure",
-                )
+        check_figure_definition(
+            self._source.definition,
+            self._semi_major_axis,
+            self._inverse_flattening,
+            self._chart.length_unit,
+            what="transition",
+        )
 
     @property
     def semi_major_axis(self) -> float:

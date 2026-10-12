@@ -1019,14 +1019,16 @@ class _ReferenceFrameAccessor:
         Maps between bases: this array's binding source and its frame (the binding matrix and
         its inverse), one frame in two coordinate systems (``coordinate_system_change``), or
         ``transform`` between two frames, taking precedence when its endpoints match. Each map
-        must be square and invertible. Only constant (affine) maps are supported. Labels
-        become the new basis's axis names.
+        must be square and invertible. A frame-field basis (such as
+        :class:`~xarrayrf.EastNorthUp`) or a ``transform`` without a constant matrix (a chart
+        transition) is evaluated at this array's sample points; such a transform must start
+        or end at this array's frame. Labels become the new basis's axis names.
 
         Args:
             basis: The target basis for every slot, or a mapping from component dimension to
                 basis.
-            transform: An affine transform between the frames on the path, from the slot's
-                side toward the target's.
+            transform: A transform between the frames on the path, from the slot's side toward
+                the target's: affine, or with a Jacobian (evaluated per sample).
             units: The new ``attrs["units"]``, required exactly when the basis units change.
             tensor_type: For an undeclared scalar only: its order-0 law (a density or a
                 pseudoscalar).

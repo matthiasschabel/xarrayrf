@@ -375,7 +375,7 @@ def test_decode_refuses_data_that_is_not_json(corrupt: Any) -> None:
 
 
 def _transitions() -> list[object]:
-    """One of each chart transition, spherical and geodetic, in both directions."""
+    """One of each chart transition, spherical and geodetic, in both directions, and a field."""
     spherical = xrf.ReferenceFrame.local(
         xrf.CoordinateSystem(
             ("lon", "lat", "r"),
@@ -400,7 +400,8 @@ def _transitions() -> list[object]:
         semi_major_axis=6378137.0,
         inverse_flattening=298.257223563,
     )
-    return [to_sphere, to_sphere.inverse(), to_ellipsoid, to_ellipsoid.inverse()]
+    field = xrf.EastNorthUp(geodetic, semi_major_axis=6378137.0, inverse_flattening=298.257223563)
+    return [to_sphere, to_sphere.inverse(), to_ellipsoid, to_ellipsoid.inverse(), field]
 
 
 def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:

@@ -21,11 +21,18 @@ from ._affine import equilibrated_inverse
 from ._array_coordinates import ArrayCoordinates
 from ._binding import BindingIndex
 from ._frame import ReferenceFrame
+from ._frame_field import EastNorthUp, FrameField
 from ._orientation import coordinate_system_change
 from ._symmetric_packing import SymmetricPacking
 from ._tensor_component_declaration import ComponentBasis, TensorComponentDeclaration
 from ._tensor_type import TensorType, transform_tensor_components
-from ._transform import SupportsAffine, SupportsPoints
+from ._transform import (
+    SupportsAffine,
+    SupportsInverse,
+    SupportsJacobian,
+    SupportsPoints,
+    check_transform,
+)
 
 DECLARATION_ATTR = "xarrayrf_tensor_components"
 
@@ -271,6 +278,13 @@ def declared_coordinates(
             raise ValueError(
                 f"component dimension {dim!r} has length {array.sizes[dim]}, but {held}"
             )
+        if isinstance(basis, FrameField) and (
+            binding is None or basis.base != binding.transform.target
+        ):
+            raise ValueError(
+                "a frame field basis must be over this array's frame, in its own coordinate "
+                "system: the field is evaluated at the array's sample points"
+            )
         if isinstance(basis, ArrayCoordinates) and (
             binding is None or basis != binding.transform.source
         ):
@@ -356,8 +370,11 @@ def _name(endpoint: object) -> str:
 def stale_array_bases(index: TensorComponentIndex, binding: BindingIndex | None) -> bool:
     """Whether a declared ArrayCoordinates basis no longer matches the binding source."""
     source = binding.transform.source if binding is not None else None
+    frame = binding.transform.target if binding is not None else None
     return any(
-        isinstance(basis, ArrayCoordinates) and basis != source for basis in index.declaration.bases
+        (isinstance(basis, ArrayCoordinates) and basis != source)
+        or (isinstance(basis, FrameField) and basis.base != frame)
+        for basis in index.declaration.bases
     )
 
 
@@ -431,6 +448,129 @@ def basis_map(
     return matrix
 
 
+def needs_points(
+    sources: Sequence[ComponentBasis],
+    targets: Sequence[ComponentBasis],
+    transform: SupportsPoints | None,
+) -> bool:
+    """Whether a change of basis varies by position: a frame field, or a non-affine transform."""
+    fields = any(isinstance(basis, FrameField) for basis in (*sources, *targets))
+    return fields or (transform is not None and not isinstance(transform, SupportsAffine))
+
+
+def _to_frame(
+    basis: ComponentBasis,
+    frame: ReferenceFrame,
+    points: npt.NDArray[np.float64],
+    binding_transform: SupportsPoints | None,
+    transform: SupportsPoints | None,
+) -> npt.NDArray[np.float64]:
+    """Components in ``basis`` to components in ``frame``'s coordinate basis, at ``points``."""
+    if isinstance(basis, FrameField):
+        _require_base(basis, frame)
+        return np.asarray(basis.matrix(points), dtype=np.float64)
+    if isinstance(basis, ArrayCoordinates):
+        bound, bound_frame = _binding_matrix(binding_transform, basis)
+        if bound_frame != frame:
+            raise ValueError("the binding's frame is not the frame components are mapped through")
+        return bound
+    if basis == frame:
+        return np.eye(len(frame.axes))
+    if transform is not None and transform.source == basis and transform.target == frame:
+        if isinstance(transform, SupportsAffine):
+            return np.asarray(transform.matrix, dtype=np.float64)
+        # Components move from the transform's source frame, so its Jacobian is evaluated at
+        # each sample's location there.
+        if not isinstance(transform, SupportsInverse):
+            raise ValueError(
+                "a pointwise transform toward the array's frame needs an inverse to locate the "
+                "samples in its source frame"
+            )
+        located = check_transform(transform.inverse()).transform_point(points)
+        return np.asarray(_jacobian(transform).jacobian(at=located), dtype=np.float64)
+    return _frame_map(basis, frame, None)
+
+
+def _from_frame(
+    basis: ComponentBasis,
+    frame: ReferenceFrame,
+    points: npt.NDArray[np.float64],
+    binding_transform: SupportsPoints | None,
+    transform: SupportsPoints | None,
+) -> npt.NDArray[np.float64]:
+    """Components in ``frame``'s coordinate basis to components in ``basis``, at ``points``."""
+    if isinstance(basis, FrameField):
+        _require_base(basis, frame)
+        return np.asarray(basis.inverse_matrix(points), dtype=np.float64)
+    if isinstance(basis, ArrayCoordinates):
+        bound, bound_frame = _binding_matrix(binding_transform, basis)
+        if bound_frame != frame or bound.shape[0] != bound.shape[1]:
+            raise ValueError("the binding's matrix does not map this frame square and invertibly")
+        return equilibrated_inverse(bound)
+    if basis == frame:
+        return np.eye(len(frame.axes))
+    if transform is not None and transform.source == frame and transform.target == basis:
+        if isinstance(transform, SupportsAffine):
+            return np.asarray(transform.matrix, dtype=np.float64)
+        return np.asarray(_jacobian(transform).jacobian(at=points), dtype=np.float64)
+    return _frame_map(frame, basis, None)
+
+
+def _jacobian(transform: SupportsPoints) -> SupportsJacobian:
+    if not isinstance(transform, SupportsJacobian):
+        raise ValueError("a pointwise change of basis needs the transform's Jacobian")
+    return transform
+
+
+def _require_base(field: FrameField, frame: ReferenceFrame) -> None:
+    if field.base != frame:
+        raise ValueError(
+            f"a frame field's base must be the array's frame {frame.identifier} in its own "
+            f"coordinate system {frame.axes}; this field is over {field.base.axes}"
+        )
+
+
+def point_basis_map(
+    source: ComponentBasis,
+    target: ComponentBasis,
+    *,
+    frame: ReferenceFrame,
+    points: npt.NDArray[np.float64],
+    binding_transform: SupportsPoints | None,
+    transform: SupportsPoints | None,
+) -> npt.NDArray[np.float64]:
+    """The map from ``source`` to ``target`` components at ``points`` of ``frame``.
+
+    Assembled through ``frame``'s coordinate basis: to it from ``source``, then from it to
+    ``target``, each piece constant or evaluated at the points (``(*batch, n, n)``). A
+    pointwise ``transform`` must have ``frame`` as one endpoint, since only its points are
+    known. East/north/up to (or from) its own Earth-centred chart maps by the field's
+    directions directly, which exist at the poles where the chart basis does not.
+    """
+    if source == target:
+        return np.eye(len(source.axes))
+    if isinstance(source, EastNorthUp) and source.matches(transform):
+        assert transform is not None
+        if transform.target == target and source.base == frame:
+            return source.directions(points)
+    if isinstance(target, EastNorthUp) and target.matches(transform):
+        assert transform is not None
+        if transform.source == source and target.base == frame:
+            return np.swapaxes(target.directions(points), -1, -2)
+    if (
+        transform is not None
+        and not isinstance(transform, SupportsAffine)
+        and frame not in (transform.source, transform.target)
+    ):
+        raise ValueError(
+            "a pointwise transform must start or end at the array's frame, whose points are "
+            "the only ones known"
+        )
+    inward = _to_frame(source, frame, points, binding_transform, transform)
+    outward = _from_frame(target, frame, points, binding_transform, transform)
+    return np.asarray(np.matmul(outward, inward), dtype=np.float64)
+
+
 def change_basis(
     array: xr.DataArray,
     index: TensorComponentIndex,
@@ -448,15 +588,22 @@ def change_basis(
         tensor_type, declaration.component_dims, tuple(targets), packing=packing
     )
     binding_transform = binding.transform if binding is not None else None
-    maps = [
-        basis_map(source, target, binding_transform=binding_transform, transform=transform)
-        for source, target in zip(declaration.bases, targets, strict=True)
-    ]
+    dims = list(declaration.component_dims)
+    if needs_points(declaration.bases, targets, transform):
+        maps, geometry_dims = _sample_maps(
+            array, declaration.bases, targets, binding=binding, transform=transform
+        )
+        core = [*geometry_dims, *dims]
+    else:
+        maps = [
+            basis_map(source, target, binding_transform=binding_transform, transform=transform)
+            for source, target in zip(declaration.bases, targets, strict=True)
+        ]
+        core = dims
     check_common_map(tensor_type, maps)
     _check_units(declaration.bases, targets, units)
-    dims = list(declaration.component_dims)
     result = _apply_over(
-        array, lambda values: transform_declared_components(values, declaration, maps), dims
+        array, lambda values: transform_declared_components(values, declaration, maps), core
     )
     result = result.drop_indexes(list(index.axes)).drop_vars(list(index.axes))
     labelled = result.assign_coords(
@@ -475,10 +622,100 @@ def change_basis(
     return typed
 
 
+def _sample_maps(
+    array: xr.DataArray,
+    sources: Sequence[ComponentBasis],
+    targets: Sequence[ComponentBasis],
+    *,
+    binding: BindingIndex | None,
+    transform: SupportsPoints | None,
+) -> tuple[list[npt.NDArray[np.float64]], tuple[str, ...]]:
+    """Per-slot maps at every sample of a framed array, batched over its geometry dims."""
+    if binding is None:
+        raise ValueError(
+            "a change of basis that varies by position needs the samples' points; frame the "
+            "array first"
+        )
+    frame = binding.transform.target
+    assert isinstance(frame, ReferenceFrame)  # a binding maps array coordinates to a frame
+    geometry = array.rf.geometry
+    points = np.asarray(geometry.points(axis_dim="__axis__").values, dtype=np.float64)
+    maps = []
+    for source, target in zip(sources, targets, strict=True):
+
+        def evaluate(
+            at: npt.NDArray[np.float64],
+            source: ComponentBasis = source,
+            target: ComponentBasis = target,
+        ) -> npt.NDArray[np.float64]:
+            matrix = point_basis_map(
+                source,
+                target,
+                frame=frame,
+                points=at,
+                binding_transform=binding.transform,
+                transform=transform,
+            )
+            if matrix.shape[-1] == matrix.shape[-2]:
+                # A passive change of basis is a bijection at every sample; a user field could
+                # return a finite but singular matrix.
+                equilibrated_inverse(matrix)
+            return matrix
+
+        try:
+            matrix = evaluate(points)
+        except ValueError as error:
+            sample = _first_failing_sample(evaluate, points, geometry.dims)
+            if sample is None:
+                raise
+            raise ValueError(f"at sample {sample}: {error}") from error
+        if matrix.ndim == 2:
+            matrix = np.broadcast_to(matrix, (*points.shape[:-1], *matrix.shape))
+        if matrix.shape[-1] != matrix.shape[-2]:
+            raise ValueError(
+                f"a change of basis must be square; the map from {source.axes} to {target.axes} "
+                f"has shape {matrix.shape[-2:]}"
+            )
+        maps.append(matrix)
+    return maps, tuple(geometry.dims)
+
+
+def _first_failing_sample(
+    evaluate: Any, points: npt.NDArray[np.float64], dims: Sequence[str]
+) -> dict[str, int] | None:
+    """The first sample whose evaluation raises, by bisection over the flattened samples."""
+    flat = points.reshape(-1, points.shape[-1])
+
+    def fails(stop: int) -> bool:
+        try:
+            evaluate(flat[:stop])
+        except ValueError:
+            return True
+        return False
+
+    if not fails(len(flat)):
+        return None
+    low, high = 0, len(flat)  # the prefix of length high fails, of length low does not
+    while high - low > 1:
+        middle = (low + high) // 2
+        if fails(middle):
+            high = middle
+        else:
+            low = middle
+    position = np.unravel_index(high - 1, points.shape[:-1])
+    return {str(dim): int(index) for dim, index in zip(dims, position, strict=True)}
+
+
 def check_common_map(tensor_type: TensorType, maps: Sequence[npt.NDArray[np.float64]]) -> None:
     """Refuse per-slot maps that differ for a type whose determinant factor needs one map."""
     common = all(np.array_equal(matrix, maps[0]) for matrix in maps)
-    if not common and (tensor_type.reflection_parity == "odd" or tensor_type.determinant_exponent):
+    if not common:
+        refuse_separate_maps(tensor_type)
+
+
+def refuse_separate_maps(tensor_type: TensorType) -> None:
+    """Refuse a pseudotensor or density whose slots would change by different maps."""
+    if tensor_type.reflection_parity == "odd" or tensor_type.determinant_exponent:
         raise ValueError(
             "a pseudotensor or density needs one map for det J, but its slots change basis by "
             "different maps; give every slot the same basis"

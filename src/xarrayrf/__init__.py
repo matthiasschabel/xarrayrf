@@ -53,6 +53,7 @@ from ._encoding import (
     encode,
 )
 from ._frame import LOCAL_NAMESPACE, ReferenceFrame, Role
+from ._frame_field import EastNorthUp, FrameField
 from ._grid import Grid
 from ._lattice import Lattice
 from ._orientation import coordinate_system_change
@@ -118,8 +119,10 @@ __all__ = [
     "CoordinateSystem",
     "DecoderResultError",
     "DirectionVocabulary",
+    "EastNorthUp",
     "EncodingError",
     "Endpoint",
+    "FrameField",
     "GeodeticToCartesian",
     "Grid",
     "Lattice",

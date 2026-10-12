@@ -17,6 +17,8 @@ from ._component_resampling import (
     component_request,
     resample_components,
 )
+from ._coordinate_system import CARTESIAN
+from ._frame import ReferenceFrame
 from ._geometry import Geometry
 from ._grid import Grid
 from ._resampling import BLOCK_POINTS, Support, check_options, execute
@@ -165,7 +167,7 @@ def resample(
         block_points: Target samples located per block.
         output_component_basis: For declared components: the result's basis, the target frame
             or an equivalent frame (``rf.resample_to`` also accepts the target's
-            ``ArrayCoordinates``).
+            ``ArrayCoordinates`` or a frame field over the target frame).
         component_reorientation: For declared components: ``"jacobian"``,
             ``"polar_orthogonal_factor"`` or a callable, as above.
         units: For declared components: the result's ``attrs["units"]``, required exactly when
@@ -297,8 +299,14 @@ def _resample_with_intervals(
         min_coverage=min_coverage,
         block_points=block_points,
         adoption_suffices=adoption_suffices,
-        # Declared components flip across a pole in a basis that varies by position.
-        pole_halos=components is None,
+        # Components in a basis that varies by position (east/north, the chart basis) reverse
+        # across a pole; in a constant Cartesian basis they are continuous there.
+        pole_halos=components is None
+        or all(
+            isinstance(basis, ReferenceFrame)
+            and basis.coordinate_system.representation == CARTESIAN
+            for basis in components.index.declaration.bases
+        ),
     )
     source_values = source_array
     if plan.window is not None:

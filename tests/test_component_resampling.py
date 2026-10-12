@@ -534,7 +534,11 @@ def test_undeclared_sources_are_unchanged() -> None:
         ({"component_reorientation": None}, ValueError, "needs component_reorientation"),
         ({"component_reorientation": "rotation"}, ValueError, "must be one of"),
         ({"component_reorientation": 3}, TypeError, "or a callable"),
-        ({"output_component_basis": "fixed"}, TypeError, "ReferenceFrame or ArrayCoordinates"),
+        (
+            {"output_component_basis": "fixed"},
+            TypeError,
+            "ReferenceFrame, ArrayCoordinates or FrameField",
+        ),
         ({"output_component_basis": MOVING}, ValueError, "output_component_basis must be"),
         ({"fill_value": -1.0}, ValueError, "valid-looking tensor"),
         ({"units": "m/s"}, ValueError, "only accepted when the basis units change"),
