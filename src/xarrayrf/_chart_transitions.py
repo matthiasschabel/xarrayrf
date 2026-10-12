@@ -165,14 +165,16 @@ class _ChartTransition:
 
     # The figure: a sphere of radius a when e² = 0; the spherical chart is the degenerate
     # a = 0, e² = 0, for which the geodetic formulas reduce to radius = height.
-    def _figure(self) -> tuple[float, float]:
+    # 1 - e² is carried as (1 - f)², not computed by subtraction: for a flattening near 1, e²
+    # rounds to 1 and 1 - e² would cancel to 0.
+    def _figure(self) -> tuple[float, float, float]:
         f = 0.0 if self._inverse_flattening == 0.0 else 1.0 / self._inverse_flattening
-        return self._semi_major_axis, f * (2.0 - f)
+        return self._semi_major_axis, f * (2.0 - f), (1.0 - f) ** 2
 
     def _evolute_radius(self) -> float:
         """Distance from the centre within which the inverse is not unique (e² a² / b)."""
-        a, e2 = self._figure()
-        return 0.0 if e2 == 0.0 else e2 * a / math.sqrt(1.0 - e2)
+        a, e2, b2 = self._figure()
+        return 0.0 if e2 == 0.0 else e2 * a / math.sqrt(b2)
 
     def _points(self, points: npt.ArrayLike, *, field: str) -> npt.NDArray[np.float64]:
         values = real_float_array(points, field=field)
@@ -208,12 +210,13 @@ class _ChartTransition:
         return longitude, cos_lat, sin_lat, height
 
     def _forward(self, values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        a, e2 = self._figure()
+        a, _, b2 = self._figure()
         longitude, cos_lat, sin_lat, height = self._angles(values)
-        n = a / np.sqrt(1.0 - e2 * sin_lat**2)
+        # 1 - e² sin²φ, written without cancellation (see _figure).
+        n = a / np.sqrt(cos_lat**2 + b2 * sin_lat**2)
         # The forward domain is the inverse's image: the point must stay on its surface foot's
         # side of the equator and the axis, and outside the evolute, or another foot is nearer.
-        shallow = height > -n * (1.0 - e2)
+        shallow = height > -n * b2
         if not shallow.all():
             raise ValueError(
                 f"{self._RADIAL} at point {self._first(~shallow)} reaches the far side of the "
@@ -224,7 +227,7 @@ class _ChartTransition:
             (
                 across * np.cos(longitude),
                 across * np.sin(longitude),
-                (n * (1.0 - e2) + height) * sin_lat,
+                (n * b2 + height) * sin_lat,
             ),
             axis=-1,
         )
@@ -237,7 +240,7 @@ class _ChartTransition:
         return xyz
 
     def _backward(self, values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        a, e2 = self._figure()
+        a, e2, b2 = self._figure()
         x, y, z = values[..., 0], values[..., 1], values[..., 2]
         radius = np.sqrt(x * x + y * y + z * z)
         bound = self._evolute_radius()
@@ -256,7 +259,7 @@ class _ChartTransition:
             # Vermeille, "Direct transformation from geocentric coordinates to geodetic
             # coordinates", J. Geodesy 76 (2002): closed form, exact outside the evolute.
             p = rho**2 / a**2
-            q = (1.0 - e2) * z**2 / a**2
+            q = b2 * z**2 / a**2
             r = (p + q - e2**2) / 6.0
             s = e2**2 * p * q / (4.0 * r**3)
             t = np.cbrt(1.0 + s + np.sqrt(s * (2.0 + s)))
@@ -266,7 +269,7 @@ class _ChartTransition:
             k = np.sqrt(u + v + w**2) - w
             d = k * rho / (k + e2)
             latitude = 2.0 * np.arctan2(z, d + np.hypot(d, z))
-            height = (k + e2 - 1.0) / k * np.hypot(d, z)
+            height = (k - b2) / k * np.hypot(d, z)
         chart = self._chart
         start, period = self._longitude_start, chart.period
         longitude = np.arctan2(y, x) / chart.longitude_scale
@@ -297,7 +300,9 @@ class _ChartTransition:
                 sphere). The error names the first offending point index.
         """
         values = self._points(points, field="points")
-        mapped = self._forward(values) if self._TO_CARTESIAN else self._backward(values)
+        # Overflow is reported below as an error naming the problem, not as a warning.
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            mapped = self._forward(values) if self._TO_CARTESIAN else self._backward(values)
         if not np.isfinite(mapped).all():
             raise ValueError("chart transition produced non-finite coordinates")
         return mapped
@@ -310,12 +315,12 @@ class _ChartTransition:
         Columns of the forward Jacobian are ``directions[..., :, j] * scales[..., j]`` in chart
         order, since the λ, φ and h directions are orthogonal.
         """
-        a, e2 = self._figure()
+        a, _, b2 = self._figure()
         chart = self._chart
         longitude, cos_lat, sin_lat, height = self._angles(angular)
-        denominator = 1.0 - e2 * sin_lat**2
+        denominator = cos_lat**2 + b2 * sin_lat**2  # 1 - e² sin²φ without cancellation
         n = a / np.sqrt(denominator)
-        m = a * (1.0 - e2) / denominator**1.5
+        m = a * b2 / denominator**1.5
         cos_lon, sin_lon = np.cos(longitude), np.sin(longitude)
         zero = np.zeros_like(cos_lon)
         east = np.stack((-sin_lon, cos_lon, zero), axis=-1)
@@ -346,14 +351,26 @@ class _ChartTransition:
         Raises:
             TypeError: If ``at`` is missing, not real, or a masked array.
             ValueError: If ``at`` has the wrong shape, is not finite or is outside the domain,
-                or, for a Cartesian source, lies on the polar axis. The error names the first
-                offending point index.
+                or, for a Cartesian source, lies on the polar axis, or the Jacobian overflows
+                float64 (at a point within about 1e-306 of the polar axis, say). The error names the
+                first offending point index.
         """
         if at is None:
             raise TypeError("a chart transition's Jacobian varies by point; pass at=")
         values = self._points(at, field="at")
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            jacobian = self._jacobian(values)
+        finite = np.isfinite(jacobian).all(axis=(-2, -1))
+        if not finite.all():
+            raise ValueError(
+                f"the Jacobian at point {self._first(~finite)} is not finite in float64, "
+                "so it cannot be represented there",
+            )
+        return jacobian
+
+    def _jacobian(self, values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         if self._TO_CARTESIAN:
-            self._forward(values)  # domain check only
+            self.transform_point(values)  # domain and finiteness checks only
             directions, scales = self._angular_jacobian(values)
             return directions * scales[..., None, :]
         on_axis = (values[..., 0] == 0.0) & (values[..., 1] == 0.0)
@@ -362,7 +379,7 @@ class _ChartTransition:
                 f"point {self._first(on_axis)} is on the polar axis, where longitude has no "
                 "derivative, so the Jacobian does not exist there",
             )
-        directions, scales = self._angular_jacobian(self._backward(values))
+        directions, scales = self._angular_jacobian(self.transform_point(values))
         # (N + h) cos φ is the distance from the axis. Near the axis the computed latitude can
         # round to exactly ±90°, so take that distance from the Cartesian point instead.
         rho = np.hypot(values[..., 0], values[..., 1])
@@ -509,7 +526,7 @@ class SphericalToCartesian(_Spherical):
     Latitude is geocentric and the radius is the distance from the centre, as for the
     celestial sphere with a distance or a spherical-polar physics chart. The forward domain
     excludes the centre, which has no latitude. ``longitude_start`` only affects
-    :meth:`inverse`, so that the round trip is exact.
+    :meth:`inverse`, so that ``t.inverse().inverse() == t``.
     """
 
     __slots__ = ()
@@ -548,8 +565,9 @@ class GeodeticToCartesian(_Geodetic):
     declares a figure (``figure``, ``semi_major_axis``, ``inverse_flattening``,
     ``length_unit``), it must agree. Heights may be negative down to the point where the
     normal reaches the equatorial plane or the polar axis; the image must also lie outside
-    the evolute bound ``e² a² / b`` (about 42.8 km for WGS 84), so every accepted point
-    round-trips through :meth:`inverse`.
+    the evolute bound ``e² a² / b`` (about 42.8 km for WGS 84), so every accepted point maps
+    back through :meth:`inverse` to itself, with longitude modulo the period and
+    ``longitude_start`` on the polar axis.
     """
 
     __slots__ = ()

@@ -383,9 +383,12 @@ lon_lat_h = to_ecef.inverse().transform_point(xyz)
   the transition must match it exactly.
 - Longitudes produced by the Cartesian-to-angular direction lie in
   `[longitude_start, longitude_start + period)`; the default start is −180° (−π). On the polar
-  axis the result is `longitude_start`. Both directions carry `longitude_start`, so the inverse
-  round-trips exactly.
-- Domain: the forward domain is the inverse's image, so every accepted point round-trips.
+  axis the result is `longitude_start`. Both directions carry `longitude_start`, so
+  `t.inverse().inverse() == t`.
+- Domain: the forward domain is the inverse's image, so every accepted point maps back to the
+  same point: the same latitude and radial coordinate, and the same longitude modulo the period
+  (it comes back in the inverse's interval), except on the polar axis, where it comes back as
+  `longitude_start`.
   Latitude must lie within ±90°; the radius must be positive; a geodetic height may be negative
   down to where the normal reaches the equatorial plane or the axis. Points at or within the
   evolute bound `e² a² / b` of the centre (about 42.8 km for WGS 84; the centre itself for a
@@ -394,7 +397,9 @@ lon_lat_h = to_ecef.inverse().transform_point(xyz)
   Jacobian there is finite and singular; the inverse Jacobian does not exist on the axis and
   raises. Scalar resampling across a pole works; resampling declared tensor components through
   a polar target raises the error that names the target sample.
-- The geodetic inverse is Vermeille's closed form; it agrees with PROJ to about 1e−9 m.
+- The geodetic inverse is Vermeille's closed form. Against PROJ 9.8 (`pyproj`), the forward map
+  agrees exactly, and the inverse recovers PROJ's forward inputs to about 1e−9 m; PROJ's own
+  geocentric inverse is an approximation that differs by up to 8 mm at 1000 km altitude.
 - `coordinate_system_change` never derives a transition. Between two angular systems with the
   same representation and roles it derives the permutation that matches axes by role.
 

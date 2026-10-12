@@ -13,7 +13,8 @@
 - Chart transitions between an angular chart and a Cartesian chart of one frame:
   `SphericalToCartesian`, `CartesianToSpherical`, `GeodeticToCartesian` and
   `CartesianToGeodetic`, with pointwise Jacobians, exact inverses and persistence. The
-  geodetic inverse agrees with PROJ to about 1e-9 m. Pass one to `resample(..., transform=)`
+  geodetic forward map agrees with PROJ exactly, and the inverse recovers PROJ's forward inputs
+  to about 1e-9 m. Pass one to `resample(..., transform=)`
   to resample between the charts.
 - `coordinate_system_change` matches the axes of two angular systems by role, so reordering
   longitude and latitude is derivable; it refuses systems that differ in representation or

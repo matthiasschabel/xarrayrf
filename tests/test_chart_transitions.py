@@ -7,7 +7,7 @@ import json
 import math
 import pickle
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -226,9 +226,8 @@ def test_the_forward_domain_is_the_inverse_image(
     e2 = 0.0 if inverse_flattening == 0.0 else E2
     sine = math.sin(math.radians(latitude))
     limit = -A / math.sqrt(1 - e2 * sine**2) * (1 - e2)
+    # Exactly at the limit, rounding decides; a metre below it is on the far side.
     with pytest.raises(ValueError, match=r"point \(0,\) reaches the far side of the centre"):
-        transition.transform_point([[10.0, latitude, limit]])
-    with pytest.raises(ValueError, match="far side"):
         transition.transform_point([[10.0, latitude, limit - 1.0]])
     deepest = np.array([[10.0, latitude, limit + 1.0]])
     if e2:
@@ -488,3 +487,155 @@ def test_resampling_a_geodetic_grid_onto_earth_centred_points() -> None:
     assert isinstance(result, xr.DataArray)
     # Multilinear interpolation of a linear field is exact up to float64 roundoff of degrees.
     assert_allclose(result.transpose("x", "y", "z").values, expected, atol=1e-9, rtol=0)
+
+
+def test_the_inverse_is_compared_with_projs_own_inverse() -> None:
+    """PROJ's geocentric inverse is an approximation that drifts at altitude.
+
+    Measured against PROJ 9.8: 7.5 mm in height and 3.4e-8 degrees in latitude at 1000 km,
+    where this inverse recovers PROJ's forward inputs to about 1e-9 m. The tolerances bound
+    PROJ's error, not this implementation's.
+    """
+    pyproj = pytest.importorskip("pyproj")
+    transition = wgs84()
+    xyz = transition.transform_point(oracle_points())
+    expected = np.stack(
+        pyproj.Transformer.from_crs(4978, 4979, always_xy=True).transform(*xyz.T), axis=-1
+    )
+    ours = transition.inverse().transform_point(xyz)
+    # On the polar axis PROJ answers longitude 0 and this inverse its longitude_start.
+    off_axis = np.hypot(xyz[:, 0], xyz[:, 1]) > 0.0
+    assert_allclose(ours[off_axis, 0], expected[off_axis, 0], atol=1e-7, rtol=0)
+    assert_allclose(ours[:, 1], expected[:, 1], atol=1e-7, rtol=0)
+    assert_allclose(ours[:, 2], expected[:, 2], atol=0.02, rtol=0)
+
+
+def test_jacobians_that_overflow_float64_raise() -> None:
+    frame, cartesian = charts(spherical(("deg", "deg", "m")))
+    inverse = xrf.CartesianToSpherical(cartesian, frame)
+    with pytest.raises(ValueError, match=r"Jacobian at point \(1,\) is not finite"):
+        inverse.jacobian(at=[[1.0, 1.0, 1.0], [1e-307, 0.0, 1.0]])
+
+
+def test_a_flattening_near_one_keeps_one_minus_e_squared() -> None:
+    """e² rounds to 1 here; 1 - e² is carried as (1 - f)² instead of cancelling to zero."""
+    frame, cartesian = charts(geodetic())
+    transition = xrf.GeodeticToCartesian(
+        frame, cartesian, semi_major_axis=1.0, inverse_flattening=1.000000001
+    )
+    # The equator, and the pole, where 1 - e² sin²φ would also cancel if subtracted.
+    point = np.array([[0.0, 0.0, 1e12], [-180.0, 90.0, 1e12]])
+    assert_allclose(
+        transition.inverse().transform_point(transition.transform_point(point)),
+        point,
+        rtol=1e-12,
+    )
+    assert np.all(np.isfinite(transition.jacobian(at=point)))
+
+
+def test_points_need_three_finite_coordinates() -> None:
+    with pytest.raises(ValueError, match="trailing axis of length 3"):
+        wgs84().transform_point([[0.0, 0.0]])
+    with pytest.raises(ValueError, match="trailing axis of length 3"):
+        wgs84().jacobian(at=5.0)
+    assert wgs84().transform_point(np.empty((0, 3))).shape == (0, 3)
+    assert wgs84().jacobian(at=np.empty((2, 0, 3))).shape == (2, 0, 3, 3)
+
+
+def test_an_overflowing_cartesian_point_raises() -> None:
+    with pytest.raises(ValueError, match="non-finite coordinates"):
+        wgs84().inverse().transform_point([[1e308, 1e308, 0.0]])
+
+
+def test_mixed_degree_and_radian_angles_round_trip() -> None:
+    transition = xrf.GeodeticToCartesian(*charts(geodetic(units=("deg", "rad", "m"))), **WGS84)
+    points = np.array([[[10.0, 0.5, 100.0], [-120.0, -1.2, -50.0]]])
+    xyz = transition.transform_point(points)
+    assert xyz.shape == (1, 2, 3)
+    assert_allclose(transition.inverse().transform_point(xyz), points, atol=1e-6, rtol=0)
+    expected = xrf.GeodeticToCartesian(*charts(geodetic()), **WGS84).transform_point(
+        [[10.0, math.degrees(0.5), 100.0], [-120.0, math.degrees(-1.2), -50.0]]
+    )
+    assert_allclose(xyz[0], expected, atol=1e-6, rtol=0)
+
+
+def test_a_chart_without_its_radial_axis_is_refused() -> None:
+    system = xrf.CoordinateSystem(
+        ("lon", "lat", "t"),
+        ("deg", "deg", "s"),
+        representation="spherical",
+        axis_roles=("longitude", "latitude", None),
+    )
+    with pytest.raises(ValueError, match="source chart needs a radius axis"):
+        xrf.SphericalToCartesian(*charts(system))
+
+
+def test_a_transition_record_with_array_endpoints_is_malformed() -> None:
+    data = xrf.encode(wgs84())
+    data["value"]["source"] = xrf.encode(xrf.ArrayCoordinates(("i", "j", "k"), ("1",) * 3))["value"]
+    with pytest.raises(xrf.MalformedDataError, match="endpoints must be reference frames"):
+        xrf.decode(data)
+
+
+def polar_source(components: bool) -> xr.DataArray:
+    """A geodetic grid whose last latitude row is the north pole."""
+    frame, _ = charts(geodetic())
+    lon, lat, h = np.arange(0.0, 360.0, 30.0), np.array([80.0, 85.0, 90.0]), np.array([0.0, 1.0])
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(("lon", "lat", "h"), ("deg", "deg", "m")),
+        target=frame,
+        matrix=np.eye(3),
+        translation=(0.0, 0.0, 0.0),
+    )
+    grid = xrf.Grid(transform, {"lon": ("lon", lon), "lat": ("lat", lat), "h": ("h", h)})
+    shape = (lon.size, lat.size, h.size)
+    if not components:
+        return frame_array(np.full(shape, 7.0), grid)
+    plain = xr.DataArray(
+        np.ones((*shape, 3)),
+        dims=("lon", "lat", "h", "component"),
+        coords={"component": list(frame.axes)},
+    )
+    array = cast(xr.DataArray, plain.rf.frame(grid))
+    declared: xr.DataArray = array.rf.declare_tensor_components(
+        xrf.VECTOR, component_dims=("component",), bases=frame
+    )
+    return declared
+
+
+def polar_target() -> xrf.Grid:
+    """One Earth-centred point on the polar axis, half a metre above the pole."""
+    _, cartesian = charts(geodetic())
+    b = A * (1 - 1 / WGS84["inverse_flattening"])
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(("x", "y", "z"), ("m", "m", "m")),
+        target=cartesian,
+        matrix=np.eye(3),
+        translation=(0.0, 0.0, 0.0),
+    )
+    return xrf.Grid(transform, {"x": ("x", [0.0]), "y": ("y", [0.0]), "z": ("z", [b + 0.5])})
+
+
+def test_scalar_resampling_reaches_the_pole_through_a_transition() -> None:
+    frame, cartesian = charts(geodetic())
+    result = xrf.resample(
+        polar_source(components=False).rf.geometry,
+        polar_target(),
+        # The axis inverts to longitude_start, which must lie among the 0…330 labels: the
+        # seam does not wrap yet.
+        transform=xrf.CartesianToGeodetic(cartesian, frame, **WGS84, longitude_start=0.0),
+    )
+    assert_allclose(result.values.ravel(), [7.0], atol=1e-12, rtol=0)
+
+
+def test_component_resampling_through_the_pole_names_the_target_sample() -> None:
+    frame, cartesian = charts(geodetic())
+    with pytest.raises(ValueError, match=r"undefined at target sample \{'x': 0, 'y': 0, 'z': 0\}"):
+        xrf.resample(
+            polar_source(components=True).rf.geometry,
+            polar_target(),
+            transform=xrf.CartesianToGeodetic(cartesian, frame, **WGS84, longitude_start=0.0),
+            output_component_basis=cartesian,
+            component_reorientation="jacobian",
+            units="m",
+        )

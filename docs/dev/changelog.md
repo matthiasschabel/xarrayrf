@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026-10-12] — Independent QA of angular charts steps 1 and 2
+
+- **Problem**: Cross-model QA (Codex gpt-6-astra, after gpt-6-sol's reviews) of the angular
+  declarations and chart transitions (`58ddfac..0464ef5`).
+- **Resolution**: Four findings, all confirmed by reproduction and fixed. (B1) Jacobians could
+  return `inf` instead of raising (spherical inverse at `[1e-307, 0, 1]`); `jacobian` now raises
+  a `ValueError` naming the first non-finite point, and `transform_point` reports overflow as
+  an error rather than a warning. (B2) An accepted flattening near 1 divided by zero, then
+  cancelled at the poles: `1 - e²` is carried as `(1 - f)²` and `1 - e² sin²φ` as
+  `cos²φ + (1 - f)² sin²φ`, so no subtraction of e² remains. (N1) Tests added: real polar
+  scalar and component resampling through `CartesianToGeodetic`, shapes, empty batches,
+  overflow, mixed degree/radian charts, a chart missing its radial role, a malformed record.
+  (N2) Docs overstated round trips (longitude returns modulo the period, and as
+  `longitude_start` on the axis) and the PROJ comparison: PROJ's own geocentric inverse is off
+  by up to 7.5 mm at 1000 km, while this inverse recovers PROJ's forward inputs to ~1e-9 m.
+- **Verification**: stock 2,394 passed plus 47 xfailed; ruff and mypy pass. Two convergence
+  passes; accepted.
+- **Files affected**: `src/xarrayrf/_chart_transitions.py`, `tests/test_chart_transitions.py`,
+  `docs/core_interface.md`, `CHANGELOG.md`.
+- **Reviewed by**: Codex (gpt-6-astra, high); Claude Opus 5.5 (`claude-opus-5-5`) applying
+  QAEngineer.
+
 ## [2026-10-12] — Angular charts stage 2: chart transitions
 
 - **Problem**: A lon/lat/height chart and an Earth-centred Cartesian chart of one frame had no
