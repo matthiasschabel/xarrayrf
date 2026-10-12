@@ -31,6 +31,9 @@ reasons. The stable documents are [the design](../design.md),
 - [nonlinear_geometry_plan.md](architecture/nonlinear_geometry_plan.md): staging for nonlinear
   geometry and the structural rules (chart identity, metrics, angular axes, tensors) every stage
   respects.
+- [value_geometry_design.md](architecture/value_geometry_design.md): vectors, tensors,
+  pseudovectors and densities: one transform law, the component index carrying it, passive
+  basis change, resampling of component variables, staged.
 - [field_transform_design.md](architecture/field_transform_design.md): stage 1, displacement,
   position and B-spline transforms on `Grid`, declared inverse pairs, a Jacobian-determinant
   diagnostic, importers, and the deformation models to support after it.
@@ -68,6 +71,9 @@ reasons. The stable documents are [the design](../design.md),
 
 ## napari-3783/
 
+- [compositional_model_comparison_notes.md](napari-3783/compositional_model_comparison_notes.md):
+  the napari compositional model compared with xarrayrf, the decisions taken (transform edge
+  semantics, value geometry, axis roles) and the view-bridge spike.
 - [transformations_wishlist_review.md](napari-3783/transformations_wishlist_review.md): the
   model-side coverage of napari/napari#3783's transform wish list and thread requests.
 

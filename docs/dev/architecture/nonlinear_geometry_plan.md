@@ -120,6 +120,11 @@ defined order of conversion and interpolation, because with varying bases conver
 interpolating differs from converting after. Neither a metric nor a tetrad specifies parallel
 transport.
 
+Designed in [the value geometry design](value_geometry_design.md) (2026-10-11): one law over
+per-slot variance, parity and a determinant power; a component index as carrier; resampling
+interpolates in the source basis and then converts. `FrameField` remains for pointwise bases
+after stage 2 below.
+
 ### Stage 2: angular charts (outline)
 
 - New `representation` values for longitude/latitude charts (spherical and geodetic) and the

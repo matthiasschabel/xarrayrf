@@ -172,6 +172,10 @@ but cannot verify that the caller assigned the right numbers to those declared c
 
 ### Quantity rules
 
+Superseded by [the value geometry design](value_geometry_design.md), which generalizes these
+rules into one law and specifies the component carrier; the table remains as the shortcuts it
+defines.
+
 Specified in the core interface as plain callables `rule(transform, values, *, at)` over a
 trailing component axis in source-axis order, acting independently over leading axes so they
 apply chunk by chunk:
@@ -297,7 +301,8 @@ placement in R and t and the meaning of one index step in the spacing.
   `polar_rotation`): no implementation exists in `src/xarrayrf/` as of this date; callers apply
   `jacobian()` themselves (as the relativity example does). The acceptance oracles are in the
   [prior-art study](prior_art_coverage_study.md).
-- Component bindings: carrier room reserved, behaviour unspecified.
+- Component bindings: specified as the component index in
+  [the value geometry design](value_geometry_design.md).
 - Projective and field-backed transforms, including DICOM Deformable Spatial Registration.
 - Finite-difference Jacobians behind an explicit request.
 - Approximate and declared inverses, under a separate name.

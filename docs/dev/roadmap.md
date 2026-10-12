@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-11
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -30,7 +30,8 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 2. A native-operation audit beyond the 93-case probe, concentrating on paths that could return
    a valid-looking incorrect binding.
 3. Persistence schema 1 frozen ([persistence design](architecture/persistence_design.md)).
-   Freezing is an explicit maintainer decision.
+   Freezing is an explicit maintainer decision. The freeze records whether additive record kinds (such as the planned
+   transform edge wrapper) may land after it.
 4. All supported dependency-floor CI lanes pass. This criterion is met on `da5f627`:
    [hosted run 37668735524](https://github.com/matthiasschabel/xarrayrf/actions/runs/37668735524)
    passes locked, minimum-core, minimum-resample and current. Hosted validation of the patched
@@ -64,6 +65,11 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   with chart transitions and a minimal CF reader (rectilinear GCM and celestial grids), then
   curvilinear coordinate fields, then provider adapters (pyproj, Astropy). Angular charts change
   core value objects and need their own reviewed design.
+- **From the napari compositional-model comparison**
+  ([notes](napari-3783/compositional_model_comparison_notes.md)): transform edge semantics
+  (role, accuracy, validity region, provenance) as a core value object honoured by `resample`;
+  vector, tensor, pseudovector and density value geometry
+  ([design](architecture/value_geometry_design.md); stage 1 is a NumPy kernel); reserved `axis_types` role values. Each starts with a design note.
 - **Small follow-ups.** DICOM localizer (mixed-orientation) splitting and a NIfTI writer on top
   of `nifti.to_header`, when a consumer needs them. `DuckArray` already uses a local protocol.
 

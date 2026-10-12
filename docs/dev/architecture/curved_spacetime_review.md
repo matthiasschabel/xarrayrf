@@ -117,8 +117,8 @@ scope only.
 | 1 | Chart declarations carrying projection and domain parameters, and explicit transition transforms between charts of one frame, with the signed-permutation derivation kept as the fast path; no transition registry. Designed with stage 2 of the [nonlinear geometry plan](nonlinear_geometry_plan.md). |
 | 2 | An optional constant or field metric on a frame, tied to a chart (`eta` for Minkowski; identity as a coordinate-space convention when absent, refused on angular axes). `affine_class` stays numeric and a separate query tests metric preservation; `Lattice.spacing` and future distance queries are the readers. See the plan's metric rule. |
 | 3 | The angular representation and declared-domain stages already listed in [the special-relativity note](relativity_notes.md). |
-| 4 | Specify quantity rules as `tensor(values, indices=("up", "down", ...))` over trailing component axes, with `J` evaluated per sample from the geometry. |
-| 5 | A separate `FrameField` value object, so `check_transform`'s rule needs no exception. |
+| 4 | Specify quantity rules as `tensor(values, indices=("up", "down", ...))` over trailing component axes, with `J` evaluated per sample from the geometry. Adopted in the [value geometry design](value_geometry_design.md). |
+| 5 | A separate `FrameField` value object, so `check_transform`'s rule needs no exception. Kept for pointwise bases, stage 4 of the [value geometry design](value_geometry_design.md). |
 
 ## Alternatives Considered
 
