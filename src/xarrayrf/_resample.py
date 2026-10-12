@@ -17,6 +17,7 @@ from ._resampling import BLOCK_POINTS, Support, check_options, execute
 from ._resampling import Method as Method
 from ._resampling import plan as _plan
 from ._sampling import Domain, Sampling
+from ._tensor_components import declaration_of
 from ._transform import SupportsPoints
 
 
@@ -191,6 +192,14 @@ def _resample_with_intervals(
     """Return unframed values, interval claims and optional box coverage from one plan."""
     if not isinstance(source, Geometry) or not isinstance(target, Geometry | Grid):
         raise TypeError("source must be Geometry and target must be Geometry or Grid")
+    if declaration_of(source.array, verify=False) is not None:
+        # Interpolating components as independent scalars ignores how they change between the
+        # source and target bases: the silent wrong answer value geometry exists to prevent.
+        raise ValueError(
+            "the source declares tensor components, and resampling them is not defined yet "
+            "(value geometry stage 3); to resample the components as independent scalars "
+            "deliberately, call rf.clear_tensor_components() first"
+        )
     check_options(method, block_points, support, min_coverage)
     target_order = (
         target.dims

@@ -12,6 +12,7 @@ import numpy as np
 import numpy.typing as npt
 import xarray as xr
 
+from ._array_coordinates import ArrayCoordinates
 from ._binding import BindingIndex, binding_coordinates, grid_from_binding, grid_variables
 from ._encoding import Decoder, MalformedDataError, decode_intervals, encode
 from ._encoding import decode as decode_value
@@ -21,6 +22,20 @@ from ._grid import Coordinate, Grid
 from ._resample import Method, _resample_with_intervals
 from ._resampling import BOX_METHODS, Support, check_box_values, check_support
 from ._sampling import Domain
+from ._tensor_component_declaration import ComponentBasis, TensorComponentDeclaration
+from ._tensor_components import (
+    DECLARATION_ATTR,
+    TensorComponentIndex,
+    attach,
+    change_basis,
+    change_scalar_basis,
+    declaration_of,
+    declared_coordinates,
+    detach,
+    refuse_component_geometry,
+    stale_array_bases,
+)
+from ._tensor_type import TensorType
 from ._transform import SupportsPoints
 from ._validation import check_names
 
@@ -224,6 +239,46 @@ def _binding(array: xr.DataArray, *, verify: bool = True) -> BindingIndex | None
     return index
 
 
+def _unframe(array: xr.DataArray, index: BindingIndex) -> xr.DataArray:
+    names = index.transform.source.axes
+    result = array.drop_indexes(list(names))
+    if _BINDING_ATTR in result.attrs:
+        result = result.copy(deep=False)
+        result.attrs = {k: v for k, v in result.attrs.items() if k != _BINDING_ATTR}
+    for name in names:
+        if name in result.dims and result.coords[name].dims == (name,):
+            result = result.set_xindex(name)
+    return result
+
+
+def _canonical_json(data: object) -> str:
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _decode_declaration(array: xr.DataArray) -> xr.DataArray:
+    encoded = array.attrs[DECLARATION_ATTR]
+    if not isinstance(encoded, str):
+        raise MalformedDataError(f"{DECLARATION_ATTR!r} must be JSON text")
+    try:
+        payload = json.loads(encoded)
+    except ValueError as error:
+        raise MalformedDataError(f"{DECLARATION_ATTR!r} is not valid JSON: {error}") from error
+    declaration = decode_value(payload)
+    if not isinstance(declaration, TensorComponentDeclaration):
+        raise MalformedDataError(
+            f"{DECLARATION_ATTR!r} must hold a tensor component declaration, got "
+            f"{type(declaration).__name__}"
+        )
+    plain = array.copy(deep=False)
+    plain.attrs = {key: value for key, value in array.attrs.items() if key != DECLARATION_ATTR}
+    try:
+        return attach(plain, declared_coordinates(plain, declaration, _binding(plain)))
+    except (TypeError, ValueError) as error:
+        raise MalformedDataError(
+            f"encoded tensor component declaration is not valid here: {error}"
+        ) from error
+
+
 def _require_duck_array(data: object) -> DuckArray:
     """Require pixel input that xarray treats as a duck array (xarray's own rule, restated)."""
     array_like = isinstance(data, np.ndarray) or (
@@ -362,6 +417,7 @@ class _ReferenceFrameAccessor:
                     f"source coordinates conflict with the Grid declarations ({details}); "
                     "use replace_coordinates=True to replace them"
                 )
+            refuse_component_geometry(array, grid.dims)
             Geometry(
                 array.assign_coords(variables),
                 grid.transform,
@@ -377,6 +433,7 @@ class _ReferenceFrameAccessor:
         geometry = Geometry(
             array, coordinate_transform, dims=cast(Sequence[str], dims), intervals=intervals
         )
+        refuse_component_geometry(array, geometry.dims)
         names = coordinate_transform.source.axes
         variables = {name: array.coords[name].variable for name in names}
         for name, variable in variables.items():
@@ -403,28 +460,43 @@ class _ReferenceFrameAccessor:
         return _assign_binding(stripped, coords)
 
     def decode(self, *, decoders: Mapping[str, Decoder] | None = None) -> xr.DataArray:
-        """Restore a binding from this array's reserved JSON attribute.
+        """Restore a binding and a tensor component declaration from reserved JSON attributes.
 
         The decoded coordinate transform maps the array's coordinates (an
-        ``ArrayCoordinates`` source) to its target ``ReferenceFrame``.
+        ``ArrayCoordinates`` source) to its target ``ReferenceFrame``. The binding is restored
+        first, so a declaration in the array's own coordinates validates against it.
 
         Args:
             decoders: Decoders for user-defined transform kinds, passed to the value decoder.
 
         Returns:
-            A DataArray with the attribute removed and its binding validated against current
-            coordinates. Pixel data is shared with this array.
+            A DataArray with the attributes removed and both declarations validated against
+            current coordinates. Pixel data is shared with this array.
 
         Raises:
-            ValueError: If the array is already framed or has no encoded binding.
-            MalformedDataError: If the binding attribute is not valid JSON binding data.
-            EncodingError: If decoding the transform fails.
+            ValueError: If the array is already framed or declared, or has neither encoded
+                attribute.
+            MalformedDataError: If an attribute is not valid JSON declaration data.
+            EncodingError: If decoding a value fails.
         """
         array = self._array
+        if _BINDING_ATTR not in array.attrs and DECLARATION_ATTR not in array.attrs:
+            raise ValueError(
+                f"array has no {_BINDING_ATTR!r} attribute and no {DECLARATION_ATTR!r} attribute"
+            )
+        if declaration_of(array) is not None:
+            raise ValueError("array already declares tensor components")
+        if _BINDING_ATTR in array.attrs:
+            array = self._decode_binding(array, decoders)
+        if DECLARATION_ATTR in array.attrs:
+            array = _decode_declaration(array)
+        return array
+
+    def _decode_binding(
+        self, array: xr.DataArray, decoders: Mapping[str, Decoder] | None
+    ) -> xr.DataArray:
         if _binding(array) is not None:
             raise ValueError("array is already framed")
-        if _BINDING_ATTR not in array.attrs:
-            raise ValueError(f"array has no {_BINDING_ATTR!r} attribute")
         encoded = array.attrs[_BINDING_ATTR]
         if not isinstance(encoded, str):
             raise MalformedDataError(f"{_BINDING_ATTR!r} must be JSON text")
@@ -610,7 +682,9 @@ class _ReferenceFrameAccessor:
             min_coverage=min_coverage,
         )
         result.name = self._array.name
-        result.attrs = {k: v for k, v in self._array.attrs.items() if k != _BINDING_ATTR}
+        result.attrs = {
+            k: v for k, v in self._array.attrs.items() if k not in (_BINDING_ATTR, DECLARATION_ATTR)
+        }
         framed = cast(
             xr.DataArray,
             result.rf.frame(
@@ -648,7 +722,9 @@ class _ReferenceFrameAccessor:
         replacement = adopt_frame(binding.transform, other)
         return cast(
             xr.DataArray,
-            self.unframe().rf.frame(replacement, dims=binding.dims, intervals=binding.intervals),
+            _unframe(self._array, binding).rf.frame(
+                replacement, dims=binding.dims, intervals=binding.intervals
+            ),
         )
 
     def unframe(self) -> xr.DataArray:
@@ -661,35 +737,241 @@ class _ReferenceFrameAccessor:
         index = _binding(self._array, verify=False)
         if index is None:
             raise ValueError("array is unframed; call rf.frame() first")
-        names = index.transform.source.axes
-        result = self._array.drop_indexes(list(names))
-        if _BINDING_ATTR in result.attrs:
-            result = result.copy(deep=False)
-            result.attrs = {k: v for k, v in result.attrs.items() if k != _BINDING_ATTR}
-        for name in names:
-            if name in result.dims and result.coords[name].dims == (name,):
-                result = result.set_xindex(name)
-        return result
+        components = declaration_of(self._array, verify=False)
+        if components is not None and any(
+            isinstance(basis, ArrayCoordinates) for basis in components.declaration.bases
+        ):
+            raise ValueError(
+                "tensor components are declared in this array's own coordinates, which need the "
+                "binding; change them to a frame with rf.change_component_basis, or call "
+                "rf.clear_tensor_components(), before unframing"
+            )
+        return _unframe(self._array, index)
 
     def encode(self) -> xr.DataArray:
-        """Return an unframed, pixel-sharing copy with a JSON binding attribute.
+        """Return an undeclared, pixel-sharing copy with JSON declaration attributes.
 
-        The reserved ``xarrayrf_binding`` attribute replaces any existing value. Call
-        ``rf.decode()`` after reading the array to restore and validate its binding.
+        The frame binding goes to the reserved ``xarrayrf_binding`` attribute and a tensor
+        component declaration to ``xarrayrf_tensor_components``, each replacing any existing
+        value. Call ``rf.decode()`` after reading the array to restore and validate both.
+
+        Raises:
+            ValueError: If the array has neither a binding nor a tensor component declaration.
         """
-        index = self._require_binding()
-        result = self.unframe().copy(deep=False)
-        result.attrs = {
-            **result.attrs,
-            _BINDING_ATTR: json.dumps(
+        index = _binding(self._array)
+        components = declaration_of(self._array)
+        if index is None and components is None:
+            raise ValueError(
+                "array is unframed and declares no tensor components; there is nothing to encode"
+            )
+        if components is not None and stale_array_bases(components, index):
+            raise ValueError(
+                "the tensor components are declared in ArrayCoordinates that are no longer this "
+                "array's binding source (a source axis was renamed or the binding changed); "
+                "call rf.clear_tensor_components() and declare them again"
+            )
+        result = self._array
+        if components is not None:
+            result = detach(result, components)
+        if index is not None:
+            result = _unframe(result, index)
+        result = result.copy(deep=False)
+        attrs = dict(result.attrs)
+        if index is not None:
+            attrs[_BINDING_ATTR] = _canonical_json(
                 {
                     "transform": encode(index.transform),
                     "dims": list(index.dims),
                     "intervals": {name: rows.tolist() for name, rows in index.intervals.items()},
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            ),
-        }
+                }
+            )
+        if components is not None:
+            attrs[DECLARATION_ATTR] = _canonical_json(encode(components.declaration))
+        result.attrs = attrs
         return result
+
+    @property
+    def has_tensor_components(self) -> bool:
+        """Whether this array declares tensor components.
+
+        Raises:
+            ValueError: If the declaration's index has lost coordinates to another index.
+        """
+        return declaration_of(self._array) is not None
+
+    @property
+    def tensor_component_declaration(self) -> TensorComponentDeclaration:
+        """The tensor component declaration: law, component dimensions and bases."""
+        return self._require_components().declaration
+
+    def _require_components(self) -> TensorComponentIndex:
+        index = declaration_of(self._array)
+        if index is None:
+            raise ValueError(
+                "array declares no tensor components; call rf.declare_tensor_components() first"
+            )
+        return index
+
+    def declare_tensor_components(
+        self,
+        tensor_type: TensorType,
+        *,
+        component_dims: Sequence[str],
+        bases: ComponentBasis | Sequence[ComponentBasis],
+    ) -> xr.DataArray:
+        """Declare which dimensions hold this array's tensor components, and in which bases.
+
+        The labels of each component dimension are its basis's axis names, in order; they are
+        created when the dimension has no coordinate. A basis is a ``ReferenceFrame`` or this
+        array's binding source ``ArrayCoordinates`` (components per unit of each coordinate
+        value). Scalars (densities, pseudoscalars) have no component dimension; pass
+        ``tensor_type=`` to ``rf.change_component_basis`` instead.
+
+        The declaration is enforced on selection (a scalar, subset or permutation of
+        components drops it, leaving plain labels), alignment and concatenation between
+        declared operands (different declarations refuse), renaming, and every xarrayrf
+        operation: ``resample`` and ``rf.resample_to`` refuse a declared source. It is
+        **advisory with respect to values**: element-wise operations that are not linear in
+        the components (``v ** 2``, ``abs``, a component-by-component product, a mask varying
+        along a component dimension, NaN-skipping reductions with components missing at
+        different samples), ``roll`` and ``shift`` along a component dimension, and payload
+        replacement leave it in place; an operand with the component dimension but no
+        coordinate adopts it. Sums, differences and scalings of equal declarations are
+        correct.
+
+        Args:
+            tensor_type: The transformation law; order at least 1.
+            component_dims: One array dimension per component index, in index order.
+            bases: One basis per component index, or one for all of them.
+
+        Returns:
+            A DataArray sharing this array's data, with an index on the component
+            coordinates.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            ValueError: If the array already declares components or carries an encoded
+                declaration, the declaration is invalid, a component dimension is absent, a
+                geometry dimension or of the wrong length, its labels are not the basis axes,
+                or an ``ArrayCoordinates`` basis is not this array's binding source.
+
+        Example:
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> import xarrayrf as xrf
+            >>> import xarrayrf.native
+            >>> frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("m", "m")))
+            >>> wind = xr.DataArray(np.array([[1.0, 2.0]]), dims=("time", "component"))
+            >>> wind = wind.rf.declare_tensor_components(
+            ...     xrf.VECTOR, component_dims=("component",), bases=frame
+            ... )
+            >>> wind.component.values.tolist()
+            ['x', 'y']
+        """
+        array = self._array
+        if declaration_of(array) is not None:
+            raise ValueError(
+                "array already declares tensor components; call rf.clear_tensor_components() first"
+            )
+        if DECLARATION_ATTR in array.attrs:
+            raise ValueError(
+                f"array carries an encoded declaration in attrs[{DECLARATION_ATTR!r}]; call "
+                "rf.decode() to restore it, or drop the attribute before declaring"
+            )
+        declaration = TensorComponentDeclaration(tensor_type, component_dims, bases)
+        return attach(array, declared_coordinates(array, declaration, _binding(array)))
+
+    def clear_tensor_components(self) -> xr.DataArray:
+        """Remove the tensor component declaration; the labels stay as ordinary coordinates.
+
+        Also clears a declaration whose index lost coordinates to another index, and drops an
+        encoded declaration left in ``attrs``.
+        """
+        index = declaration_of(self._array, verify=False)
+        if index is None:
+            raise ValueError("array declares no tensor components")
+        result = detach(self._array, index)
+        if DECLARATION_ATTR in result.attrs:
+            result = result.copy(deep=False)
+            result.attrs = {k: v for k, v in result.attrs.items() if k != DECLARATION_ATTR}
+        return result
+
+    def change_component_basis(
+        self,
+        basis: ComponentBasis | Mapping[str, ComponentBasis],
+        *,
+        transform: SupportsPoints | None = None,
+        units: str | None = None,
+        tensor_type: TensorType | None = None,
+        from_basis: ComponentBasis | None = None,
+    ) -> xr.DataArray:
+        """Express the components in another basis, at the same sample locations.
+
+        Maps between bases: this array's binding source and its frame (the binding matrix and
+        its inverse), one frame in two coordinate systems (``coordinate_system_change``), or
+        ``transform`` between two frames, taking precedence when its endpoints match. Each map
+        must be square and invertible. Only constant (affine) maps are supported. Labels
+        become the new basis's axis names.
+
+        Args:
+            basis: The target basis for every slot, or a mapping from component dimension to
+                basis.
+            transform: An affine transform between the frames on the path, from the slot's
+                side toward the target's.
+            units: The new ``attrs["units"]``, required exactly when the basis units change.
+            tensor_type: For an undeclared scalar only: its order-0 law (a density or a
+                pseudoscalar).
+            from_basis: For an undeclared scalar only: the basis it is expressed in.
+
+        Returns:
+            A new array; declared components stay declared in the new bases. Dask inputs stay
+            lazy; a component dimension split across chunks raises xarray's core-dimension
+            error.
+
+        Raises:
+            TypeError: If an argument has the wrong type or the values are not numeric.
+            ValueError: If no map is derivable, a map is singular or not square, slots of a
+                pseudotensor or density change by different maps, a symmetric declaration
+                would end in mixed bases, ``units`` is missing or not needed, or the scalar
+                arguments are given with a declaration or missing without one.
+        """
+        index = declaration_of(self._array)
+        binding = _binding(self._array)
+        if index is None:
+            if tensor_type is None or from_basis is None:
+                raise ValueError(
+                    "array declares no tensor components; declare them, or pass tensor_type= "
+                    "(order 0) and from_basis= for a scalar"
+                )
+            if not isinstance(tensor_type, TensorType) or tensor_type.order != 0:
+                raise ValueError("tensor_type= here must be an order-0 TensorType")
+            if isinstance(basis, Mapping):
+                raise TypeError("a scalar takes one target basis, not a mapping")
+            return change_scalar_basis(
+                self._array,
+                tensor_type,
+                from_basis,
+                basis,
+                binding=binding,
+                transform=transform,
+                units=units,
+            )
+        if tensor_type is not None or from_basis is not None:
+            raise ValueError(
+                "tensor_type= and from_basis= are for undeclared scalars; this array declares "
+                "its components"
+            )
+        dims = index.declaration.component_dims
+        if isinstance(basis, Mapping):
+            unknown = set(basis) - set(dims)
+            if unknown:
+                raise ValueError(f"{sorted(unknown)} are not component dimensions {dims}")
+            targets = tuple(
+                basis.get(dim, current)
+                for dim, current in zip(dims, index.declaration.bases, strict=True)
+            )
+        else:
+            targets = (basis,) * len(dims)
+        return change_basis(
+            self._array, index, targets, binding=binding, transform=transform, units=units
+        )

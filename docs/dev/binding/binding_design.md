@@ -1,7 +1,7 @@
 # Native `.rf` binding design
 
 **Status:** Implemented
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-11
 **Scope:** The runtime binding behind the `DataArray.rf` accessor (`src/xarrayrf/_binding.py`,
 `src/xarrayrf/native.py`): its carrier, ownership rules, Dataset rule, native-operation outcomes,
 operand checks and the local xarray hooks it relies on. Per-operation results are in the
@@ -279,6 +279,9 @@ encoding.
   along one dimension), mixed geometry/nongeometry stack propagation, geometry-aware padding with
   caller-supplied coordinates, and 2-D or higher source coordinates. Each needs a consumer.
   Treating no-op geometry coarsen and zero-width pad as identities is a smaller follow-up.
+- A second private index, `TensorComponentIndex`, now carries tensor component declarations on
+  non-geometry dimensions with an advisory contract; see the
+  [value geometry stage 2 plan](../architecture/value_geometry_stage2_plan.md).
 - Dataset `rf` accessor and Dataset persistence; consulting `should_add_coord_to_array` in
   Dataset reductions (#11215 follow-up).
 - Framed `concat` along a geometry dimension (stitching slabs that share a transform), refused

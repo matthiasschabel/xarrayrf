@@ -2,7 +2,7 @@ UV ?= uv
 XARRAY_UPSTREAM ?= $(HOME)/GitHub/xarray-upstream
 XARRAY_PATCHED ?= $(HOME)/GitHub/xarray-patched-4
 
-.PHONY: check test test-upstream test-patched test-pinned tour relativity probe build
+.PHONY: check test test-upstream test-patched test-pinned tour relativity probe probe-tensor build
 check:
 	$(UV) run --no-sync ruff check .
 	$(UV) run --no-sync ruff format --check .
@@ -31,6 +31,9 @@ relativity:
 
 probe:
 	$(UV) run --no-sync python tools/binding_operation_probe.py
+
+probe-tensor:
+	$(UV) run --no-sync python tools/tensor_component_probe.py
 
 build:
 	$(UV) build

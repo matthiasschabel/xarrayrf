@@ -1,6 +1,6 @@
 # Value geometry: vectors, tensors, pseudovectors and densities
 
-**Status:** Active (stage 1 implemented; stage 2 not started)
+**Status:** Active (stages 1 and 2 implemented; packing and stage 3 next)
 **Last updated:** 2026-10-11
 **Scope:** Core: a tensor type and transform law for basis-dependent values, a component
 index carrying it, passive basis change, resampling of component variables and persistence.

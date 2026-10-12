@@ -3,7 +3,8 @@
 **Status:** Active
 **Last updated:** 2026-10-11
 **Scope:** `xarrayrf.encode` and `xarrayrf.decode` for vocabularies, coordinate systems, frames,
-array coordinates, grids, affine and composite transforms, and user-defined transforms. Native binding
+array coordinates, grids, affine and composite transforms, tensor types and component
+declarations, and user-defined transforms. Native binding
 persistence wraps this encoding; NGFF, CF and NIfTI formats are adapters.
 
 ## Context
@@ -94,6 +95,7 @@ value geometry component declaration sits beside the binding record, whose field
 | Kind | Introduced |
 |---|---|
 | `direction_vocabulary`, `coordinate_system`, `reference_frame`, `array_coordinates`, `affine_transform`, `composite_transform`, `grid` | schema 1 (unreleased) |
+| `tensor_type`, `tensor_component_declaration` | schema 1, value geometry stage 2 (unreleased) |
 
 ## Alternatives Considered
 

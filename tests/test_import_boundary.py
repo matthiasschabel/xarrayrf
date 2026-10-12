@@ -13,7 +13,14 @@ import pytest
 import xarrayrf
 
 INTEGRATION_MODULES = frozenset(
-    {"_geometry", "_resample", "_frame_coordinates", "_binding", "_grid_selection"}
+    {
+        "_geometry",
+        "_resample",
+        "_frame_coordinates",
+        "_binding",
+        "_grid_selection",
+        "_tensor_components",
+    }
 )
 """Modules allowed to import xarray; everything else in the package is core."""
 

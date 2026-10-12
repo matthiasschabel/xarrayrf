@@ -90,6 +90,18 @@
 
 ### Added
 
+- Tensor components on xarray variables: `TensorComponentDeclaration` names the component
+  dimension and basis of each index of a `TensorType`, and the `.rf` accessor gains
+  `declare_tensor_components`, `tensor_component_declaration`, `has_tensor_components`,
+  `clear_tensor_components` and `change_component_basis` (array coordinates, coordinate
+  systems of one frame, or an explicit transform; constant maps). The declaration is advisory
+  with respect to values: element-wise operations can keep it after changing the values.
+  `resample` and `rf.resample_to` refuse declared sources, and `rf.unframe` refuses while
+  components are declared in the array's own coordinates. `rf.encode` and `rf.decode` handle
+  the declaration in a separate `xarrayrf_tensor_components` attribute, and either the binding
+  or the declaration alone. New persistence kinds `tensor_type` and
+  `tensor_component_declaration`.
+
 - Tensor transformation in the NumPy core: `TensorType` declares a value's index variance
   (contravariant or covariant per component index), reflection parity and determinant
   exponent, and `transform_tensor_components` applies the one law covering vectors,

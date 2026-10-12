@@ -49,6 +49,7 @@ from ._frame import LOCAL_NAMESPACE, ReferenceFrame, Role
 from ._grid import Grid
 from ._lattice import Lattice
 from ._orientation import coordinate_system_change
+from ._tensor_component_declaration import TensorComponentDeclaration
 from ._tensor_type import (
     COVECTOR,
     CROSS_PRODUCT_PSEUDOVECTOR,
@@ -112,6 +113,7 @@ __all__ = [
     "SupportsInverse",
     "SupportsJacobian",
     "SupportsPoints",
+    "TensorComponentDeclaration",
     "TensorType",
     "Transform",
     "UnknownKindError",

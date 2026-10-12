@@ -344,6 +344,8 @@ def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
         affine,
         composite,
         xrf.Grid(affine, {"i": ("i", [0, 1])}),
+        xrf.CROSS_PRODUCT_PSEUDOVECTOR,
+        xrf.TensorComponentDeclaration(xrf.COVECTOR, ("component",), frame),
     ):
         encoded = xrf.encode(value)["value"]
         kind = encoded["kind"]

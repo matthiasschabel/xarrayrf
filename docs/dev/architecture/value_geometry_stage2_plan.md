@@ -1,6 +1,6 @@
 # Value geometry stage 2: tensor components on xarray variables
 
-**Status:** Active (plan reviewed; not started)
+**Status:** Implemented
 **Last updated:** 2026-10-11
 **Scope:** The xarray binding layer: a private `TensorComponentIndex`, declaration and inspection
 on the `.rf` accessor, `rf.change_component_basis`, the resampling guard, persistence of the
@@ -181,8 +181,7 @@ independent scalars is the silent wrong answer the design exists to prevent. The
 ### Operation probe
 
 `tools/tensor_component_probe.py` (`make probe-tensor`), the same lanes and classification as the
-binding probe, written up in a `value_geometry_stage2_inventory` section of this plan once
-measured. Cases: isel/sel identity, scalar, subset, permutation; transpose (slots keep their
+binding probe; measured below. Cases: isel/sel identity, scalar, subset, permutation; transpose (slots keep their
 names); rename of component dims; arithmetic with an equal declaration, a different law, a
 different basis, a different label order, a scalar; untyped operands with a default index,
 with unindexed labels and with a bare component dimension, each in both orders; every row of
@@ -194,6 +193,74 @@ constant mask; `align` inner/outer/exact/override;
 sharing component dims and of one with its own; `copy`, `astype`, `chunk`, `compute`, pickle;
 `encode`/`decode`; `resample_to` refusal; renaming a binding source axis under an
 `ArrayCoordinates` basis (the stale basis must refuse at `change_component_basis`).
+
+### Measured inventory
+
+`tools/tensor_component_probe.py` (`make probe-tensor`), 2026-10-11, on stock xarray 2026.7.0,
+upstream `main` at `8de862c29` and patched series 4. Requirements: `keep`, `drop`, `refuse`;
+`safe` (raising or dropping are fine, keeping is a documented limitation); `limitation` (a
+documented path where the declaration survives a value change). Totals: stock 39 ok,
+14 limitations; upstream 38 ok, 15 limitations; patched 41 ok,
+12 limitations; no holes on any lane.
+
+| Case | Requirement | Stock | Upstream | Patched |
+|---|---|---|---|---|
+| isel_identity | keep | kept (ok) | kept (ok) | kept (ok) |
+| isel_scalar | drop | dropped (ok) | dropped (ok) | dropped (ok) |
+| isel_subset | drop | dropped (ok) | dropped (ok) | dropped (ok) |
+| isel_permutation | drop | dropped (ok) | dropped (ok) | dropped (ok) |
+| isel_other_dim | keep | kept (ok) | kept (ok) | kept (ok) |
+| sel_label | drop | dropped (ok) | dropped (ok) | dropped (ok) |
+| sel_all_labels | keep | kept (ok) | kept (ok) | kept (ok) |
+| transpose | keep | kept (ok) | kept (ok) | kept (ok) |
+| rename_component_dim | keep | kept (ok) | kept (ok) | kept (ok) |
+| add_equal | keep | kept (ok) | kept (ok) | kept (ok) |
+| add_scalar | keep | kept (ok) | kept (ok) | kept (ok) |
+| scale | keep | kept (ok) | kept (ok) | kept (ok) |
+| add_different_law | refuse | raises ValueError (ok) | raises ValueError (ok) | raises ValueError (ok) |
+| add_different_basis | refuse | raises ValueError (ok) | raises ValueError (ok) | raises ValueError (ok) |
+| add_default_index | safe | raises AlignmentError (ok) | kept (limitation) | kept (limitation) |
+| add_default_index_reverse | safe | raises AlignmentError (ok) | dropped (ok) | dropped (ok) |
+| add_unindexed_labels | safe | kept (limitation) | kept (limitation) | raises ValueError (ok) |
+| add_unindexed_labels_reverse | safe | kept (limitation) | kept (limitation) | raises ValueError (ok) |
+| add_bare_dimension | safe | kept (limitation) | kept (limitation) | kept (limitation) |
+| add_bare_dimension_reverse | safe | kept (limitation) | kept (limitation) | kept (limitation) |
+| square | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| abs | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| component_product | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| where_component_mask | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| where_constant_mask | keep | kept (ok) | kept (ok) | kept (ok) |
+| fillna | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| nanmean_missing | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| roll_values | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| roll_coords | refuse | raises ValueError (ok) | raises ValueError (ok) | raises ValueError (ok) |
+| shift | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| payload_replacement | limitation | kept (limitation) | kept (limitation) | kept (limitation) |
+| mean_time | keep | kept (ok) | kept (ok) | kept (ok) |
+| sum_component | drop | dropped (ok) | dropped (ok) | dropped (ok) |
+| align_inner | keep | kept (ok) | kept (ok) | kept (ok) |
+| align_outer | keep | kept (ok) | kept (ok) | kept (ok) |
+| align_override | safe | kept (limitation) | kept (limitation) | raises ValueError (ok) |
+| concat_time | keep | kept (ok) | kept (ok) | kept (ok) |
+| concat_component | refuse | raises ValueError (ok) | raises ValueError (ok) | raises ValueError (ok) |
+| stack_component | safe | dropped (ok) | dropped (ok) | raises ValueError (ok) |
+| pad_component | safe | dropped (ok) | dropped (ok) | raises ValueError (ok) |
+| coarsen_component | safe | raises TypeError (ok) | raises TypeError (ok) | raises ValueError (ok) |
+| expand_dims | keep | kept (ok) | kept (ok) | kept (ok) |
+| dataset_sibling | keep | kept (ok) | kept (ok) | kept (ok) |
+| copy | keep | kept (ok) | kept (ok) | kept (ok) |
+| astype | keep | kept (ok) | kept (ok) | kept (ok) |
+| chunk | keep | kept (ok) | kept (ok) | kept (ok) |
+| compute | keep | kept (ok) | kept (ok) | kept (ok) |
+| dask_add | keep | kept (ok) | kept (ok) | kept (ok) |
+| pickle | keep | kept (ok) | kept (ok) | kept (ok) |
+| encode_decode | keep | kept (ok) | kept (ok) | kept (ok) |
+| resample_to | refuse | raises ValueError (ok) | raises ValueError (ok) | raises ValueError (ok) |
+| stale_array_basis | refuse | raises ValueError (ok) | raises ValueError (ok) | raises ValueError (ok) |
+| dask_from_array | keep | kept (ok) | kept (ok) | kept (ok) |
+
+Every limitation is a row of the contract table above; the lanes differ only in which untyped
+operands are adopted or refused and in the patched preflights for override, stack and pad.
 
 ### Tests
 
@@ -272,7 +339,13 @@ accepted. The second pass resolved all five with no new findings.
 
 ## Next Steps
 
-1. Review this plan (Codex, gpt-6-astra, high).
-2. Implement the index and accessor with tests, then `change_component_basis`, then the guard and
-   persistence, narrowest tests first; then the probe on three lanes, the inventory, docs; full
-   suite, ruff, mypy.
+Done on 2026-10-11: `src/xarrayrf/_tensor_component_declaration.py`,
+`src/xarrayrf/_tensor_components.py`, the accessor members, the resampling guard, the two
+persistence kinds, `tests/test_tensor_components.py` and `tools/tensor_component_probe.py`
+(measured above). The implementation review (Codex, gpt-6-astra, high, two passes) added three
+refusals the plan implied but the first cut missed: a supplied transform that does not fit its
+hop, framing a declared component dimension as geometry, and unframing or encoding a stale
+array-coordinate basis. Suites pass on stock, upstream and patched xarray.
+
+Next, before stage 3: symmetric packing (stage 2b, Deferred Work), then resampling of
+declared components (design section 3).

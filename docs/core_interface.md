@@ -361,7 +361,7 @@ import numpy as np
 import xarrayrf as xrf
 
 shear = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-xrf.transform_tensor_components([0.0, 1.0, 0.0], shear, xrf.VECTOR)    # [1, 1, 0]
+xrf.transform_tensor_components([0.0, 1.0, 0.0], shear, xrf.VECTOR)  # [1, 1, 0]
 xrf.transform_tensor_components([1.0, 0.0, 0.0], shear, xrf.COVECTOR)  # [1, -1, 0]
 xrf.transform_tensor_components(
     np.diag([3.0, 2.0, 1.0]), shear, xrf.SECOND_ORDER_CONTRAVARIANT_TENSOR
@@ -372,8 +372,43 @@ ITK's symmetric-tensor transform gives `diag(3, 2, 1)` for the same shear; it di
 design and is not mirrored. Choosing the
 map (a Jacobian from `transform.jacobian(at)`, a basis change, or its polar factor) is the
 caller's decision; domain reorientation policies such as diffusion PPD live downstream. The
-kernel knows no frames or bases: attaching a type to an xarray variable is the next stage of
-[the value geometry design](dev/architecture/value_geometry_design.md).
+kernel knows no frames or bases.
+
+#### Tensor components on xarray variables
+
+A `TensorComponentDeclaration(tensor_type, component_dims, bases)` says which dimensions hold the
+components of each index and in which basis: a `ReferenceFrame`, or the array's own binding
+source `ArrayCoordinates` (components per unit of each coordinate value). On the `.rf`
+accessor, `declare_tensor_components` attaches one through a private index on the component
+coordinates, whose labels are the basis axis names; `tensor_component_declaration`,
+`has_tensor_components` and `clear_tensor_components` inspect and remove it.
+
+```python
+frame = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("m", "m")))
+wind = xr.DataArray(np.array([[1.0, 2.0]]), dims=("time", "component"))
+wind = wind.rf.declare_tensor_components(xrf.VECTOR, component_dims=("component",), bases=frame)
+```
+
+`rf.change_component_basis(basis, *, transform=None, units=None)` re-expresses the components at
+the same samples: between the array coordinates and the bound frame through the binding matrix
+or its inverse, between coordinate systems of one frame by `coordinate_system_change`, and
+between frames through `transform`. Every map must be square and invertible and, for now,
+constant. `units=` is required exactly when the basis units change. Scalars (densities,
+pseudoscalars) have no component dimension: pass `tensor_type=` and `from_basis=` instead.
+`resample` and `rf.resample_to` refuse a declared source until resampling of components is
+defined. `rf.encode` writes the declaration to its own `xarrayrf_tensor_components` attribute,
+beside the binding's.
+
+**The declaration is advisory with respect to values.** It is enforced on selection (a scalar,
+subset or permutation of components drops it), alignment and concatenation between declared
+operands, renaming, and xarrayrf's own operations. An xarray index lives with the coordinates
+and never sees element-wise operations, so these keep a declaration the values no longer
+satisfy: non-linear operations (`v ** 2`, `abs`, component-by-component products), masks and
+fills varying along a component dimension, NaN-skipping reductions with components missing at
+different samples, `roll` and `shift` along a component dimension, and payload replacement. An
+operand with the component dimension but no coordinate adopts it; untyped operands with labels
+are refused or adopted depending on the xarray version. The measured list is in
+[the stage 2 plan](dev/architecture/value_geometry_stage2_plan.md).
 
 ## Naming conventions
 

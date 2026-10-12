@@ -24,6 +24,8 @@ from ._composite import CompositeTransform
 from ._coordinate_system import CoordinateSystem
 from ._frame import ReferenceFrame
 from ._grid import Coordinate, Grid
+from ._tensor_component_declaration import TensorComponentDeclaration
+from ._tensor_type import TensorType
 from ._transform import Endpoint, SupportsPoints, check_transform
 from ._vocabulary import DirectionVocabulary
 
@@ -87,6 +89,8 @@ _BUILT_IN: Final = frozenset(
         "affine_transform",
         "composite_transform",
         "grid",
+        "tensor_type",
+        "tensor_component_declaration",
     }
 )
 
@@ -97,7 +101,8 @@ def encode(value: object) -> dict[str, Any]:
     Args:
         value: A :class:`DirectionVocabulary`, :class:`CoordinateSystem`,
             :class:`ReferenceFrame`, :class:`ArrayCoordinates`, :class:`AffineTransform`,
-            :class:`CompositeTransform`, :class:`Grid`, or a user-defined transform implementing
+            :class:`CompositeTransform`, :class:`Grid`, :class:`TensorType`,
+            :class:`TensorComponentDeclaration`, or a user-defined transform implementing
             :class:`SupportsEncoding`.
 
     Returns:
@@ -218,6 +223,22 @@ def _encode(value: object) -> dict[str, Any]:
             "kind": "composite_transform",
             "transforms": [_encode(member) for member in value.transforms],
         }
+    if isinstance(value, TensorType):
+        return {
+            "kind": "tensor_type",
+            "index_variance": list(value.index_variance),
+            "reflection_parity": value.reflection_parity,
+            "determinant_exponent": value.determinant_exponent,
+            "index_symmetry": value.index_symmetry,
+            "requires_orthogonal_map": value.requires_orthogonal_map,
+        }
+    if isinstance(value, TensorComponentDeclaration):
+        return {
+            "kind": "tensor_component_declaration",
+            "tensor_type": _encode(value.tensor_type),
+            "component_dims": list(value.component_dims),
+            "bases": [_encode(basis) for basis in value.bases],
+        }
     if isinstance(value, SupportsEncoding) and isinstance(value, SupportsPoints):
         return _encode_extension(value)
     raise TypeError(
@@ -332,6 +353,14 @@ _FIELDS: Final = {
     "affine_transform": {"source", "target", "matrix", "translation"},
     "composite_transform": {"transforms"},
     "grid": {"transform", "dims", "coordinates", "intervals"},
+    "tensor_type": {
+        "index_variance",
+        "reflection_parity",
+        "determinant_exponent",
+        "index_symmetry",
+        "requires_orthogonal_map",
+    },
+    "tensor_component_declaration": {"tensor_type", "component_dims", "bases"},
 }
 
 _EXTENSION_FIELDS: Final = {"version", "source", "target", "data"}
@@ -493,6 +522,27 @@ class _Decoder:
             self.value(fields["transform"]),
             ordered,
             intervals=decode_intervals(fields["intervals"]),
+        )
+
+    def tensor_type(self, fields: Mapping[str, Any]) -> TensorType:
+        exponent = fields["determinant_exponent"]
+        if isinstance(exponent, bool) or not isinstance(exponent, int | float):
+            raise MalformedDataError(f"determinant_exponent must be a number, got {exponent!r}")
+        return TensorType(
+            self._list(fields["index_variance"], "index_variance"),
+            reflection_parity=fields["reflection_parity"],
+            determinant_exponent=exponent,
+            index_symmetry=fields["index_symmetry"],
+            requires_orthogonal_map=fields["requires_orthogonal_map"],
+        )
+
+    def tensor_component_declaration(self, fields: Mapping[str, Any]) -> TensorComponentDeclaration:
+        tensor_type = self.value(fields["tensor_type"])
+        if not isinstance(tensor_type, TensorType):
+            raise MalformedDataError("a declaration's tensor_type must be a tensor type")
+        bases = [self._endpoint(item) for item in self._list(fields["bases"], "bases")]
+        return TensorComponentDeclaration(
+            tensor_type, self._list(fields["component_dims"], "component_dims"), bases
         )
 
     def composite_transform(self, fields: Mapping[str, Any]) -> CompositeTransform:
