@@ -37,6 +37,9 @@ reasons. The stable documents are [the design](../design.md),
 - [value_geometry_stage1_plan.md](architecture/value_geometry_stage1_plan.md): stage 1 of the
   value geometry design: `TensorType`, the NumPy kernel `transform_tensor_components`,
   `polar_orthogonal_factor`, its broadcasting and determinant contracts, and the test oracles.
+- [value_geometry_stage2_plan.md](architecture/value_geometry_stage2_plan.md): stage 2: tensor
+  component declarations on xarray variables, the advisory contract and its measured limits,
+  `rf.change_component_basis`, the resampling guard and persistence.
 - [field_transform_design.md](architecture/field_transform_design.md): stage 1, displacement,
   position and B-spline transforms on `Grid`, declared inverse pairs, a Jacobian-determinant
   diagnostic, importers, and the deformation models to support after it.

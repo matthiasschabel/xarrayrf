@@ -238,7 +238,7 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 1. Stage 1: `TensorType`, the law, the NumPy kernel and shortcuts, with the stage-1
    acceptance cases as tests. Done: `src/xarrayrf/_tensor_type.py`, `tests/test_tensor_type.py`,
    per [the stage 1 plan](value_geometry_stage1_plan.md).
-2. Before stage 2: the schema-1 freeze decision records whether additive record kinds may land
-   after it; stage 2 then adds the component index, `rf.change_component_basis`, the `resample` guard,
+2. Stage 2 ([plan](value_geometry_stage2_plan.md); additive record kinds may land within schema 1,
+   decided 2026-10-11) adds the component index, `rf.change_component_basis`, the `resample` guard,
    persistence and the operation probe.
 3. Stage 3 after stage 2's probe passes on the patched lane.
