@@ -2,7 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- Angular coordinate systems: `CoordinateSystem(..., representation="spherical" | "geodetic",
+  axis_roles=(...))` declares longitude, latitude and a radius or height axis beside ordinary
+  axes such as time. Angular axes take degrees, CF `degrees_east`/`degrees_north` or radians;
+  Euclidean quantities are refused on them (`Lattice.spacing`, `Lattice.direction`,
+  `axis_codes`, box averaging along latitude). `axis_roles` persists as an optional schema-1
+  field. Longitude does not wrap at 0/360 yet.
+- Chart transitions between an angular chart and a Cartesian chart of one frame:
+  `SphericalToCartesian`, `CartesianToSpherical`, `GeodeticToCartesian` and
+  `CartesianToGeodetic`, with pointwise Jacobians, exact inverses and persistence. The
+  geodetic inverse agrees with PROJ to about 1e-9 m. Pass one to `resample(..., transform=)`
+  to resample between the charts.
+- `coordinate_system_change` matches the axes of two angular systems by role, so reordering
+  longitude and latitude is derivable; it refuses systems that differ in representation or
+  roles rather than deriving an identity from matching axis names.
+
 ### Changed
+
+- NGFF export refuses angular frames: NGFF axes carry no representation, and degree units would
+  read back as refused Cartesian axes.
+- Resampling declared tensor components now also names the target sample when the frame map's
+  Jacobian raises (a chart transition on the polar axis), not only when it is singular.
 
 - Cubic resampling refuses NaN in the source samples it reads, including onto a coincident
   grid. The spline prefilter spread one NaN along its whole line, while the same-grid gather

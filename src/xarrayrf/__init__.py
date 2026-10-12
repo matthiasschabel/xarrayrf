@@ -31,6 +31,12 @@ from typing import Any
 
 from ._affine import INVERSE_CONDITION_LIMIT, AffineTransform
 from ._array_coordinates import ArrayCoordinates
+from ._chart_transitions import (
+    CartesianToGeodetic,
+    CartesianToSpherical,
+    GeodeticToCartesian,
+    SphericalToCartesian,
+)
 from ._classification import AffineClass, affine_class
 from ._composite import CompositeTransform, compose
 from ._coordinate_system import CARTESIAN, GEODETIC, SPHERICAL, AxisCode, AxisRole, CoordinateSystem
@@ -106,18 +112,22 @@ __all__ = [
     "ArrayCoordinates",
     "AxisCode",
     "AxisRole",
+    "CartesianToGeodetic",
+    "CartesianToSpherical",
     "CompositeTransform",
     "CoordinateSystem",
     "DecoderResultError",
     "DirectionVocabulary",
     "EncodingError",
     "Endpoint",
+    "GeodeticToCartesian",
     "Grid",
     "Lattice",
     "MalformedDataError",
     "MissingDecoderError",
     "ReferenceFrame",
     "Role",
+    "SphericalToCartesian",
     "SupportsAffine",
     "SupportsEncoding",
     "SupportsInverse",

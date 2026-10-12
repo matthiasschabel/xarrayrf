@@ -277,19 +277,64 @@ def _angular(representation: str, roles: tuple[AxisRole, ...]) -> CoordinateSyst
     "target",
     [
         pytest.param(_angular("geodetic", ("longitude", "latitude")), id="spherical-geodetic"),
-        pytest.param(_angular("spherical", ("latitude", "longitude")), id="roles-swapped"),
         pytest.param(CoordinateSystem(("u", "v"), ("m", "m")), id="cartesian"),
     ],
 )
 def test_angular_declarations_that_differ_derive_no_change(target: CoordinateSystem) -> None:
     """Matching names and units would otherwise pass unoriented axes through as an identity."""
     source = ReferenceFrame.declared(UID, _angular("spherical", ("longitude", "latitude")))
-    with pytest.raises(ValueError, match="explicit transition transform"):
+    with pytest.raises(ValueError, match="explicit chart transition"):
         coordinate_system_change(source, source.with_coordinate_system(target))
-    with pytest.raises(ValueError, match="explicit transition transform"):
+    with pytest.raises(ValueError, match="explicit chart transition"):
         coordinate_system_change(source.with_coordinate_system(target), source)
 
 
 def test_an_equal_angular_system_derives_the_identity() -> None:
     frame = ReferenceFrame.declared(UID, _angular("spherical", ("longitude", "latitude")))
     assert_allclose(coordinate_system_change(frame, frame).matrix, np.eye(2), atol=0, rtol=0)
+
+
+def test_angular_axes_are_matched_by_role() -> None:
+    """The same axis names with swapped roles are a reordering, not an identity."""
+    frame = ReferenceFrame.declared(UID, _angular("spherical", ("longitude", "latitude")))
+    swapped = frame.with_coordinate_system(_angular("spherical", ("latitude", "longitude")))
+    assert_allclose(
+        coordinate_system_change(frame, swapped).matrix, [[0, 1], [1, 0]], atol=0, rtol=0
+    )
+
+
+def test_angular_reordering_keeps_pass_through_axes_and_units() -> None:
+    def system(
+        axes: tuple[str, ...], units: tuple[str, ...], roles: tuple[AxisRole | None, ...]
+    ) -> CoordinateSystem:
+        return CoordinateSystem(axes, units, representation="geodetic", axis_roles=roles)
+
+    frame = ReferenceFrame.declared(
+        UID,
+        system(
+            ("t", "lat", "lon", "h"),
+            ("s", "deg", "deg", "m"),
+            (None, "latitude", "longitude", "height"),
+        ),
+    )
+    reordered = system(
+        ("t", "lon", "lat", "h"),
+        ("s", "deg", "deg", "m"),
+        (None, "longitude", "latitude", "height"),
+    )
+    matrix = coordinate_system_change(frame, frame.with_coordinate_system(reordered)).matrix
+    assert_allclose(matrix, np.eye(4)[[0, 2, 1, 3]], atol=0, rtol=0)
+    radians = system(
+        ("t", "lon", "lat", "h"),
+        ("s", "rad", "deg", "m"),
+        (None, "longitude", "latitude", "height"),
+    )
+    with pytest.raises(ValueError, match="units are never rescaled"):
+        coordinate_system_change(frame, frame.with_coordinate_system(radians))
+    moved_time = system(
+        ("lon", "t", "lat", "h"),
+        ("deg", "s", "deg", "m"),
+        ("longitude", None, "latitude", "height"),
+    )
+    with pytest.raises(ValueError, match="has no role and does not appear unchanged"):
+        coordinate_system_change(frame, frame.with_coordinate_system(moved_time))

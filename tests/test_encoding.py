@@ -374,6 +374,35 @@ def test_decode_refuses_data_that_is_not_json(corrupt: Any) -> None:
         xrf.decode(encoded, decoders={"example:shift": decode_shift})
 
 
+def _transitions() -> list[object]:
+    """One of each chart transition, spherical and geodetic, in both directions."""
+    spherical = xrf.ReferenceFrame.local(
+        xrf.CoordinateSystem(
+            ("lon", "lat", "r"),
+            ("deg", "deg", "m"),
+            representation="spherical",
+            axis_roles=("longitude", "latitude", "radius"),
+        )
+    )
+    geodetic = xrf.ReferenceFrame.local(
+        xrf.CoordinateSystem(
+            ("lon", "lat", "h"),
+            ("deg", "deg", "m"),
+            representation="geodetic",
+            axis_roles=("longitude", "latitude", "height"),
+        )
+    )
+    cartesian = xrf.CoordinateSystem(("x", "y", "z"), ("m", "m", "m"))
+    to_sphere = xrf.SphericalToCartesian(spherical, spherical.with_coordinate_system(cartesian))
+    to_ellipsoid = xrf.GeodeticToCartesian(
+        geodetic,
+        geodetic.with_coordinate_system(cartesian),
+        semi_major_axis=6378137.0,
+        inverse_flattening=298.257223563,
+    )
+    return [to_sphere, to_sphere.inverse(), to_ellipsoid, to_ellipsoid.inverse()]
+
+
 def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
     """The decoder's field table and the encoder's output must not drift apart."""
     from xarrayrf._encoding import _FIELDS
@@ -406,6 +435,7 @@ def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
         xrf.CROSS_PRODUCT_PSEUDOVECTOR,
         xrf.TensorComponentDeclaration(xrf.COVECTOR, ("component",), frame),
         xrf.SymmetricPacking.mandel(2),
+        *_transitions(),
         xrf.TensorComponentDeclaration(
             xrf.SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR,
             ("component",),

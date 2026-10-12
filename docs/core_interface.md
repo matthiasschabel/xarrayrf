@@ -191,12 +191,12 @@ units. An angular system cannot be oriented, and `axis_codes` refuses it. Euclid
 are refused on angular frames: `Lattice.spacing` and `Lattice.direction` raise (`matrix` still
 gives the steps axis by axis), and box methods refuse to average along latitude, since a mean
 over degrees of latitude is not an area mean; longitude slabs and pass-through latitude are
-allowed. `coordinate_system_change` refuses two systems that differ in representation or roles
-when either is angular. NGFF export refuses angular frames, since NGFF axes carry no
+allowed. `coordinate_system_change` refuses two systems that differ in representation or set of
+roles when either is angular, and matches angular axes by role otherwise; conversions to
+Cartesian charts are the chart transitions below. NGFF export refuses angular frames, since NGFF axes carry no
 representation and degree units would read back as refused Cartesian axes; NIfTI export already
 requires an oriented patient frame. Longitude labels are not wrapped yet: a target beyond the outer source
-labels is outside, as on any axis. Transitions to Cartesian charts, seam-aware resampling and a
-CF reader follow.
+labels is outside, as on any axis. Seam-aware resampling and a CF reader follow.
 
 **`ReferenceFrame`**: identifier, `coordinate_system`, optional `role`, `definition`, `context`,
 `display`; constructed by `ReferenceFrame.local(coordinate_system, ...)`,
@@ -352,6 +352,54 @@ transform first; the docstring says so.
 `compose(first, second, ...)` returns a single collapsed `AffineTransform` when every member is
 affine, so resampling and export can ask `isinstance(t, SupportsAffine)` of a chain, and a
 `CompositeTransform` otherwise.
+
+### Chart transitions
+
+A chart transition re-expresses one frame between an angular chart and a Cartesian chart; both
+endpoints must be equivalent frames, so identity is kept. Four classes, each with points, a
+pointwise Jacobian and an exact inverse (the partner class):
+
+| Class | Source chart | Target chart |
+|---|---|---|
+| `SphericalToCartesian(source, target, *, longitude_start=None)` | spherical: longitude, latitude, radius | Cartesian, 3 axes |
+| `CartesianToSpherical(source, target, *, longitude_start=None)` | Cartesian, 3 axes | spherical |
+| `GeodeticToCartesian(source, target, *, semi_major_axis, inverse_flattening, longitude_start=None)` | geodetic: longitude, latitude, height | Cartesian, 3 axes |
+| `CartesianToGeodetic(source, target, *, semi_major_axis, inverse_flattening, longitude_start=None)` | Cartesian, 3 axes | geodetic |
+
+```python
+to_ecef = rf.GeodeticToCartesian(
+    wgs84_lon_lat_h, wgs84_ecef, semi_major_axis=6378137.0, inverse_flattening=298.257223563
+)
+lon_lat_h = to_ecef.inverse().transform_point(xyz)
+```
+
+- The angular chart has exactly the three spatial roles, in any order; the Cartesian chart's axes
+  are read as `(x, y, z)` in declared order: x toward longitude 0 on the equator, z toward the
+  north pole, right-handed. Every Cartesian unit must equal the radius or height unit, which is
+  also the unit of `semi_major_axis`; nothing is rescaled.
+- `inverse_flattening` is `0.0` for a sphere (as in pyproj), otherwise greater than 1. When the
+  frame definition declares a figure under the reserved keys `figure` (`"sphere"` or
+  `"ellipsoid"`), `semi_major_axis`, `inverse_flattening` (ellipsoids only) and `length_unit`,
+  the transition must match it exactly.
+- Longitudes produced by the Cartesian-to-angular direction lie in
+  `[longitude_start, longitude_start + period)`; the default start is −180° (−π). On the polar
+  axis the result is `longitude_start`. Both directions carry `longitude_start`, so the inverse
+  round-trips exactly.
+- Domain: the forward domain is the inverse's image, so every accepted point round-trips.
+  Latitude must lie within ±90°; the radius must be positive; a geodetic height may be negative
+  down to where the normal reaches the equatorial plane or the axis. Points at or within the
+  evolute bound `e² a² / b` of the centre (about 42.8 km for WGS 84; the centre itself for a
+  sphere) raise in both directions. Errors name the first offending point index.
+- Exact poles (±90, or ±`math.pi / 2` in radians) map exactly onto the axis. The forward
+  Jacobian there is finite and singular; the inverse Jacobian does not exist on the axis and
+  raises. Scalar resampling across a pole works; resampling declared tensor components through
+  a polar target raises the error that names the target sample.
+- The geodetic inverse is Vermeille's closed form; it agrees with PROJ to about 1e−9 m.
+- `coordinate_system_change` never derives a transition. Between two angular systems with the
+  same representation and roles it derives the permutation that matches axes by role.
+
+Pass a transition to `resample(..., transform=)` to resample between charts of one frame, such
+as a lon/lat/height grid onto Earth-centred Cartesian points.
 
 ### Tensor transformation
 
@@ -1009,7 +1057,7 @@ clamped positions, at a cost proportional to the shell.
 ## Persistence
 
 `encode(value)` and `decode(data, *, decoders=None)` convert vocabularies, coordinate systems,
-frames, array coordinates, grids, affine and composite transforms, and user-defined transforms to and from
+frames, array coordinates, grids, affine and composite transforms, chart transitions, and user-defined transforms to and from
 versioned, plain JSON data. Decoding rebuilds through the public constructors; frame identity,
 metadata types and float64 coefficients survive exactly. User-defined transforms implement
 `SupportsEncoding` (namespaced `kind`, own `version`, `to_data()`) and decode only through

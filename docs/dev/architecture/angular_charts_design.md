@@ -123,9 +123,12 @@ Two public transition classes, each implementing `SupportsPoints`, `SupportsJaco
   raises); stage 2 does not depend on the masked evaluation of
   [field-backed transforms stage 1c](field_transform_design.md), and adopts it when that lands.
   Separately per operation:
-  - *Forward points:* defined for every latitude in ±90°, every finite geodetic height
-    (negative heights included) and every radius ≥ 0; latitude outside the bounds or a
-    negative radius raises.
+  - *Forward points:* the forward domain is the inverse's image, so every accepted point
+    round-trips: latitude in ±90°; a radius > 0; a geodetic height above `−N(φ)(1 − e²)`
+    (negative heights included, down to where the normal reaches the equatorial plane or the
+    axis; `−a` for a sphere), with the image outside the evolute bound below. Anything else
+    raises: deeper points have a nearer surface foot elsewhere (amended in the
+    [stage 2 plan](angular_charts_stage2_plan.md) review, 2026-10-12).
   - *Inverse points:* on the polar axis every longitude names the same point, so the inverse
     returns `longitude_start` there as an ordinary, valid result. Spherical: only the centre
     has no latitude, and there the inverse raises. Geodetic: the inverse is unique and meets
@@ -303,4 +306,5 @@ Each gets a short plan reviewed before implementation, as for value geometry.
 
 1. Stage 1, declarations, refusals and persistence ([plan](angular_charts_stage1_plan.md)).
    Done.
-2. Stage 2 plan: transitions (section 3).
+2. Stage 2, transitions ([plan](angular_charts_stage2_plan.md)). Done.
+3. Stage 3 plan: seam-aware resampling (section 4).

@@ -93,7 +93,7 @@ mypy_path = "src"
 # Dask is used only by the lazy-evaluation tests, to prove no pixel task runs. It does not
 # publish type information, and this is a no-op if a future release starts doing so.
 [[tool.mypy.overrides]]
-module = ["dask.*", "scipy.*"]
+module = ["astropy.*", "dask.*", "scipy.*"]
 ignore_missing_imports = true
 
 # nbformat and nbclient publish no annotations; only the notebook builders call them.

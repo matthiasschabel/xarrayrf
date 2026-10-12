@@ -213,7 +213,7 @@ frames are specified in [the core model design](dev/architecture/core_model_desi
 |---|---|
 | Identifier | Opaque namespaced identity for a particular frame; globally identified, scoped to a container, or minted locally. DICOM FoR UIDs belong here. |
 | Definition | Optional versioned domain declaration needed to interpret an externally defined system. An adapter resolves and validates it at construction; the core does not look up names. |
-| Coordinate representation | The `CoordinateSystem`: ordered axes, axis units, representation kind and optional axis orientation from an adapter-supplied direction vocabulary; these describe the output of F. Implemented: Cartesian, and spherical and geodetic longitude/latitude declarations; transitions and seam handling follow. |
+| Coordinate representation | The `CoordinateSystem`: ordered axes, axis units, representation kind and optional axis orientation from an adapter-supplied direction vocabulary; these describe the output of F. Implemented: Cartesian, and spherical and geodetic longitude/latitude declarations with chart transitions to Cartesian; seam handling follows. |
 | Defining context | Only parameters needed to interpret that system or transformation, such as an applicable epoch, observer or realization. Acquisition timestamps are not automatically defining context. |
 | Display metadata | Human-readable labels and provenance, excluded from geometric compatibility. |
 

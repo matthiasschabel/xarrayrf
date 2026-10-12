@@ -225,19 +225,21 @@ def resample_components(
             out = np.empty(flat.shape, dtype=dtype)
             for start in range(0, total, block_points):
                 stop = min(start + block_points, total)
-                jacobians = np.asarray(
-                    jacobian_map.jacobian(target_frame_points(start, stop)), dtype=np.float64
-                )
+                points = target_frame_points(start, stop)
                 block = (slice(None),) * len(leading) + (slice(start, stop),)
                 try:
+                    # A transform may raise where its Jacobian does not exist (a chart
+                    # transition on the polar axis) rather than return a singular matrix.
+                    jacobians = np.asarray(jacobian_map.jacobian(points), dtype=np.float64)
                     push = _push(jacobians)
                 except ValueError as error:
-                    # The inverse names a block-relative index; report the target sample.
-                    sample = _first_singular(jacobians, start, shape, target_dims)
+                    # Both failures name a block-relative index; report the target sample.
+                    sample = _first_failing(jacobian_map, points, start, shape, target_dims)
                     raise ValueError(
-                        f"the frame map's Jacobian is singular or not finite at target sample "
-                        f"{sample}, so components there have no image; a folding or "
-                        "undefined registration cannot carry tensor components"
+                        f"the frame map's Jacobian is singular, not finite or undefined at "
+                        f"target sample {sample}, so components there have no image; a folding "
+                        "or undefined registration, or a pole of a chart transition, cannot "
+                        "carry tensor components"
                     ) from error
                 out[block] = transform_declared_components(flat[block], declaration, compose(push))
             return out.reshape(values.shape)
@@ -280,16 +282,20 @@ def _push(jacobian: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
     return equilibrated_inverse(jacobian)
 
 
-def _first_singular(
-    jacobians: npt.NDArray[np.float64],
+def _first_failing(
+    jacobian_map: SupportsJacobian,
+    points: npt.NDArray[np.float64],
     start: int,
     shape: tuple[int, ...],
     target_dims: Sequence[str],
 ) -> dict[str, int]:
-    """The target sample of the first Jacobian in a block that cannot be inverted."""
-    for offset, matrix in enumerate(jacobians):
+    """The target sample of the first point in a block whose Jacobian fails or is singular.
+
+    Runs only on the error path, one point at a time, so the cost is paid once per failure.
+    """
+    for offset, point in enumerate(points):
         try:
-            equilibrated_inverse(matrix)
+            equilibrated_inverse(np.asarray(jacobian_map.jacobian(point[None]))[0])
         except ValueError:
             position = np.unravel_index(start + offset, shape) if shape else ()
             return {str(dim): int(index) for dim, index in zip(target_dims, position, strict=True)}

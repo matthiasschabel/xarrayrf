@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 
 from ._affine import AffineTransform
-from ._coordinate_system import CARTESIAN
+from ._coordinate_system import CARTESIAN, CoordinateSystem
 from ._frame import ReferenceFrame
 
 
@@ -37,7 +38,8 @@ def coordinate_system_change(source: ReferenceFrame, target: ReferenceFrame) -> 
             axis is oriented in one system only, the systems use
             different vocabularies or direction pairs, matched axes have different units,
             unoriented axes differ in name, unit or position, or either system is angular and
-            the two differ in representation or axis roles.
+            the two differ in representation or set of axis roles. Angular axes are matched by
+            role, so reordering longitude and latitude is derivable.
     """
     _check_frame(source, field="source")
     _check_frame(target, field="target")
@@ -49,15 +51,12 @@ def coordinate_system_change(source: ReferenceFrame, target: ReferenceFrame) -> 
         )
     a = source.coordinate_system
     b = target.coordinate_system
-    # Unoriented axes are matched by name, unit and position only, so without this guard two
-    # angular declarations with the same axes, such as spherical and geodetic latitude, would
-    # derive an identity.
-    angular = a.representation != CARTESIAN or b.representation != CARTESIAN
-    if angular and (a.representation, a.axis_roles) != (b.representation, b.axis_roles):
-        raise ValueError(
-            f"a {a.representation} and a {b.representation} coordinate system, or two with "
-            "different axis roles, are not related by an axis permutation; use an explicit "
-            "transition transform",
+    if a.representation != CARTESIAN or b.representation != CARTESIAN:
+        return AffineTransform.from_matrix(
+            source=source,
+            target=target,
+            matrix=_angular_permutation(a, b),
+            translation=np.zeros(len(b.axes)),
         )
     oriented_a = {i: token for i, token in enumerate(a.orientation) if token is not None}
     oriented_b = {i: token for i, token in enumerate(b.orientation) if token is not None}
@@ -117,3 +116,50 @@ def coordinate_system_change(source: ReferenceFrame, target: ReferenceFrame) -> 
         matrix=matrix,
         translation=np.zeros(len(b.axes)),
     )
+
+
+def _angular_permutation(a: CoordinateSystem, b: CoordinateSystem) -> npt.NDArray[np.float64]:
+    """Match angular axes by role and pass other axes through unchanged.
+
+    Unoriented axes are otherwise matched by name, unit and position only, so two angular
+    declarations with the same axes, such as spherical and geodetic latitude, would derive an
+    identity; representations and role sets must therefore agree first.
+    """
+    if a.representation != b.representation or sorted(map(str, a.axis_roles)) != sorted(
+        map(str, b.axis_roles)
+    ):
+        raise ValueError(
+            f"a {a.representation} system with roles {a.axis_roles} and a {b.representation} "
+            f"system with roles {b.axis_roles} are not related by an axis permutation; use an "
+            "explicit chart transition such as GeodeticToCartesian or SphericalToCartesian",
+        )
+    matrix = np.zeros((len(b.axes), len(a.axes)))
+    for i, role in enumerate(b.axis_roles):
+        if role is None:
+            if (a.axes[i], a.units[i], a.axis_types[i], a.axis_roles[i]) != (
+                b.axes[i],
+                b.units[i],
+                b.axis_types[i],
+                None,
+            ):
+                raise ValueError(
+                    f"axis {b.axes[i]!r} has no role and does not appear unchanged at the same "
+                    "position in the source; such axes pass through only when identical",
+                )
+            matrix[i, i] = 1.0
+            continue
+        j = a.axis_roles.index(role)
+        if a.units[j] != b.units[i]:
+            raise ValueError(
+                f"{role} axis {a.axes[j]!r} in {a.units[j]!r} matches {b.axes[i]!r} in "
+                f"{b.units[i]!r}; units are never rescaled here, so supply an explicit "
+                "scaling transform",
+            )
+        if a.axis_types[j] != b.axis_types[i]:
+            raise ValueError(
+                f"{role} axis {a.axes[j]!r} of type {a.axis_types[j]!r} matches {b.axes[i]!r} "
+                f"of type {b.axis_types[i]!r}; an axis keeps its type across coordinate "
+                "systems of one frame",
+            )
+        matrix[i, j] = 1.0
+    return matrix

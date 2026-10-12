@@ -1,5 +1,29 @@
 # Changelog
 
+## [2026-10-12] — Angular charts stage 2: chart transitions
+
+- **Problem**: A lon/lat/height chart and an Earth-centred Cartesian chart of one frame had no
+  conversion: `coordinate_system_change` derives only permutations, and stage 1 made it refuse
+  angular/Cartesian pairs.
+- **Resolution**: `SphericalToCartesian`, `CartesianToSpherical`, `GeodeticToCartesian` and
+  `CartesianToGeodetic` (`_chart_transitions.py`): equivalent-frame endpoints, explicit figure
+  checked against reserved definition keys, Vermeille's closed-form geodetic inverse, forward
+  domain equal to the inverse image (height above `-N(1 - e²)`, outside the evolute bound), exact
+  poles on the axis, pointwise Jacobians with an analytic inverse whose longitude scale comes
+  from the Cartesian distance to the axis. Four schema-1 record kinds.
+  `coordinate_system_change` matches angular axes by role. Component resampling names the target
+  sample when a Jacobian raises, not only when it is singular. Oracles: pyproj live (dev extra),
+  Astropy as a generated fixture (`tools/build_astropy_spherical_fixture.py`).
+- **Verification**: stock 2,384 passed plus 47 xfailed; patched and upstream lanes pass; ruff
+  and mypy pass.
+- **Files affected**: `src/xarrayrf/_chart_transitions.py`, `_encoding.py`, `_orientation.py`,
+  `_component_resampling.py`, `__init__.py`; `tests/test_chart_transitions.py`,
+  `test_encoding.py`, `test_orientation.py`, `test_component_resampling.py`;
+  `tests/fixtures/astropy_spherical.json`; `tools/build_astropy_spherical_fixture.py`;
+  `pyproject.toml` (mypy: astropy stubs); `CHANGELOG.md`; `docs/core_interface.md`,
+  `docs/design.md`.
+- **Reviewed by**: Codex (gpt-6-sol, high), plan and implementation.
+
 ## [2026-10-12] — Independent QA of angular charts stage 1
 
 - **Problem**: Review the angular declarations, refusals and persistence (`515b9e7`, design

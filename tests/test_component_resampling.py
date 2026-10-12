@@ -382,6 +382,28 @@ def test_a_singular_jacobian_names_the_target_sample() -> None:
         )
 
 
+class Undefined(Bend):
+    """A map whose Jacobian raises at x = 0.5, as a chart transition does on the polar axis."""
+
+    def jacobian(self, at: npt.ArrayLike | None = None) -> npt.NDArray[np.float64]:
+        values = np.asarray(at, dtype=np.float64)
+        if np.isclose(values[..., 0], 0.5).any():
+            raise ValueError("no Jacobian on the axis")
+        return super().jacobian(at)
+
+
+def test_a_raised_jacobian_names_the_target_sample() -> None:
+    with pytest.raises(ValueError, match=r"undefined at target sample \{'k': 2, 'j': 0, 'i': 0\}"):
+        xrf.resample(
+            constant_field(VECTOR_VALUE).rf.geometry,
+            TARGET.rf.grid,
+            transform=Undefined(),
+            output_component_basis=FIXED,
+            component_reorientation="jacobian",
+            block_points=5,
+        )
+
+
 def test_box_methods_average_components_and_keep_the_declaration() -> None:
     from test_box_resample import slab_grid
 

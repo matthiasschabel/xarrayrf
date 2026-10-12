@@ -20,6 +20,12 @@ import numpy as np
 
 from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
+from ._chart_transitions import (
+    CartesianToGeodetic,
+    CartesianToSpherical,
+    GeodeticToCartesian,
+    SphericalToCartesian,
+)
 from ._composite import CompositeTransform
 from ._coordinate_system import CARTESIAN, CoordinateSystem
 from ._frame import ReferenceFrame
@@ -89,6 +95,10 @@ _BUILT_IN: Final = frozenset(
         "array_coordinates",
         "affine_transform",
         "composite_transform",
+        "spherical_to_cartesian",
+        "cartesian_to_spherical",
+        "geodetic_to_cartesian",
+        "cartesian_to_geodetic",
         "grid",
         "tensor_type",
         "tensor_component_declaration",
@@ -223,6 +233,22 @@ def _encode(value: object) -> dict[str, Any]:
             "target": _encode(value.target),
             "matrix": value.matrix.tolist(),
             "translation": value.translation.tolist(),
+        }
+    if isinstance(value, SphericalToCartesian | CartesianToSpherical):
+        return {
+            "kind": _TRANSITION_KINDS[type(value)],
+            "source": _encode(value.source),
+            "target": _encode(value.target),
+            "longitude_start": value.longitude_start,
+        }
+    if isinstance(value, GeodeticToCartesian | CartesianToGeodetic):
+        return {
+            "kind": _TRANSITION_KINDS[type(value)],
+            "source": _encode(value.source),
+            "target": _encode(value.target),
+            "semi_major_axis": value.semi_major_axis,
+            "inverse_flattening": value.inverse_flattening,
+            "longitude_start": value.longitude_start,
         }
     if isinstance(value, CompositeTransform):
         return {
@@ -373,6 +399,22 @@ _FIELDS: Final = {
     "array_coordinates": {"axes", "units", "axis_types", "sample_offset"},
     "affine_transform": {"source", "target", "matrix", "translation"},
     "composite_transform": {"transforms"},
+    "spherical_to_cartesian": {"source", "target", "longitude_start"},
+    "cartesian_to_spherical": {"source", "target", "longitude_start"},
+    "geodetic_to_cartesian": {
+        "source",
+        "target",
+        "semi_major_axis",
+        "inverse_flattening",
+        "longitude_start",
+    },
+    "cartesian_to_geodetic": {
+        "source",
+        "target",
+        "semi_major_axis",
+        "inverse_flattening",
+        "longitude_start",
+    },
     "grid": {"transform", "dims", "coordinates", "intervals"},
     "tensor_type": {
         "index_variance",
@@ -384,6 +426,13 @@ _FIELDS: Final = {
     "tensor_component_declaration": {"tensor_type", "component_dims", "bases"},
     "symmetric_packing": {"index_pairs", "off_diagonal_scale"},
     "packed_tensor_component_declaration": {"tensor_type", "component_dim", "basis", "packing"},
+}
+
+_TRANSITION_KINDS: Final[dict[type, str]] = {
+    SphericalToCartesian: "spherical_to_cartesian",
+    CartesianToSpherical: "cartesian_to_spherical",
+    GeodeticToCartesian: "geodetic_to_cartesian",
+    CartesianToGeodetic: "cartesian_to_geodetic",
 }
 
 _OPTIONAL_FIELDS: Final = {"coordinate_system": {"axis_roles"}}
@@ -604,6 +653,38 @@ class _Decoder:
     def composite_transform(self, fields: Mapping[str, Any]) -> CompositeTransform:
         members = [self.value(item) for item in self._list(fields["transforms"], "transforms")]
         return CompositeTransform(*members)
+
+    # Constructors validate the frames and numbers; their TypeError and ValueError surface as
+    # MalformedDataError through the dispatcher.
+    def spherical_to_cartesian(self, fields: Mapping[str, Any]) -> SphericalToCartesian:
+        return SphericalToCartesian(
+            *self._frames(fields), longitude_start=fields["longitude_start"]
+        )
+
+    def cartesian_to_spherical(self, fields: Mapping[str, Any]) -> CartesianToSpherical:
+        return CartesianToSpherical(
+            *self._frames(fields), longitude_start=fields["longitude_start"]
+        )
+
+    def geodetic_to_cartesian(self, fields: Mapping[str, Any]) -> GeodeticToCartesian:
+        return GeodeticToCartesian(*self._frames(fields), **self._figure(fields))
+
+    def cartesian_to_geodetic(self, fields: Mapping[str, Any]) -> CartesianToGeodetic:
+        return CartesianToGeodetic(*self._frames(fields), **self._figure(fields))
+
+    def _frames(self, fields: Mapping[str, Any]) -> tuple[ReferenceFrame, ReferenceFrame]:
+        source, target = self.value(fields["source"]), self.value(fields["target"])
+        if not isinstance(source, ReferenceFrame) or not isinstance(target, ReferenceFrame):
+            raise MalformedDataError("a chart transition's endpoints must be reference frames")
+        return source, target
+
+    @staticmethod
+    def _figure(fields: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "semi_major_axis": fields["semi_major_axis"],
+            "inverse_flattening": fields["inverse_flattening"],
+            "longitude_start": fields["longitude_start"],
+        }
 
     def _extension(self, kind: str, fields: Mapping[str, Any]) -> SupportsPoints:
         decoder = self._decoders.get(kind)
