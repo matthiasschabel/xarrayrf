@@ -10,7 +10,8 @@ of [the value geometry design](value_geometry_design.md) (sections 1 and 7).
 
 The design fixes one law,
 
-    T' = sign(det J)^[parity odd] * |det J|^w * (J on each up slot)(J^-T on each down slot) T
+    T' = sign(det J)^[parity odd] * |det J|^w
+         * (J on each contravariant slot) (J^-T on each covariant slot) T
 
 with `J[a, b] = d target_a / d source_b`, and stages its delivery. Stage 1 is the law alone: a
 value object declaring a value's tensor type and a NumPy function applying the law to arrays. It
@@ -33,26 +34,26 @@ objects:
 
 | Field | Type | Validation |
 |---|---|---|
-| `variance` | `tuple[Literal["up", "down"], ...]` | any sequence of those strings, normalised to a tuple; empty means scalar |
+| `index_variance` | `tuple[Literal["contravariant", "covariant"], ...]` | any sequence of those strings, normalised to a tuple; empty means scalar; `"up"` / `"down"` are refused, not aliased |
 | `parity` | `Literal["even", "odd"]` | default `"even"` |
 | `det_power` | `float` | finite real, not `bool`; default `0.0`; stored as `float` so `-1` and `-1.0` are equal and hash equal |
 | `symmetry` | `Literal["symmetric", "antisymmetric"] \| None` | default `None`; only with exactly two slots of equal variance, else `ValueError` naming the shear counterexample |
 
-Properties: `rank` (`len(variance)`). No `basis` field: bases belong to the stage-2 component
+Properties: `rank` (`len(index_variance)`). No `basis` field: bases belong to the stage-2 component
 index, never to the type.
 
 Shortcuts, as module constants of plain `TensorType` values (not persisted categories):
 
-| Constant | variance | parity | `det_power` |
+| Constant | `index_variance` | parity | `det_power` |
 |---|---|---|---|
 | `SCALAR` | `()` | even | 0 |
 | `PSEUDOSCALAR` | `()` | odd | 0 |
-| `VECTOR` | `("up",)` | even | 0 |
-| `COVECTOR` | `("down",)` | even | 0 |
-| `SECOND_RANK_TENSOR` | `("up", "up")` | even | 0 |
-| `CROSS_PRODUCT_VECTOR` | `("down",)` | odd | 1 |
-| `TWO_FORM_DUAL` | `("up",)` | odd | -1 |
-| `PSEUDOVECTOR` | `("up",)` | odd | 0, orthogonal maps only |
+| `VECTOR` | `("contravariant",)` | even | 0 |
+| `COVECTOR` | `("covariant",)` | even | 0 |
+| `SECOND_RANK_TENSOR` | `("contravariant", "contravariant")` | even | 0 |
+| `CROSS_PRODUCT_VECTOR` | `("covariant",)` | odd | 1 |
+| `TWO_FORM_DUAL` | `("contravariant",)` | odd | -1 |
+| `PSEUDOVECTOR` | `("contravariant",)` | odd | 0, orthogonal maps only |
 
 A scalar density is spelled `TensorType((), det_power=-1)`; no constant, since the exponent
 depends on what is counted per volume. `PSEUDOVECTOR` needs a refusal the others do not, so
@@ -90,7 +91,7 @@ depends on what is counted per volume. `PSEUDOVECTOR` needs a refusal the others
 Algorithm, all batched, no Python loop over points:
 
 1. Validate the type and map (finite, real, square, `n` consistent with every component axis).
-2. Move component axes to the end. For each up slot apply `J`, for each down slot `J^-T`, by
+2. Move component axes to the end. For each contravariant slot apply `J`, for each covariant slot `J^-T`, by
    `matmul` along that axis with the map broadcast over the other component axes.
 3. If parity is odd or `det_power != 0`, compute `sign, logabsdet = np.linalg.slogdet(J)`
    batched. The scalar factor is `exp(w * logabsdet)`, times `sign` **only for odd parity** (an
@@ -103,7 +104,7 @@ Algorithm, all batched, no Python loop over points:
    and values follows NumPy (inf with a warning), as for any array arithmetic.
 4. Move axes back.
 
-Refusal of singular maps: when the type has a down slot, odd parity or `det_power != 0`, the map
+Refusal of singular maps: when the type has a covariant slot, odd parity or `det_power != 0`, the map
 must pass the equilibrated conditioning test already used by `AffineTransform.inverse`
 (`INVERSE_CONDITION_LIMIT`, unit-independent). `equilibrated_inverse` in `_affine.py` is 2-D
 only; generalise it to `(..., n, n)` with per-matrix row and column equilibration, keeping the
@@ -116,9 +117,9 @@ tolerance. The message names `CROSS_PRODUCT_VECTOR` and `TWO_FORM_DUAL`. Units a
 the kernel, so "orthogonal" is about the numbers; a caller mixing units is responsible, as with
 the rest of the kernel.
 
-Distinct bases per slot (stage 2, e.g. an up slot in a frame and a down slot in array
+Distinct bases per slot (stage 2, e.g. an contravariant slot in a frame and a covariant slot in array
 coordinates) need no per-slot map argument: the caller first converts each slot to a common
-basis with a rank-one call on that axis (`TensorType(("up",))` or `(("down",))` with
+basis with a rank-one call on that axis (`TensorType(("contravariant",))` or `(("covariant",))` with
 `component_axes=(axis,)`), then applies the common map. Stage 2 documents this route.
 
 Symmetry: the kernel does not check that symmetric input is symmetric (that is a carrier
@@ -159,8 +160,8 @@ numbers):
    second-rank tensor to `diag(2,3,1)` gives upper triangle `[2.2, 0.4, 0, 2.8, 0, 1]`
    (prior-art oracle 4; these values are exact: `R = [[2,1,0],[-1,2,0],[0,0,√5]]/√5`).
 2. Rotation: `SECOND_RANK_TENSOR` under a rotation equals `R T R^T`. Mixed tensor
-   `TensorType(("up", "down"))` under the shear equals `J T J^-1` (ITK's symmetric-tensor
-   formula, reachable only by declaring mixed variance). Rank 3 `("up", "down", "down")` on a
+   `TensorType(("contravariant", "covariant"))` under the shear equals `J T J^-1` (ITK's symmetric-tensor
+   formula, reachable only by declaring mixed variance). Rank 3 `("contravariant", "covariant", "covariant")` on a
    seeded random map equals an explicit `einsum("ai,bj,ck,ibc->ajk", J, Jinv, Jinv, T)`
    (written per index, independent of the kernel's matmul route).
 3. Reflection `diag(-1,1,1)`: `VECTOR (1,1,1) -> (-1,1,1)`; `PSEUDOVECTOR (1,1,1) -> (1,-1,-1)`;
@@ -174,7 +175,7 @@ numbers):
    non-orthogonal improper map.
 6. Lorentz boost, `boost_matrix(0.6)` from `tests/test_relativity.py` (c = 1): with
    `F^{0i} = E_i`, `F^{ij} = eps_ijk B_k`, `E = (1, 2, 3)`, `B = (4, 5, 6)`, the
-   `("up", "up")` antisymmetric type gives `E' = (1, -2, 7.5)`, `B' = (4, 8.5, 6)`, which match
+   `("contravariant", "contravariant")` antisymmetric type gives `E' = (1, -2, 7.5)`, `B' = (4, 8.5, 6)`, which match
    the textbook `E'_y = gamma (E_y - beta B_z)` and its companions.
 7. Pointwise maps: a `(4, 3, 3)` stack against `(4, 3)` values equals four separate calls;
    broadcasting a single map over `(5, 4, 3)`.
@@ -196,7 +197,7 @@ numbers):
 Refusals, one test per raised error, asserting type and message fragment: masked values;
 boolean and object values; non-integer and `bool` `component_axes`; non-`bool`
 `orthogonal_only`; invalid slot string;
-non-sequence variance; bad parity; non-finite or `bool` `det_power`; symmetry on rank != 2;
+non-sequence `index_variance`; bad parity; non-finite or `bool` `det_power`; symmetry on rank != 2;
 symmetry on mixed variance; non-square map; mismatched `n`; wrong number of `component_axes`;
 duplicate or out-of-range axes; non-finite map; singular map where required (single and batched,
 naming the index); `orthogonal_only` with a shear; `polar_rotation` of a singular map.
@@ -204,8 +205,8 @@ naming the index); `orthogonal_only` with a shear; `polar_rotation` of a singula
 Import boundary: the xarray-blocked subprocess calls `transform_components` and
 `polar_rotation`.
 
-Equality and hashing: `TensorType(("up",)) == VECTOR`; `det_power=-1` vs `-1.0` hash equal;
-`orthogonal_only` distinguishes `PSEUDOVECTOR` from `TensorType(("up",), parity="odd")`.
+Equality and hashing: `TensorType(("contravariant",)) == VECTOR`; `det_power=-1` vs `-1.0` hash equal;
+`orthogonal_only` distinguishes `PSEUDOVECTOR` from `TensorType(("contravariant",), parity="odd")`.
 
 ### Documentation
 

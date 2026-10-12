@@ -40,7 +40,8 @@ accepted; no open disagreements.
 
 A `TensorType` value object declares, per variable:
 
-- `variance`: tuple of `"up"` / `"down"`, one per component index (empty = scalar);
+- `index_variance`: tuple of `"contravariant"` (transforms with `J`) or `"covariant"`
+  (with `J^-T`), one per component axis, in order (empty = scalar);
 - `parity`: `"even"` or `"odd"`;
 - `det_power`: real `w`;
 - `symmetry`: `None`, `"symmetric"` or `"antisymmetric"`: rank 2 only, and only for two
@@ -50,15 +51,17 @@ A `TensorType` value object declares, per variable:
 With `J` the components of the linear map from the source basis to the target basis
 (`J[a, b] = d target_a / d source_b`):
 
-    T' = sign(det J)^[parity odd] * |det J|^w * (J on each up slot) (J^-T on each down slot) T
+    T' = sign(det J)^[parity odd] * |det J|^w
+         * (J on each contravariant slot) (J^-T on each covariant slot) T
 
-The existing named rules become shortcuts: `VECTOR = (up,)`, `COVECTOR = (down,)`,
-`SECOND_RANK_TENSOR = (up, up)`; mass density = scalar with `w = -1`.
+The existing named rules become shortcuts: `VECTOR = (contravariant,)`,
+`COVECTOR = (covariant,)`, `SECOND_RANK_TENSOR = (contravariant, contravariant)`; mass
+density = scalar with `w = -1`.
 
 **Pseudovectors are not one law under non-orthogonal maps.** Using
 `(Mx) x (My) = det(M) M^-T (x x y)`: a cross product of two vectors (torque, angular momentum)
-transforms as `det(J) J^-T b` = `(down,)`, odd, `w = 1`; the axial dual of a 2-form (magnetic
-flux density as a flux form) transforms as `det(J)^-1 J b` = `(up,)`, odd, `w = -1`. Both
+transforms as `det(J) J^-T b` = `(covariant,)`, odd, `w = 1`; the axial dual of a 2-form (magnetic
+flux density as a flux form) transforms as `det(J)^-1 J b` = `(contravariant,)`, odd, `w = -1`. Both
 reduce to `sign(det R) R b` for orthogonal `R`. So the `pseudovector` shortcut is defined only
 for orthogonal `J` (refusing otherwise, with a message naming the two explicit declarations),
 and general maps require the explicit type. The two origins may be convenience constructors
@@ -72,7 +75,7 @@ policy (PPD, downstream).
 
 Kernel: `transform_components(values, linear_map, tensor_type, *, component_axes)` in the
 NumPy-only geometry core, vectorised over leading axes and over pointwise maps
-(`linear_map` shape `(..., n, n)`), chunk-friendly. Refuses singular maps where a down slot or
+(`linear_map` shape `(..., n, n)`), chunk-friendly. Refuses singular maps where a covariant slot or
 nonzero `w` needs `det`/inverse.
 
 ### 2. Where components live: a component index, not attrs
@@ -185,10 +188,11 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 - **Naming the type `QuantityType`.** Rejected: pint's and astropy's `Quantity` (and
   xarrayrf's own `units` module) mean a value with units, so the name suggests dimensional
   analysis. "A tensor of type (p, q)" is the standard term; densities and pseudotensors are
-  tensor types with a determinant power and odd parity. The per-slot field is `variance`,
-  not `indices`, because "component index" already names the xarray index that carries
-  the type. `det_power` is kept rather than "weight", whose sign convention varies by
-  author.
+  tensor types with a determinant power and odd parity. The per-slot field is `index_variance`
+  with values `"contravariant"` / `"covariant"`: bare `variance` reads as the statistical
+  concept, `indices` would collide with the component index that carries the type, and
+  the physicists' `"up"` / `"down"` are shorthand that needs the textbook. `det_power` is kept
+  rather than "weight", whose sign convention varies by author.
 - **Attrs as the type carrier.** Rejected for the reason the binding design rejected them:
   arithmetic keeps the first operand's attrs, so a vector plus a covector keeps a
   valid-looking wrong type, and `resample` copies attrs. Rank >= 1 uses an index instead.
