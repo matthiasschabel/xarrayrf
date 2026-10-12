@@ -9,7 +9,7 @@
   axes such as time. Angular axes take degrees, CF `degrees_east`/`degrees_north` or radians;
   Euclidean quantities are refused on them (`Lattice.spacing`, `Lattice.direction`,
   `axis_codes`, box averaging along latitude). `axis_roles` persists as an optional schema-1
-  field. Longitude does not wrap at 0/360 yet.
+  field.
 - Chart transitions between an angular chart and a Cartesian chart of one frame:
   `SphericalToCartesian`, `CartesianToSpherical`, `GeodeticToCartesian` and
   `CartesianToGeodetic`, with pointwise Jacobians, exact inverses and persistence. The
@@ -19,6 +19,10 @@
 - `coordinate_system_change` matches the axes of two angular systems by role, so reordering
   longitude and latitude is derivable; it refuses systems that differ in representation or
   roles rather than deriving an identity from matching axis names.
+- Resampling a spherical or geodetic source wraps at the longitude seam (global grids, found
+  exactly for nonuniform, descending and float32 labels; regional grids found from another
+  branch) and interpolates across the poles of global grids with antipodal longitudes. Labels
+  stay literal. Declared components do not cross poles yet; box methods do not wrap.
 
 ### Changed
 

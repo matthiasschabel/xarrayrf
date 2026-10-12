@@ -15,6 +15,7 @@ import numpy.typing as npt
 from ._array_coordinates import ArrayCoordinates
 from ._composite import CompositeTransform
 from ._lattice import Lattice
+from ._periodic import PeriodicAxes
 from ._sampling import (
     DOMAINS,
     POSITION_SLACK,
@@ -98,12 +99,15 @@ def locator(
     slack: float = 0.0,
     *,
     extrapolate: bool = False,
+    periodic: PeriodicAxes | None = None,
 ) -> Locator:
     """Validate once and return frame points -> positions ``(..., D)``, NaN outside.
 
     The inverse and the coordinate values are prepared here, so repeated calls, such as one
     per resampling block, pay only for the arithmetic. ``slack`` widens the domain by that
-    many steps on every side, for comparisons within a tolerance.
+    many steps on every side, for comparisons within a tolerance. ``periodic`` locates the
+    angular axes that wrap or cross a pole, in positions of the halo-extended block; only
+    resampling passes it, so every other query keeps literal labels.
 
     Raises:
         TypeError: If the transform has no inverse.
@@ -134,9 +138,17 @@ def locator(
         else:
             coordinates = transform_points(inverse, values)
             roundoff = None
-        positions = np.stack(
-            [
-                coordinate_to_position(
+        columns = []
+        for sampling, axis, extent in order:
+            # The periodic step happens before any domain check, which would turn seam targets
+            # into NaN.
+            column = (
+                periodic.locate(axis, coordinates[..., axis], extent)
+                if periodic is not None
+                else None
+            )
+            if column is None:
+                column = coordinate_to_position(
                     sampling.values,
                     coordinates[..., axis],
                     singleton_step(sampling, domain),
@@ -144,10 +156,8 @@ def locator(
                     extrapolate=extrapolate,
                     roundoff=0.0 if roundoff is None else roundoff[..., axis],
                 )
-                for sampling, axis, extent in order
-            ],
-            axis=-1,
-        )
+            columns.append(column)
+        positions = np.stack(columns, axis=-1)
         # A point outside along any dimension is outside as a whole.
         positions[np.isnan(positions).any(axis=-1)] = np.nan
         return positions

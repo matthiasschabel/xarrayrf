@@ -195,8 +195,8 @@ allowed. `coordinate_system_change` refuses two systems that differ in represent
 roles when either is angular, and matches angular axes by role otherwise; conversions to
 Cartesian charts are the chart transitions below. NGFF export refuses angular frames, since NGFF axes carry no
 representation and degree units would read back as refused Cartesian axes; NIfTI export already
-requires an oriented patient frame. Longitude labels are not wrapped yet: a target beyond the outer source
-labels is outside, as on any axis. Seam-aware resampling and a CF reader follow.
+requires an oriented patient frame. Resampling wraps at the longitude seam and crosses the poles
+(see Resampling); labels themselves are never wrapped. A CF reader follows.
 
 **`ReferenceFrame`**: identifier, `coordinate_system`, optional `role`, `definition`, `context`,
 `display`; constructed by `ReferenceFrame.local(coordinate_system, ...)`,
@@ -909,6 +909,37 @@ allowance, not an origin-relative physical support window. An interval supplies 
 samples-domain fractional extrapolation.
 
 ## Resampling
+
+### Longitude seams and poles
+
+On a source whose frame is spherical or geodetic, point methods (`nearest`, `linear`, `cubic`)
+treat longitude as periodic and latitude as continuing across a pole, when the source mapping
+lets them: the longitude (and latitude) frame axis must depend on exactly one source coordinate,
+which feeds no other frame axis, so a rotated-pole mapping takes no part. Labels and outputs stay
+literal; only where a target is found changes. Box methods do neither.
+
+- **Global longitude** wraps: a target is located modulo the period, between the last and the
+  first sample across the seam, and halos extend the source so that every method interpolates
+  there. Coverage comes from declared intervals when the axis has them (global when they tile
+  the period), otherwise from labels: the seam may be no wider than the widest step anywhere in
+  the grid. A closing duplicate (0 and 360 both present) is recognized and its last sample is
+  never read. Nonuniform, descending and float32-stored labels are located exactly. A grid
+  whose steps vary by more than a factor of two and that misses one sample can look global from
+  labels alone; declare its intervals.
+- **Regional longitude** never interpolates across its gap, but is found from targets on
+  another branch: a 170…190 grid answers a target labelled −185.
+- **Poles**: on a global grid whose longitudes come in antipodal pairs, latitude continues
+  across a pole on the meridian half a turn away, for a pole sample (±90) or cell-centred rows
+  (±89.5 on a 1° grid). Targets in the polar cap are interpolated rather than filled; beyond
+  ±90 they are outside. Declared tensor components never cross a pole (their east and north
+  reverse there); their polar-cap targets stay outside until pointwise bases exist.
+- **Cost**: such sources take the general per-point path rather than the separable lattice
+  path, without cropping, and cubic interpolation reads 24 extra samples on each side of the
+  seam.
+
+The approach follows xarraybc's periodic bracketing and sphere topology.
+
+### Resampling in general
 
 `resample` is explicit and lives in the xarray layer. For each target sample it computes the point
 in the target frame, maps it into the source frame, then through the inverse of the source's

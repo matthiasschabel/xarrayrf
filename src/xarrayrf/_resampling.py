@@ -19,7 +19,17 @@ from ._frame import ReferenceFrame
 from ._frame_adoption import adopt_frame
 from ._frame_compatibility import anonymous_frame_difference
 from ._orientation import coordinate_system_change
-from ._positions import check_domain, extents, lattice, lattice_parts, locator, sample_columns
+from ._periodic import CUBIC_HALO, PeriodicAxes, periodic_axes
+from ._positions import (
+    check_domain,
+    extents,
+    lattice,
+    lattice_parts,
+    located_axes,
+    locator,
+    reach,
+    sample_columns,
+)
 from ._sampling import (
     LATTICE_TOLERANCE,
     POSITION_SLACK,
@@ -226,11 +236,12 @@ def _general_map(
     target_dims: tuple[str, ...],
     frame_map: SupportsPoints | None,
     domain: Domain,
+    periodic: PeriodicAxes | None = None,
 ) -> PositionMap:
     """Map through target coordinates, the frames and the source's exact inverse."""
     samplings = target.axes
     transform = target.transform
-    locate = locator(source, domain)
+    locate = locator(source, domain, periodic=periodic)
     source_axes = [source.dims.index(dim) for dim in source_dims]
     identity_order = source_dims == source.dims
 
@@ -543,6 +554,8 @@ class _Plan:
     intervals: dict[str, npt.NDArray[np.float64]]
     frame_map: SupportsPoints | None
     target_frame_points: Callable[[int, int], npt.NDArray[np.float64]]
+    extend: Callable[[npt.NDArray[np.generic]], npt.NDArray[np.generic]] | None = None
+    """Halo extension of each source block for a wrapping or pole-crossing source."""
 
 
 def check_options(
@@ -600,6 +613,7 @@ def plan(
     support: Support = "point",
     min_coverage: float = 0.5,
     adoption_suffices: Callable[[AffineTransform], bool] | None = None,
+    pole_halos: bool = True,
 ) -> _Plan:
     """Plan interpolation for trailing source axes and output axes in explicit storage order.
 
@@ -608,7 +622,9 @@ def plan(
     ``source_order`` and ``target_order`` must name exactly their sampling's dims, once each.
     Coordinate reads are deferred until option and frame checks have passed.
     ``adoption_suffices`` is called only for the anonymous-frame diagnostic; without it,
-    adoption is treated as insufficient.
+    adoption is treated as insufficient. ``pole_halos`` allows interpolation across a pole of
+    a global longitude/latitude source; it is off for declared components, whose basis flips
+    there.
 
     Raises:
         ValueError: If either storage order does not name exactly its sampling's dims.
@@ -654,6 +670,7 @@ def plan(
     lattice_map = None
     position_map = None
     box = None
+    periodic: PeriodicAxes | None = None
     if total and any(source.sizes[dim] == 0 for dim in source_dims):
         raise ValueError("cannot resample an empty source: nothing to sample from")
     if method in BOX_METHODS:
@@ -661,11 +678,29 @@ def plan(
             source, target, frame_map, source_dims, target_dims, method, support, min_coverage
         )
     elif total:
-        reach = extents(source, domain)
-        reach = [reach[source.dims.index(dim)] for dim in source_dims]
-        lattice_map = _lattice_map(source, target, source_dims, target_dims, frame_map, reach)
+        located = located_axes(source)
+        periodic = periodic_axes(
+            source,
+            halo=CUBIC_HALO if order == 3 else 1,
+            pole_halos=pole_halos,
+            domain=domain,
+            extents={
+                axis: extent
+                for (_, axis, _), extent in zip(located, reach(located, domain), strict=True)
+            },
+        )
+        if periodic is None:
+            source_reach = extents(source, domain)
+            source_reach = [source_reach[source.dims.index(dim)] for dim in source_dims]
+            lattice_map = _lattice_map(
+                source, target, source_dims, target_dims, frame_map, source_reach
+            )
         if lattice_map is None:
-            position_map = _general_map(source, target, source_dims, target_dims, frame_map, domain)
+            # A modulo or a mirror is not affine, and a crop could drop samples across the
+            # seam, so a periodic source takes the general path.
+            position_map = _general_map(
+                source, target, source_dims, target_dims, frame_map, domain, periodic
+            )
     output_dtype = _output_dtype(dtype, method, fill_value)
     source_shape = tuple(source.sizes[dim] for dim in source_dims) if total else ()
     window = None
@@ -693,6 +728,20 @@ def plan(
         else None
     )
 
+    extend = None
+    if periodic is not None and total:
+        axis_of = {sampling.dim: index for index, sampling in enumerate(source.axes)}
+        source_shape = tuple(
+            periodic.extended_size(axis_of[dim], size)
+            for dim, size in zip(source_dims, source_shape, strict=True)
+        )
+        storage = {axis_of[dim]: k for k, dim in enumerate(source_dims)}
+        lon_dim = storage[periodic.longitude.axis]
+        lat_dim = None if periodic.latitude is None else storage[periodic.latitude.axis]
+
+        def extend(volume: npt.NDArray[np.generic]) -> npt.NDArray[np.generic]:
+            return periodic.extend(volume, lon_dim, lat_dim)
+
     source_last = np.array([size - 1 for size in source_shape], dtype=np.float64).reshape(-1, 1)
 
     try:
@@ -719,6 +768,7 @@ def plan(
         intervals=_interval_claims(source, target, frame_map, support) if total else {},
         frame_map=frame_map,
         target_frame_points=_target_frame_points(target, target_dims, target_shape),
+        extend=extend,
     )
 
 
@@ -940,6 +990,8 @@ def execute(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.gene
             "spreads along whole lines; fill or mask them first, or use method='linear'"
         )
     slices = [values[index] for index in np.ndindex(*leading)]
+    if plan.extend is not None:
+        slices = [plan.extend(volume) for volume in slices]
     if plan.lattice_map is None:
         return _general_block(plan, slices, leading)
     return _lattice_block(plan, slices, leading)

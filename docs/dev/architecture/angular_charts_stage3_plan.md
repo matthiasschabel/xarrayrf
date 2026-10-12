@@ -1,6 +1,6 @@
 # Angular charts stage 3: seam- and pole-aware resampling
 
-**Status:** Active (plan; review rounds 1 and 2 addressed)
+**Status:** Implemented (2026-10-12; plan reviewed by Codex gpt-6-sol)
 **Last updated:** 2026-10-12
 **Scope:** `resample` (and `rf.resample_to`) on an angular source: global longitude wraps,
 regional longitude is found from targets on another branch, and global grids interpolate across

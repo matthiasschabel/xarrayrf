@@ -160,6 +160,13 @@ with `radius` is for charts measured from the centre.
 
 A global longitude grid is unusable without it, so it is in this stage.
 
+**Amended 2026-10-12 by the [stage 3 plan](angular_charts_stage3_plan.md):** location is exact
+(ported from xarraybc's `periodic_bracket_array`), so nonuniform and float32 global grids are
+included and the uniformity requirement below no longer applies; coverage comes from declared
+intervals or, conservatively, from labels; and latitude crosses the poles on global grids with
+antipodal longitude pairs ("latitude never wraps" below is superseded). The rest of this section
+is the original design.
+
 **Where wrapping applies.** On a source geometry whose frame has an angular representation, the
 longitude frame axis wraps when the source geometry's transform is affine, that frame axis
 depends on exactly one source axis with scale `s`, and that source axis affects no other frame
@@ -307,4 +314,5 @@ Each gets a short plan reviewed before implementation, as for value geometry.
 1. Stage 1, declarations, refusals and persistence ([plan](angular_charts_stage1_plan.md)).
    Done.
 2. Stage 2, transitions ([plan](angular_charts_stage2_plan.md)). Done.
-3. Stage 3 plan: seam-aware resampling (section 4).
+3. Stage 3, seam- and pole-aware resampling ([plan](angular_charts_stage3_plan.md)). Done.
+4. Stage 4 plan: the minimal CF reader (section 5).

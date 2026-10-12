@@ -297,6 +297,8 @@ def _resample_with_intervals(
         min_coverage=min_coverage,
         block_points=block_points,
         adoption_suffices=adoption_suffices,
+        # Declared components flip across a pole in a basis that varies by position.
+        pole_halos=components is None,
     )
     source_values = source_array
     if plan.window is not None:

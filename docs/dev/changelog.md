@@ -1,5 +1,25 @@
 # Changelog
 
+## [2026-10-12] — Angular charts stage 3: seam- and pole-aware resampling
+
+- **Problem**: Resampling treated longitude/latitude labels literally: a target at 358.75° on a
+  0…357.5° grid was fill, a regional 170…190 grid was not found from −175, and every target in
+  the polar cap of a cell-centred grid (±89.5°) was fill.
+- **Resolution**: `_periodic.py` decides, from metadata and labels, whether the longitude axis
+  wraps (global, by declared intervals or a conservative seam-gap rule; closing duplicates
+  recognized) or is regional (branch shift), and whether latitude crosses the poles (global
+  longitude with antipodal pairs; odd or even mirror chosen from the labels; beyond ±90
+  refused). Location is exact, ported from xarraybc's `periodic_bracket_array`; the pole
+  crossing follows its `sphere` topology. `locator` applies it before any domain check;
+  `plan` skips the lattice path for such sources and extends each block with halos (1 sample,
+  24 for cubic). Declared components get no pole halo (`pole_halos=False`).
+- **Verification**: stock 2,424 passed plus 47 xfailed; patched and upstream lanes pass; ruff
+  and mypy pass. A 1440 × 720 global grid resamples in about 0.13 s, linear or cubic.
+- **Files affected**: `src/xarrayrf/_periodic.py`, `_positions.py`, `_resampling.py`,
+  `_resample.py`; `tests/test_seam_resampling.py`, `tests/test_resample.py`;
+  `docs/core_interface.md`, `CHANGELOG.md`, the angular charts design and stage 3 plan.
+- **Reviewed by**: Codex (gpt-6-sol, high), plan and implementation.
+
 ## [2026-10-12] — Independent QA of angular charts steps 1 and 2
 
 - **Problem**: Cross-model QA (Codex gpt-6-astra, after gpt-6-sol's reviews) of the angular
