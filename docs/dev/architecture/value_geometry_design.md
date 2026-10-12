@@ -235,7 +235,7 @@ rationale):
 
 | Item | Waits for | Source |
 |---|---|---|
-| Pointwise bases (`FrameField`), stage 4 | angular charts (nonlinear plan stage 2) | this design, section 4 |
+| Pointwise bases (`FrameField`), stage 4 | angular charts ([design](angular_charts_design.md), nonlinear plan stage 2) | this design, section 4 |
 | Non-affine bindings in `change_component_basis` and resampling (pointwise `M_in`, `M_out`) | stage 4 | stages 2 and 3 |
 | A data-borne (duck-array) carrier giving the strict invariant | a consumer that needs it; its own design | stage 2 |
 | Patched-lane hooks: `check_roll`/`check_shift`, refusing bare-dimension adoption | the xarray hook proposal | stage 2 |

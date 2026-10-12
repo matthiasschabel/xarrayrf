@@ -1,7 +1,7 @@
 # Nonlinear geometry: staging and structural decisions
 
 **Status:** Active (roadmap; stage 1 designed, later stages outlined)
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-12
 **Scope:** The order in which xarrayrf takes on nonlinear geometry, and the structural rules
 (chart identity, metrics, angular axes, tensors) that every stage must respect. Stage 1 has its
 own design, [field-backed transforms](field_transform_design.md); later stages are outlined with
@@ -199,6 +199,12 @@ after stage 2 below.
 
 ## Open Decisions
 
+Decisions 1 to 3 are settled in the [angular charts design](angular_charts_design.md)
+(2026-10-12): `crs_frame` identity stays CRS-specific until stage 4; the qualified metric rule
+is adopted, enforced as refusals on angular axes; seam-aware resampling is in stage 2. The
+design also drops the representative longitude interval from the chart declaration in favour
+of a `longitude_start` parameter on operations that produce longitudes.
+
 1. Whether `geotiff.crs_frame` migrates so that projections of one Earth share an identity
    (projection moving into the chart declaration) or identity stays CRS-specific. Needed when
    stage 2 starts; stage 1 does not depend on it.
@@ -211,6 +217,5 @@ after stage 2 below.
 ## Next Steps
 
 1. Stage 1 per [its design](field_transform_design.md).
-2. Before stage 2, a reviewed design for chart declarations and transitions, settling open
-   decisions 1–3.
+2. Stage 2 per the [angular charts design](angular_charts_design.md) (reviewed 2026-10-12).
 3. Before stage 3, the binding probe with the operation inventory.
