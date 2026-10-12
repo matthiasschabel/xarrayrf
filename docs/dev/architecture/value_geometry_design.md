@@ -84,7 +84,7 @@ operand's attrs, so a vector plus a covector would keep a valid-looking wrong ty
 - **Rank >= 1: a component index.** Each slot is a named component dimension with a label
   coordinate; one custom xarray index spans the quantity's component coordinates (one per
   slot, or one packed coordinate for two symmetric slots) and declares, per slot, its
-  variance and basis, plus parity, `det_power` and symmetry/packing. Slots are named, so
+  variance and basis, plus parity, `det_power`, `orthogonal_only` and symmetry/packing. Slots are named, so
   transpose cannot exchange variance. Equality includes the whole declaration, so aligning or
   combining two quantities with different declarations over the same dimensions refuses
   (as conflicting bindings do, including the binding's `join` compatibility and
@@ -145,7 +145,8 @@ after angular charts (nonlinear plan stage 2); the kernel already accepts pointw
 ### 5. Persistence
 
 One new schema kind: the component index declaration (per-slot variance and basis, parity,
-`det_power`, symmetry, packing), encoded like the binding. Rank-0 declarations are call
+`det_power`, `orthogonal_only`, symmetry, packing), encoded like the binding; dropping
+`orthogonal_only` would decode `PSEUDOVECTOR` as an unrestricted odd vector. Rank-0 declarations are call
 arguments and do not persist. Custom reorientation callables do not persist. Subject to the same
 schema-1 freeze rule as transform edge semantics: the freeze records whether additive kinds may
 land after it.
@@ -218,6 +219,7 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 
 1. Stage 1: `QuantityType`, the law, the NumPy kernel and shortcuts, with the stage-1
    acceptance cases as tests. No binding change, so it does not wait on the schema freeze.
+   Planned and reviewed in [the stage 1 plan](value_geometry_stage1_plan.md).
 2. Before stage 2: the schema-1 freeze decision records whether additive record kinds may land
    after it; stage 2 then adds the component index, `rf.express_in`, the `resample` guard,
    persistence and the operation probe.
