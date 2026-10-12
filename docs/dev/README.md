@@ -74,6 +74,9 @@ reasons. The stable documents are [the design](../design.md),
 - [compositional_model_comparison_notes.md](napari-3783/compositional_model_comparison_notes.md):
   the napari compositional model compared with xarrayrf, the decisions taken (transform edge
   semantics, value geometry, axis roles) and the view-bridge spike.
+- [data_model_layering.md](napari-3783/data_model_layering.md): the boundary between
+  xarrayrf and a viewer data model; what xarrayrf provides upward and what it leaves above itself
+  (identity, change notification, storage, element topology, viewer adapters).
 - [transformations_wishlist_review.md](napari-3783/transformations_wishlist_review.md): the
   model-side coverage of napari/napari#3783's transform wish list and thread requests.
 

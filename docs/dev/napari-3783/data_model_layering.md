@@ -3,8 +3,7 @@
 **Status:** Active
 **Last updated:** 2026-10-11
 **Scope:** xarrayrf's boundary toward a viewer-facing data model (identity, fields, domains,
-sources, napari adapters). The model side is documented where it lives, in pirana-lab
-(`docs/dev/data_model_layering.md`). Builds on [the comparison notes](compositional_model_comparison_notes.md)
+sources, napari adapters). Builds on [the comparison notes](compositional_model_comparison_notes.md)
 and [the value geometry design](../architecture/value_geometry_design.md); changes neither.
 Reviewed as a plan by Codex (gpt-6-astra, high) on 2026-10-11; findings folded in.
 
@@ -97,4 +96,4 @@ objects and implement xarrayrf-owned protocols.
 ## Next Steps
 
 Value geometry stage 1, the P1 design note, P3 in the core interface; viewer boundary plan
-items 1 and 2 before any viewer integration. The model-side plan is in pirana-lab.
+items 1 and 2 before any viewer integration.
