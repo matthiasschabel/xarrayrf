@@ -579,3 +579,33 @@ def test_export_columns_follow_pixel_storage_with_different_declared_order(diago
     assert tuple(axis.name for axis in physical.axes) == ("y", "x")
     assert tuple(axis.type for axis in physical.axes) == ("space", "space")
     assert tuple(axis.unit for axis in physical.axes) == ("micrometer", "micrometer")
+
+
+def test_angular_frames_are_refused_rather_than_exported_as_cartesian() -> None:
+    """NGFF axes have no representation; degree units would read back as refused Cartesian axes."""
+    system = CoordinateSystem(
+        ("lat", "lon"),
+        ("degrees_north", "degrees_east"),
+        axis_types=("space", "space"),
+        representation="spherical",
+        axis_roles=("latitude", "longitude"),
+    )
+    earth, other = (ReferenceFrame.declared(("test", name), system) for name in ("a", "b"))
+    with pytest.raises(ValueError, match="spherical; NGFF v06 has no angular representation"):
+        to_transform(
+            AffineTransform.from_matrix(
+                source=earth, target=other, matrix=np.eye(2), translation=(0.0, 0.0)
+            ),
+            names={earth: "a", other: "b"},
+        )
+    array = xr.DataArray(
+        np.zeros((2, 3)), dims=("lat", "lon"), coords={"lat": [0.0, 1.0], "lon": [0.0, 1.0, 2.0]}
+    )
+    transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("lat", "lon"), ("degrees_north", "degrees_east")),
+        target=earth,
+        matrix=np.eye(2),
+        translation=(0.0, 0.0),
+    )
+    with pytest.raises(ValueError, match="no angular representation"):
+        to_multiscale_level(Geometry(array, transform, dims=("lat", "lon")), path="s0")

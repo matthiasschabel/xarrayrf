@@ -150,11 +150,14 @@ class CoordinateSystem:
         self._axis_roles = self._check_axis_roles(axis_roles)
         # Angles are allowed only where a role declares them; every other axis declares no
         # periodicity or branch, so an angle there would be relabelled rather than represented.
-        for unit, role in zip(self._units, self._axis_roles, strict=True):
+        for axis, unit, role in zip(self._axes, self._units, self._axis_roles, strict=True):
             if role not in _ANGULAR_UNITS and unit in ANGULAR_UNITS:
+                kind = "a Cartesian axis" if role is None else f"a {role} axis"
                 raise ValueError(
-                    f"units unit {unit!r} is angular; a Cartesian axis declares no periodicity "
-                    "or branch, so an angle would be relabelled rather than represented",
+                    f"axis {axis!r} has angular unit {unit!r}, but {kind} declares no "
+                    "periodicity or branch, so an angle would be relabelled rather than "
+                    "represented; declare a spherical or geodetic system with longitude and "
+                    "latitude roles",
                 )
         self._axis_types = check_axis_types(axis_types, count=len(self._axes))
         if vocabulary is not None and not isinstance(vocabulary, DirectionVocabulary):

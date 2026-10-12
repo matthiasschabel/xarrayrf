@@ -1,5 +1,26 @@
 # Changelog
 
+## [2026-10-12] — Independent QA of angular charts stage 1
+
+- **Problem**: Review the angular declarations, refusals and persistence (`515b9e7`, design
+  `f48b888`) for root-cause soundness, regression risk, edge cases and coverage.
+- **Resolution**: The declaration model, the `coordinate_system_change` guard and the optional
+  `axis_roles` field hold; probes confirmed pickling, deep copy, native encode/decode of a framed
+  lon/lat array, `isel`, and NIfTI export refusal. One gap fixed: NGFF export
+  (`to_transform`, `to_multiscale_level`) wrote an angular frame as plain axes with degree
+  units, reporting only the identity loss, so representation and roles vanished and our own
+  reader would refuse the result; both now refuse angular frames. Also: the angular-unit error
+  now names the axis and its role (it said "Cartesian axis" for a time or radius axis of an
+  angular system); `check_units(reject_angular=)` lost its last caller and was removed; tests
+  added for an angle on a radius axis and a Cartesian record carrying roles. Residual,
+  accepted: other adapters build Cartesian systems only, so an angular frame never enters them.
+- **Verification**: stock 2,333 passed plus 47 xfailed; patched 2,380; upstream 2,338 plus 42
+  xfailed; ruff and mypy pass.
+- **Files affected**: `src/xarrayrf/ngff/_export.py`, `src/xarrayrf/_coordinate_system.py`,
+  `src/xarrayrf/_validation.py`, `tests/test_ngff_export.py`, `tests/test_coordinate_system.py`,
+  `tests/test_encoding.py`, `docs/core_interface.md`.
+- **Reviewed by**: Claude Opus 5.5 (`claude-opus-5-5`) applying QAEngineer.
+
 ## [2026-10-12] — Angular charts stage 1: declarations, refusals, persistence
 
 - **Problem**: Longitude/latitude data could not be declared: `CoordinateSystem` admitted only

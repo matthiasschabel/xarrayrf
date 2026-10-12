@@ -59,7 +59,7 @@ ANGULAR_UNITS: Final = frozenset(
     }
     | _cf_geographic_degrees(),
 )
-"""Known angular spellings a Cartesian axis refuses, including CF geographic degrees.
+"""Known angular spellings refused on axes without a longitude or latitude role.
 
 Best effort: with open unit strings only these spellings are recognized as angular.
 """
@@ -190,9 +190,7 @@ def _check_optional_str_sequence(value: object, *, field: str) -> tuple[str | No
     return entries
 
 
-def check_units(
-    value: object, *, field: str, reject_angular: bool = False
-) -> tuple[str | None, ...]:
+def check_units(value: object, *, field: str) -> tuple[str | None, ...]:
     """Validate an ordered sequence of unit strings, ``None`` where no unit is declared.
 
     Units are compared exactly, so ``"mm"`` and ``"millimeter"`` differ; adapters choose one
@@ -203,9 +201,6 @@ def check_units(
     Args:
         value: Candidate sequence of unit strings or ``None``.
         field: Field name used in error messages.
-        reject_angular: Refuse the known angular spellings in :data:`ANGULAR_UNITS`. A
-            Cartesian axis declares no periodicity or branch, so an angle there would be
-            relabelled rather than represented.
 
     Returns:
         The units as a tuple, in the given order.
@@ -213,17 +208,11 @@ def check_units(
     Raises:
         TypeError: If ``value`` is not a non-string sequence of strings and ``None``.
         ValueError: If the sequence is empty, a unit is empty or has leading or trailing
-            whitespace, or an angular unit is given when ``reject_angular`` is set.
+            whitespace.
     """
     units = _check_optional_str_sequence(value, field=field)
     if not units:
         raise ValueError(f"{field} must declare at least one unit")
-    for unit in units:
-        if reject_angular and unit in ANGULAR_UNITS:
-            raise ValueError(
-                f"{field} unit {unit!r} is angular; a Cartesian axis declares no periodicity "
-                "or branch, so an angle would be relabelled rather than represented",
-            )
     return units
 
 

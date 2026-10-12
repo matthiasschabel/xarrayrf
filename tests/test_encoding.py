@@ -467,3 +467,10 @@ def test_an_angular_record_without_roles_is_malformed() -> None:
     del data["value"]["axis_roles"]
     with pytest.raises(xrf.MalformedDataError, match="needs axis_roles"):
         xrf.decode(data)
+
+
+def test_a_cartesian_record_with_roles_is_malformed() -> None:
+    data = xrf.encode(xrf.CoordinateSystem(("x",), ("m",)))
+    data["value"]["axis_roles"] = [None]
+    with pytest.raises(xrf.MalformedDataError, match="a Cartesian coordinate system has none"):
+        xrf.decode(data)

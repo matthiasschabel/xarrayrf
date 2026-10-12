@@ -192,7 +192,9 @@ are refused on angular frames: `Lattice.spacing` and `Lattice.direction` raise (
 gives the steps axis by axis), and box methods refuse to average along latitude, since a mean
 over degrees of latitude is not an area mean; longitude slabs and pass-through latitude are
 allowed. `coordinate_system_change` refuses two systems that differ in representation or roles
-when either is angular. Longitude labels are not wrapped yet: a target beyond the outer source
+when either is angular. NGFF export refuses angular frames, since NGFF axes carry no
+representation and degree units would read back as refused Cartesian axes; NIfTI export already
+requires an oriented patient frame. Longitude labels are not wrapped yet: a target beyond the outer source
 labels is outside, as on any axis. Transitions to Cartesian charts, seam-aware resampling and a
 CF reader follow.
 

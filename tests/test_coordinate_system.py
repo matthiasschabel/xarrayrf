@@ -360,8 +360,18 @@ def test_roles_take_part_in_equality_and_hashing() -> None:
                 "axes": ("lon", "lat", "t"),
             },
             ValueError,
-            "is angular",
+            "axis 't' has angular unit 'deg', but a Cartesian axis",
             id="angle-without-role",
+        ),
+        pytest.param(
+            {
+                "roles": ("longitude", "latitude", "radius"),
+                "units": ("deg", "deg", "rad"),
+                "axes": ("lon", "lat", "r"),
+            },
+            ValueError,
+            "but a radius axis declares no periodicity",
+            id="angle-on-radius",
         ),
     ],
 )

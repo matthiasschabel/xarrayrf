@@ -11,7 +11,7 @@ from ome_zarr_models.v06 import coordinate_transforms as ct
 from ome_zarr_models.v06.multiscales import Dataset, Multiscale
 from pydantic import ValidationError
 
-from xarrayrf import AffineTransform, ArrayCoordinates, Geometry, ReferenceFrame
+from xarrayrf import CARTESIAN, AffineTransform, ArrayCoordinates, Geometry, ReferenceFrame
 from xarrayrf.anatomy import VOCABULARY
 from xarrayrf.native import Report
 from xarrayrf.units import canonical, udunits_name
@@ -31,6 +31,17 @@ def _name(frame: ReferenceFrame, names: Mapping[ReferenceFrame, str] | None) -> 
     if namespace == NAMESPACE and "#" in value:
         return unquote(value.rsplit("#", 1)[1])
     raise ValueError(f"frame {frame.identifier!r} needs a name in names for NGFF export")
+
+
+def _require_cartesian(frame: ReferenceFrame) -> None:
+    # NGFF axes carry no representation or roles, and a degree unit on an NGFF space axis
+    # reads back as a Cartesian axis, which refuses angles: refuse rather than report a loss.
+    representation = frame.coordinate_system.representation
+    if representation != CARTESIAN:
+        raise ValueError(
+            f"frame {frame.identifier!r} is {representation}; NGFF v06 has no angular "
+            "representation, so its longitude and latitude cannot be exported",
+        )
 
 
 def _system(frame: ReferenceFrame, name: str) -> ct.CoordinateSystem:
@@ -91,12 +102,15 @@ def to_transform(
 
     Raises:
         TypeError: If ``t`` is not an affine transform.
-        ValueError: If either endpoint is not a reference frame or has no NGFF name.
+        ValueError: If either endpoint is not a reference frame, is not Cartesian, or has no
+            NGFF name.
     """
     if not isinstance(t, AffineTransform):
         raise TypeError(f"t must be an AffineTransform, got {type(t).__name__}")
     if not isinstance(t.source, ReferenceFrame) or not isinstance(t.target, ReferenceFrame):
         raise ValueError("to_transform requires ReferenceFrame source and target")
+    _require_cartesian(t.source)
+    _require_cartesian(t.target)
     if names is not None and not isinstance(names, Mapping):
         raise TypeError("names must map ReferenceFrame instances to NGFF names")
     source_name, target_name = _name(t.source, names), _name(t.target, names)
@@ -169,7 +183,8 @@ def to_multiscale_level(
 
     Raises:
         TypeError: If ``geometry`` or a public argument has the wrong type.
-        ValueError: If the path, name, geometry, or v06 multiscale is invalid.
+        ValueError: If the path, name, geometry, or v06 multiscale is invalid, or the frame
+            is not Cartesian.
     """
     if not isinstance(geometry, Geometry):
         raise TypeError(f"geometry must be a Geometry, got {type(geometry).__name__}")
@@ -192,6 +207,7 @@ def to_multiscale_level(
     except (TypeError, ValueError) as error:
         raise ValueError(f"NGFF export requires a regular affine lattice: {error}") from error
     frame = lattice.frame
+    _require_cartesian(frame)
     matrix, origin = lattice.matrix, lattice.origin
     if matrix.shape[1] != len(frame.axes):
         raise ValueError("NGFF level needs one array dimension per intrinsic axis")
