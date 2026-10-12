@@ -32,6 +32,10 @@
 
 ### Fixed
 
+- `AffineTransform.inverse` and resampling no longer refuse well-conditioned matrices at
+  extreme scales such as `1e-200 * I` or `1e200 * I` as having a zero row or column: the
+  equilibration norms are computed without squaring entries that under- or overflow.
+
 - Resampling validates inputs and frame compatibility before loading optional SciPy, so
   invalid requests receive their validation errors even without the resampling extra.
 - The DICOM example-data tool preflights the complete batch before writing, refusing duplicate
@@ -85,6 +89,16 @@
   unchanged.
 
 ### Added
+
+- Tensor transformation in the NumPy core: `TensorType` declares a value's index variance
+  (contravariant or covariant per component index), reflection parity and determinant
+  exponent, and `transform_tensor_components` applies the one law covering vectors,
+  covectors, higher-order tensors, pseudovectors and densities, batched over per-point maps.
+  Shortcuts `SCALAR`, `PSEUDOSCALAR`, `VECTOR`, `COVECTOR`,
+  `SECOND_ORDER_CONTRAVARIANT_TENSOR`, `CROSS_PRODUCT_PSEUDOVECTOR`,
+  `TWO_FORM_DUAL_PSEUDOVECTOR` and `ORTHOGONAL_PSEUDOVECTOR`; `polar_orthogonal_factor`
+  returns the orthogonal factor of a polar decomposition. xarray variables do not carry a
+  tensor type yet.
 
 - Box resampling methods `step` and `overlap_mean` with point or average target support,
   declared-interval weights, gap filling and a configurable coverage threshold. Native

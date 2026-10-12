@@ -1,6 +1,6 @@
 # Value geometry stage 1: tensor type, transform law, NumPy kernel
 
-**Status:** Active (plan reviewed; not started)
+**Status:** Implemented
 **Last updated:** 2026-10-11
 **Scope:** Geometry core only: a new `_tensor_type` module, a batched form of the equilibrated
 inverse, tests, the core interface section on quantity rules, the changelog. Implements stage 1
@@ -210,7 +210,7 @@ Equality and hashing: `TensorType(("contravariant",)) == VECTOR`; `determinant_e
 
 ### Documentation
 
-- `docs/core_interface.md` "Quantity rules" (renamed "Tensor transformation"): replace the specified callables with the law, the
+- `docs/core_interface.md` "Quantity rules", renamed "Tensor transformation": replace the specified callables with the law, the
   type, the kernel signature and the two-pseudovector warning, with a short executed example.
 - `CHANGELOG.md` "Added".
 - Docstrings with a worked example each (reflection of a vector and a pseudovector).
@@ -252,7 +252,8 @@ improper map; the private inverse helper is generalised rather than duplicated.
 
 ## Next Steps
 
-1. Implement `_tensor_type.py` and the batched inverse with tests, narrowest first
-   (`pytest tests/test_tensor_type.py tests/test_affine.py tests/test_import_boundary.py`), then the
-   full suite, ruff and mypy.
-2. Documentation as above; mark stage 1 implemented in the design.
+Done on 2026-10-11: `src/xarrayrf/_tensor_type.py`, the batched `equilibrated_inverse`,
+`tests/test_tensor_type.py` (including the docstring examples), the xarray-blocked boundary
+check, the core interface section and the changelog; full suite, ruff and mypy pass. The
+private inverse helper is exercised through the public kernel rather than tested directly.
+Stage 2 is next in [the value geometry design](value_geometry_design.md).

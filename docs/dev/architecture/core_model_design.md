@@ -1,11 +1,12 @@
 # Core model: frames, coordinate systems and transforms
 
 **Status:** Implemented
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-11
 **Scope:** The NumPy-only core: `ReferenceFrame`, `CoordinateSystem`, roles, direction
 vocabularies, the `Transform` protocols and endpoints, quantity rules, units, affine classes and
 `Lattice.affine`. [The core interface](../../core_interface.md) is normative; this note records
-why it looks the way it does. Quantity rules are specified but not implemented (see Deferred Work).
+why it looks the way it does. The quantity rules are superseded by the value geometry design and
+implemented as `TensorType` / `transform_tensor_components`.
 
 ## Context
 
@@ -173,8 +174,9 @@ but cannot verify that the caller assigned the right numbers to those declared c
 ### Quantity rules
 
 Superseded by [the value geometry design](value_geometry_design.md), which generalizes these
-rules into one law and specifies the component carrier; the table remains as the shortcuts it
-defines.
+rules into one law and specifies the component carrier; the table is historical. The law is
+implemented as `TensorType` and `transform_tensor_components`, with `VECTOR`, `COVECTOR`,
+`SECOND_ORDER_CONTRAVARIANT_TENSOR` and `polar_orthogonal_factor` in place of the rules below.
 
 Specified in the core interface as plain callables `rule(transform, values, *, at)` over a
 trailing component axis in source-axis order, acting independently over leading axes so they

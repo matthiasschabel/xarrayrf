@@ -322,11 +322,58 @@ transform first; the docstring says so.
 affine, so resampling and export can ask `isinstance(t, SupportsAffine)` of a chain, and a
 `CompositeTransform` otherwise.
 
-### Quantity rules
+### Tensor transformation
 
-Specified, not yet implemented: `point`, `vector`, `covariant_vector`, `second_rank_tensor` (J·T·Jᵀ) and
-`polar_rotation`, as plain callables over a trailing component axis in source-axis order. Domain
-rules (diffusion PPD, ITK's J·T·J⁻¹) live downstream.
+Points move with `transform_point`. Values with a direction (velocities, gradients, stress
+tensors, magnetic fields) must also be re-expressed, by one law. With `J` the linear map from
+the source basis to the target basis, `J[a, b] = d target_a / d source_b`:
+
+    T' = sign(det J)^[odd reflection parity] * |det J|^w
+         * (J on each contravariant index) (J⁻ᵀ on each covariant index) T
+
+A `TensorType` declares the three ingredients:
+
+| Field | Meaning |
+|---|---|
+| `index_variance` | `"contravariant"` (transforms with `J`, like a velocity) or `"covariant"` (with `J⁻ᵀ`, like a gradient) per component index, in order; `()` for a scalar |
+| `reflection_parity` | `"odd"` for a pseudotensor, which changes sign under an orientation-reversing map |
+| `determinant_exponent` | `w` in `\|det J\|^w`; `-1` for a density per unit volume |
+| `index_symmetry` | declared `"symmetric"` / `"antisymmetric"` for two indices of equal variance |
+| `requires_orthogonal_map` | refuse any map that is not orthogonal |
+
+Shortcuts: `SCALAR`, `PSEUDOSCALAR`, `VECTOR`, `COVECTOR`, `SECOND_ORDER_CONTRAVARIANT_TENSOR`
+(`J T Jᵀ`), `CROSS_PRODUCT_PSEUDOVECTOR`, `TWO_FORM_DUAL_PSEUDOVECTOR` and
+`ORTHOGONAL_PSEUDOVECTOR`. **A pseudovector has two laws.** A cross product of vectors (torque,
+angular momentum) transforms as `det(J) J⁻ᵀ b`; the dual of a 2-form (magnetic flux density)
+as `det(J)⁻¹ J b`. They agree only for rotations and reflections, so `ORTHOGONAL_PSEUDOVECTOR`
+refuses any other map and names the two explicit types.
+
+`transform_tensor_components(values, linear_map, tensor_type, *, component_axes=None)` applies
+the law to NumPy arrays. Component axes default to the trailing ones. A stack of maps
+`(*batch, n, n)` applies one map per point; the batch broadcasts to the values without
+enlarging them. Laws needing `J⁻ᵀ` or `det J` refuse singular maps with the unit-independent
+conditioning test of `AffineTransform.inverse`. `polar_orthogonal_factor(J)` returns the
+orthogonal factor `U` of `J = U P`, the finite-strain reorientation (a reflection when `J` is
+improper).
+
+```python
+import numpy as np
+import xarrayrf as xrf
+
+shear = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+xrf.transform_tensor_components([0.0, 1.0, 0.0], shear, xrf.VECTOR)    # [1, 1, 0]
+xrf.transform_tensor_components([1.0, 0.0, 0.0], shear, xrf.COVECTOR)  # [1, -1, 0]
+xrf.transform_tensor_components(
+    np.diag([3.0, 2.0, 1.0]), shear, xrf.SECOND_ORDER_CONTRAVARIANT_TENSOR
+)  # [[5, 2, 0], [2, 2, 0], [0, 0, 1]]
+```
+
+ITK's symmetric-tensor transform gives `diag(3, 2, 1)` for the same shear; it differs by
+design and is not mirrored. Choosing the
+map (a Jacobian from `transform.jacobian(at)`, a basis change, or its polar factor) is the
+caller's decision; domain reorientation policies such as diffusion PPD live downstream. The
+kernel knows no frames or bases: attaching a type to an xarray variable is the next stage of
+[the value geometry design](dev/architecture/value_geometry_design.md).
 
 ## Naming conventions
 

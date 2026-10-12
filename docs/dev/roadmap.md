@@ -69,7 +69,9 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   ([notes](napari-3783/compositional_model_comparison_notes.md)): transform edge semantics
   (role, accuracy, validity region, provenance) as a core value object honoured by `resample`;
   vector, tensor, pseudovector and density value geometry
-  ([design](architecture/value_geometry_design.md); stage 1 is a NumPy kernel); reserved `axis_types` role values. Each starts with a design note.
+  ([design](architecture/value_geometry_design.md); stage 1, the NumPy kernel `TensorType` /
+  `transform_tensor_components`, is implemented, stage 2 attaches types to xarray variables);
+  reserved `axis_types` role values. The others start with a design note.
 - **Small follow-ups.** DICOM localizer (mixed-orientation) splitting and a NIfTI writer on top
   of `nifti.to_header`, when a consumer needs them. `DuckArray` already uses a local protocol.
 

@@ -50,6 +50,12 @@ CORE_WITHOUT_XARRAY = textwrap.dedent(
     positions = np.array([1, 0], dtype=np.intp)
     assert intervals_equal(rows, rows)
     np.testing.assert_array_equal(interval_rows(rows, positions), rows[::-1])
+    np.testing.assert_allclose(
+        xrf.transform_tensor_components([1.0, 0.0], [[1.0, 1.0], [0.0, 1.0]], xrf.COVECTOR),
+        [1.0, -1.0],
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(xrf.polar_orthogonal_factor(np.diag([2.0, 3.0])), np.eye(2))
     assert not any(name.split(".")[0] == "scipy" for name in sys.modules)
     for indexer, expected in (
         (1, {"i": 1}),

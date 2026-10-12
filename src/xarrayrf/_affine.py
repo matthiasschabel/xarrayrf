@@ -23,35 +23,75 @@ singular after equilibration and is still refused.
 
 
 def equilibrated_inverse(matrix: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-    """Invert a square matrix through row and column equilibration.
+    """Invert a square matrix, or a stack of them, through row and column equilibration.
 
     With ``B = R @ matrix @ C`` for diagonal ``R`` and ``C`` that give ``B`` unit rows and then
     unit columns, ``inv(matrix) = C @ inv(B) @ R``. Computing through ``B`` keeps the conditioning
-    test and the arithmetic independent of the axes' units.
+    test and the arithmetic independent of the axes' units. A stack shaped ``(..., n, n)`` is
+    equilibrated and tested matrix by matrix; an empty stack returns an empty result.
 
     Raises:
-        ValueError: If the matrix has a zero row or column, or ``B`` is too ill-conditioned for
-            an inverse to be meaningful in float64.
+        ValueError: If a matrix has a zero row or column, or its ``B`` is too ill-conditioned
+            for an inverse to be meaningful in float64. For a stack, the message names the
+            index of the first matrix with a zero row or column, or of the worst-conditioned
+            matrix.
     """
-    row_norms = np.linalg.norm(matrix, axis=1)
-    if not np.all(row_norms > 0.0):
-        raise ValueError("the matrix has a zero row, so it is singular and has no inverse")
-    scaled = matrix / row_norms[:, np.newaxis]
-    column_norms = np.linalg.norm(scaled, axis=0)
-    if not np.all(column_norms > 0.0):
-        raise ValueError("the matrix has a zero column, so it is singular and has no inverse")
-    balanced = scaled / column_norms
-    condition = float(np.linalg.cond(balanced))
-    if not np.isfinite(condition) or condition > INVERSE_CONDITION_LIMIT:
+    batch = matrix.shape[:-2]
+    row_norms = _scaled_norm(matrix, axis=-1)
+    zero_row = ~np.all(row_norms > 0.0, axis=-1)
+    if np.any(zero_row):
         raise ValueError(
-            f"the matrix is singular or ill-conditioned (condition number {condition:.3g} after "
-            f"equilibration exceeds {INVERSE_CONDITION_LIMIT:.3g}), so its inverse is not "
-            "meaningful",
+            f"the matrix{_stack_position(zero_row, batch)} has a zero row, so it is singular "
+            "and has no inverse",
+        )
+    scaled = matrix / row_norms[..., :, np.newaxis]
+    column_norms = _scaled_norm(scaled, axis=-2)
+    zero_column = ~np.all(column_norms > 0.0, axis=-1)
+    if np.any(zero_column):
+        raise ValueError(
+            f"the matrix{_stack_position(zero_column, batch)} has a zero column, so it is "
+            "singular and has no inverse",
+        )
+    balanced = scaled / column_norms[..., np.newaxis, :]
+    conditions = np.asarray(np.linalg.cond(balanced), dtype=np.float64)
+    # NaN and inf both mean no usable inverse; ranking them above every finite value picks
+    # the worst matrix to report.
+    ranked = np.where(np.isfinite(conditions), conditions, np.inf)
+    if ranked.size and np.max(ranked) > INVERSE_CONDITION_LIMIT:
+        worst = np.unravel_index(int(np.argmax(ranked)), batch) if batch else ()
+        condition = float(conditions[worst])
+        position = f" at stack index {tuple(int(i) for i in worst)}" if batch else ""
+        raise ValueError(
+            f"the matrix{position} is singular or ill-conditioned (condition number "
+            f"{condition:.3g} after equilibration exceeds {INVERSE_CONDITION_LIMIT:.3g}), so its "
+            "inverse is not meaningful",
         )
     inverse: npt.NDArray[np.float64] = (
-        np.linalg.inv(balanced) / column_norms[:, np.newaxis] / row_norms[np.newaxis, :]
+        np.linalg.inv(balanced) / column_norms[..., :, np.newaxis] / row_norms[..., np.newaxis, :]
     )
     return inverse
+
+
+def _scaled_norm(matrix: npt.NDArray[np.float64], *, axis: int) -> npt.NDArray[np.float64]:
+    """2-norms along ``axis`` without squaring entries that would under- or overflow.
+
+    Dividing by the largest magnitude first keeps ``1e-200 * I`` and ``1e200 * I``, which are
+    perfectly conditioned, from reading as having zero or infinite rows.
+    """
+    largest = np.max(np.abs(matrix), axis=axis, keepdims=True)
+    safe = np.where(largest > 0.0, largest, 1.0)
+    norms: npt.NDArray[np.float64] = np.squeeze(largest, axis=axis) * np.linalg.norm(
+        matrix / safe, axis=axis
+    )
+    return norms
+
+
+def _stack_position(failed: npt.NDArray[np.bool_], batch: tuple[int, ...]) -> str:
+    """Name the first failing matrix of a stack, or nothing for a single matrix."""
+    if not batch:
+        return ""
+    first = np.unravel_index(int(np.argmax(failed)), batch)
+    return f" at stack index {tuple(int(i) for i in first)}"
 
 
 class AffineTransform:

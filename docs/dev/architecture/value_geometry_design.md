@@ -1,6 +1,6 @@
 # Value geometry: vectors, tensors, pseudovectors and densities
 
-**Status:** Active (design; not started)
+**Status:** Active (stage 1 implemented; stage 2 not started)
 **Last updated:** 2026-10-11
 **Scope:** Core: a tensor type and transform law for basis-dependent values, a component
 index carrying it, passive basis change, resampling of component variables and persistence.
@@ -236,8 +236,8 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 ## Next Steps
 
 1. Stage 1: `TensorType`, the law, the NumPy kernel and shortcuts, with the stage-1
-   acceptance cases as tests. No binding change, so it does not wait on the schema freeze.
-   Planned and reviewed in [the stage 1 plan](value_geometry_stage1_plan.md).
+   acceptance cases as tests. Done: `src/xarrayrf/_tensor_type.py`, `tests/test_tensor_type.py`,
+   per [the stage 1 plan](value_geometry_stage1_plan.md).
 2. Before stage 2: the schema-1 freeze decision records whether additive record kinds may land
    after it; stage 2 then adds the component index, `rf.change_component_basis`, the `resample` guard,
    persistence and the operation probe.

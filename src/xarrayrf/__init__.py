@@ -11,6 +11,8 @@ The core is NumPy-only and useful for arrays, meshes, point sets and tables alik
 - :func:`transform_named` and :func:`coordinate_system_change` evaluate and derive transforms;
   :meth:`CoordinateSystem.axis_codes` names a vector's direction.
 - :func:`affine_class` classifies a constant affine transform or lattice by its matrix geometry.
+- :class:`TensorType` declares how a value's components respond to a change of basis, and
+  :func:`transform_tensor_components` applies that law to arrays under a linear map.
 
 :class:`Geometry` is the xarray integration: a read-through view answering where an
 array's current samples sit, given a transform the caller supplies at each construction. It
@@ -47,6 +49,20 @@ from ._frame import LOCAL_NAMESPACE, ReferenceFrame, Role
 from ._grid import Grid
 from ._lattice import Lattice
 from ._orientation import coordinate_system_change
+from ._tensor_type import (
+    COVECTOR,
+    CROSS_PRODUCT_PSEUDOVECTOR,
+    ORTHOGONAL_PSEUDOVECTOR,
+    ORTHOGONALITY_TOLERANCE,
+    PSEUDOSCALAR,
+    SCALAR,
+    SECOND_ORDER_CONTRAVARIANT_TENSOR,
+    TWO_FORM_DUAL_PSEUDOVECTOR,
+    VECTOR,
+    TensorType,
+    polar_orthogonal_factor,
+    transform_tensor_components,
+)
 from ._transform import (
     Endpoint,
     SupportsAffine,
@@ -63,9 +79,18 @@ _INTEGRATION = frozenset({"Domain", "Geometry", "Method", "resample"})
 
 __all__ = [
     "CARTESIAN",
+    "COVECTOR",
+    "CROSS_PRODUCT_PSEUDOVECTOR",
     "INVERSE_CONDITION_LIMIT",
     "LOCAL_NAMESPACE",
+    "ORTHOGONALITY_TOLERANCE",
+    "ORTHOGONAL_PSEUDOVECTOR",
+    "PSEUDOSCALAR",
+    "SCALAR",
     "SCHEMA_VERSION",
+    "SECOND_ORDER_CONTRAVARIANT_TENSOR",
+    "TWO_FORM_DUAL_PSEUDOVECTOR",
+    "VECTOR",
     "AffineClass",
     "AffineTransform",
     "ArrayCoordinates",
@@ -87,6 +112,7 @@ __all__ = [
     "SupportsInverse",
     "SupportsJacobian",
     "SupportsPoints",
+    "TensorType",
     "Transform",
     "UnknownKindError",
     "UnsupportedVersionError",
@@ -96,7 +122,9 @@ __all__ = [
     "coordinate_system_change",
     "decode",
     "encode",
+    "polar_orthogonal_factor",
     "transform_named",
+    "transform_tensor_components",
 ]
 
 try:
