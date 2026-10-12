@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-12
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -11,8 +11,10 @@ xarrayrf provides reference frames for native xarray objects: frames and transfo
 `DataArray`s that survive frame-preserving xarray operations and refuse or unframe otherwise.
 The core, the `.rf` binding, freestanding `Grid` values with declared cell intervals,
 the first support-aware resampling methods (per-axis interval claims and the `step` and
-`overlap_mean` box methods), anatomical reformatting, complete and anonymous frames, persistence schema 1 and the NIfTI,
-DICOM, OME-NGFF and GeoTIFF adapters are implemented. No package has been published.
+`overlap_mean` box methods), anatomical reformatting, complete and anonymous frames, persistence schema 1, value geometry
+(tensor types and their transform law, advisory component declarations on xarray variables,
+symmetric packing, and resampling of declared components) and the NIfTI, DICOM, OME-NGFF and
+GeoTIFF adapters are implemented. No package has been published.
 The [five-stage codebase audit](codebase_audit_review.md) is complete; no further audit stage
 is queued. Deferred conveniences and release/viewer work below are separate.
 
@@ -68,13 +70,11 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   core value objects and need their own reviewed design.
 - **From the napari compositional-model comparison**
   ([notes](napari-3783/compositional_model_comparison_notes.md)): transform edge semantics
-  (role, accuracy, validity region, provenance) as a core value object honoured by `resample`;
-  vector, tensor, pseudovector and density value geometry
-  ([design](architecture/value_geometry_design.md); stage 1, the NumPy kernel `TensorType` /
-  `transform_tensor_components`, stage 2, advisory declarations on xarray variables, stage
-  2b, symmetric packing, and stage 3, resampling of components, are implemented; pointwise
-  bases follow angular charts);
-  reserved `axis_types` role values. The others start with a design note.
+  (role, accuracy, validity region, provenance) as a core value object honoured by `resample`,
+  and reserved `axis_types` role values; each starts with a design note. Value geometry, the
+  third decision, is implemented through stage 3; its stage 4 (pointwise bases) waits for
+  angular charts, and its other pending items are tabled in the
+  [design's Deferred Work](architecture/value_geometry_design.md#deferred-work).
 - **Small follow-ups.** DICOM localizer (mixed-orientation) splitting and a NIfTI writer on top
   of `nifti.to_header`, when a consumer needs them. `DuckArray` already uses a local protocol.
 

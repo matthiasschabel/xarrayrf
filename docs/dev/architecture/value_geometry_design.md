@@ -230,12 +230,23 @@ Stage 4: GRIB grid-relative to earth-relative wind.
 
 ## Deferred Work
 
-- Conservative remapping of densities, with explicit measure handling and coverage and overlap
-  constraints.
-- Pointwise bases (`FrameField`), after angular charts.
-- Order > 2 symmetry classes; spinors, spherical-harmonic coefficients and quaternion fields
-  (out of scope above).
-- Persisting custom reorientation policies.
+Pending, collected from this design and the stage plans (each plan's Deferred Work has the
+rationale):
+
+| Item | Waits for | Source |
+|---|---|---|
+| Pointwise bases (`FrameField`), stage 4 | angular charts (nonlinear plan stage 2) | this design, section 4 |
+| Non-affine bindings in `change_component_basis` and resampling (pointwise `M_in`, `M_out`) | stage 4 | stages 2 and 3 |
+| A data-borne (duck-array) carrier giving the strict invariant | a consumer that needs it; its own design | stage 2 |
+| Patched-lane hooks: `check_roll`/`check_shift`, refusing bare-dimension adoption | the xarray hook proposal | stage 2 |
+| Undeclared scalar densities through `resample` (`tensor_type=`) | a consumer | stage 3 |
+| Per-slot output bases in resampling | a consumer (use `change_component_basis` after) | stage 3 |
+| Antisymmetric packing | a consumer (`TWO_FORM_DUAL_PSEUDOVECTOR` covers 3-D two-forms) | stage 2b |
+| Packing undeclared arrays in `pack_symmetric_components` | a consumer (declare first) | stage 2b |
+| Constrained-value interpolation (log-Euclidean SPD, rotations) | domain policy; a hook, not core | section 3 |
+| Conservative remapping of densities, with measure, coverage and overlap handling | its own design | this design |
+| Order > 2 symmetry classes; spinors, spherical harmonics, quaternion fields | out of scope | this design |
+| Persisting custom reorientation policies | a persisted policy registry | this design |
 
 ## Next Steps
 
@@ -244,7 +255,7 @@ Stage 4: GRIB grid-relative to earth-relative wind.
    per [the stage 1 plan](value_geometry_stage1_plan.md).
 2. Stage 2 ([plan](value_geometry_stage2_plan.md); additive record kinds may land within schema 1,
    decided 2026-10-11) adds the component index, `rf.change_component_basis`, the `resample` guard,
-   persistence and the operation probe.
+   persistence and the operation probe. Done.
 3. Stage 2b, symmetric packing ([plan](value_geometry_stage2b_plan.md)). Done.
 4. Stage 3, resampling declared components ([plan](value_geometry_stage3_plan.md)). Done.
 5. Stage 4, pointwise bases, after angular charts (nonlinear plan stage 2).

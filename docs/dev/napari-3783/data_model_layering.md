@@ -1,7 +1,7 @@
 # What xarrayrf offers a viewer data model, and what it does not own
 
 **Status:** Active
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-12
 **Scope:** xarrayrf's boundary toward a viewer-facing data model (identity, fields, domains,
 sources, napari adapters). Builds on [the comparison notes](compositional_model_comparison_notes.md)
 and [the value geometry design](../architecture/value_geometry_design.md); changes neither.
@@ -31,8 +31,8 @@ not own identity, change notification, storage, element topology or any viewer a
 | Frame identity, coordinate systems, directions | `ReferenceFrame`, `CoordinateSystem`, `DirectionVocabulary` | implemented |
 | Placement of a grid of samples | `Grid`, `Geometry`, the `.rf` binding on `DataArray` | implemented; `Dataset`-level `.rf` is new work |
 | Transforms between frames, with meaning | `AffineTransform`, `CompositeTransform`; the edge wrapper with role, accuracy, validity region, provenance (P1) | transforms implemented; P1 direction agreed, design note pending |
-| Resampling onto a target grid | `da.rf.resample_to`, `resample` | implemented for scalars; component variables in value geometry stage 3 |
-| Value transformation law | `TensorType` and `transform_tensor_components(values, linear_map, tensor_type, *, component_axes)` in the geometry core; the component index and `rf.change_component_basis` (P2) | staged in the value geometry design |
+| Resampling onto a target grid | `da.rf.resample_to`, `resample` | implemented, including declared tensor components (value geometry stage 3) |
+| Value transformation law | `TensorType` and `transform_tensor_components(values, linear_map, tensor_type, *, component_axes)` in the geometry core; the component index and `rf.change_component_basis` (P2) | implemented through value geometry stage 3, with symmetric packing; pointwise bases pending |
 | Axis roles | reserved `axis_types` values `coordinate`, `local`, `component` (P3) | to document in the core interface |
 | Placement of a point set (mesh vertices, landmarks) | value-positioned point sets, viewer boundary plan item 6 | planned; ragged geometry excluded |
 | Format geometry | `dicom`, `nifti`, `ngff`, `geotiff` readers | implemented |
@@ -96,5 +96,5 @@ objects and implement xarrayrf-owned protocols.
 
 ## Next Steps
 
-Value geometry stage 1, the P1 design note, P3 in the core interface; viewer boundary plan
-items 1 and 2 before any viewer integration.
+The P1 design note and P3 in the core interface (value geometry is implemented through stage 3);
+viewer boundary plan items 1 and 2 before any viewer integration.
