@@ -418,3 +418,52 @@ def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
         assert set(encoded) - {"kind"} == _FIELDS[kind], kind
         seen.add(kind)
     assert seen == set(_FIELDS)
+
+
+GEODETIC_SYSTEM = xrf.CoordinateSystem(
+    ("time", "lat", "lon", "h"),
+    ("s", "degrees_north", "degrees_east", "m"),
+    representation="geodetic",
+    axis_roles=(None, "latitude", "longitude", "height"),
+)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        GEODETIC_SYSTEM,
+        xrf.CoordinateSystem(
+            ("ra", "dec"),
+            ("rad", "rad"),
+            representation="spherical",
+            axis_roles=("longitude", "latitude"),
+        ),
+        xrf.ReferenceFrame.declared(
+            ("test-earth", "sphere-6371229"),
+            GEODETIC_SYSTEM,
+            definition={"figure": "sphere", "semi_major_axis": 6371229.0, "length_unit": "m"},
+        ),
+    ],
+    ids=["geodetic", "spherical-radians", "frame"],
+)
+def test_angular_declarations_round_trip(value: object) -> None:
+    decoded = round_trip(value)
+    assert decoded == value
+    assert type(decoded) is type(value)
+
+
+def test_axis_roles_are_written_only_for_angular_systems() -> None:
+    assert "axis_roles" not in xrf.encode(LPS)["value"]
+    assert xrf.encode(GEODETIC_SYSTEM)["value"]["axis_roles"] == [
+        None,
+        "latitude",
+        "longitude",
+        "height",
+    ]
+
+
+def test_an_angular_record_without_roles_is_malformed() -> None:
+    data = xrf.encode(GEODETIC_SYSTEM)
+    del data["value"]["axis_roles"]
+    with pytest.raises(xrf.MalformedDataError, match="needs axis_roles"):
+        xrf.decode(data)

@@ -213,7 +213,7 @@ frames are specified in [the core model design](dev/architecture/core_model_desi
 |---|---|
 | Identifier | Opaque namespaced identity for a particular frame; globally identified, scoped to a container, or minted locally. DICOM FoR UIDs belong here. |
 | Definition | Optional versioned domain declaration needed to interpret an externally defined system. An adapter resolves and validates it at construction; the core does not look up names. |
-| Coordinate representation | The `CoordinateSystem`: ordered axes, axis units, representation kind and optional axis orientation from an adapter-supplied direction vocabulary; these describe the output of F. First implementation: Cartesian. |
+| Coordinate representation | The `CoordinateSystem`: ordered axes, axis units, representation kind and optional axis orientation from an adapter-supplied direction vocabulary; these describe the output of F. Implemented: Cartesian, and spherical and geodetic longitude/latitude declarations; transitions and seam handling follow. |
 | Defining context | Only parameters needed to interpret that system or transformation, such as an applicable epoch, observer or realization. Acquisition timestamps are not automatically defining context. |
 | Display metadata | Human-readable labels and provenance, excluded from geometric compatibility. |
 
@@ -230,7 +230,8 @@ are refused. Adapters normalize spellings (`mm` and `millimeter` compare as diff
 perform explicit conversions before construction; the core never parses, relabels or silently
 converts units and does not require Pint. An optional Pint-backed conversion helper may be added;
 unit objects are never stored. Cartesian axes refuse known angular spellings, a best-effort
-check; recognizing an angle does not supply an angular representation. Affine inputs may be
+check; recognizing an angle does not supply an angular representation, which only an angular
+representation with declared longitude and latitude roles does. Affine inputs may be
 angular, because inputs are coordinate values.
 
 **Compatibility is a sequence of checks, not overloaded approximate equality:**
@@ -590,8 +591,9 @@ rows specify extension boundaries and acceptance requirements, not v1 implementa
 No mandatory Astropy, GWCS, PROJ, GDAL or nonlinear solver. Adapters can use existing engines,
 including an internally composite model, without a core transform graph or discovery registry.
 
-World coordinates need not be Cartesian. Future representations can declare angular components,
-periodicity and singularities. Native xarray label alignment remains literal: longitude labels
+World coordinates need not be Cartesian. Spherical and geodetic representations declare
+longitude and latitude through axis roles; periodicity, seam handling and singularities follow
+in later stages. Native xarray label alignment remains literal: longitude labels
 0 and 360 do not automatically align, and no angular wrapping or branch selection happens in
 arithmetic. Explicit domain operations may normalize representations. Coordinate components do
 not by themselves define a Euclidean distance, area, spacing or physical voxel support.

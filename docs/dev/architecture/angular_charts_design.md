@@ -301,5 +301,6 @@ Each gets a short plan reviewed before implementation, as for value geometry.
 
 ## Next Steps
 
-1. Stage plan for section 1 (declaration, refusals, persistence), reviewed before
-   implementation.
+1. Stage 1, declarations, refusals and persistence ([plan](angular_charts_stage1_plan.md)).
+   Done.
+2. Stage 2 plan: transitions (section 3).

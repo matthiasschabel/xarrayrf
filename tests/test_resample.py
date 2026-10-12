@@ -11,6 +11,7 @@ from numpy.testing import assert_allclose, assert_array_equal
 from xarray.indexes import RangeIndex
 
 import xarrayrf as xrf
+from xarrayrf.native import frame_array
 
 pytest.importorskip("scipy", minversion="1.18")
 ndimage = pytest.importorskip("scipy.ndimage")
@@ -1176,3 +1177,30 @@ def test_resample_revalidates_sizes_at_the_original_planning_stage(stale: str) -
     match = "different frames" if stale == "frame_error" else "not a coordinate"
     with pytest.raises(ValueError, match=match):
         xrf.resample(source, target)
+
+
+def test_linear_resampling_between_lon_lat_grids_stays_within_the_labels() -> None:
+    """Angular frames resample like any frame; the longitude seam does not wrap yet."""
+    frame = xrf.ReferenceFrame.local(
+        xrf.CoordinateSystem(
+            ("lon", "lat"),
+            ("degrees_east", "degrees_north"),
+            representation="spherical",
+            axis_roles=("longitude", "latitude"),
+        )
+    )
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(("lon", "lat"), ("degrees_east", "degrees_north")),
+        target=frame,
+        matrix=np.eye(2),
+        translation=(0.0, 0.0),
+    )
+    lon, lat = np.arange(0.0, 360.0, 2.5), np.arange(-90.0, 90.1, 2.5)
+    source = frame_array(
+        lon[:, None] + 1000.0 * lat[None, :],
+        xrf.Grid(transform, {"lon": ("lon", lon), "lat": ("lat", lat)}),
+    )
+    target = xrf.Grid(transform, {"lon": ("lon", [1.25, 358.75]), "lat": ("lat", [-88.75])})
+    result = xrf.resample(source.rf.geometry, target)
+    assert_allclose(result.sel(lon=1.25), [1.25 - 88750.0], atol=1e-9, rtol=0)
+    assert np.isnan(result.sel(lon=358.75)).all()

@@ -145,7 +145,8 @@ Each term has one meaning. Public names, docstrings, errors and docs use these m
 Besides the classes and functions above, `xarrayrf` exports: `Endpoint` (the union type
 `ReferenceFrame | ArrayCoordinates`), `Role` (the literal `"world" | "object"`), `AxisCode` (the
 `axis`/`direction`/`angle` record `CoordinateSystem.axis_codes` returns), `Domain` (`"samples" | "cells"`),
-`Method` (`"nearest" | "linear" | "cubic"`), `CARTESIAN` (the only representation), `LOCAL_NAMESPACE`
+`Method` (`"nearest" | "linear" | "cubic"`), `CARTESIAN`, `SPHERICAL` and `GEODETIC` (the
+representations), `AxisRole` (`"longitude" | "latitude" | "radius" | "height"`), `LOCAL_NAMESPACE`
 (the identifier namespace `ReferenceFrame.local` mints in), `SCHEMA_VERSION` (the persistence
 schema, 1) and `INVERSE_CONDITION_LIMIT`. `xarrayrf.units.SYMBOLS` is the read-only spelling table;
 `xarrayrf.ngff.NAMESPACE` (`"ome-zarr"`) is the identifier namespace of frames read from a store.
@@ -162,10 +163,38 @@ package defines `__all__`; star imports expose only its public API.
 ## Value objects
 
 **`CoordinateSystem(axes, units, *, axis_types=None, representation="cartesian",
-vocabulary=None, orientation=None)`**. Units may be `None` (undeclared); an oriented axis must
+vocabulary=None, orientation=None, axis_roles=None)`**. Units may be `None` (undeclared); an oriented axis must
 declare a unit, since a direction needs the axis's quantity. Axis types join strict equality, and
 `coordinate_system_change` requires matched axes to keep their type. Format-specific rules, such
 as NGFF RFC-4's orientation only on spatial axes, are checked by adapters.
+
+Angular representations declare longitude and latitude through `axis_roles`, one role or `None`
+per axis; roles join strict equality and are refused on Cartesian systems:
+
+```python
+lon_lat = rf.CoordinateSystem(
+    ("time", "lat", "lon"),
+    ("days since 1850-01-01", "degrees_north", "degrees_east"),
+    representation=rf.SPHERICAL,
+    axis_roles=(None, "latitude", "longitude"),
+)
+```
+
+| Representation | Roles | Accepted angular units |
+|---|---|---|
+| `"spherical"` | one `"longitude"`, one `"latitude"` (geocentric), at most one `"radius"` (distance from the centre) | longitude: `deg`, `degree`, `degrees`, CF east spellings (`degrees_east`, `degree_E`, ...), `rad`, `radian`, `radians`; latitude: the same with CF north spellings |
+| `"geodetic"` | one `"longitude"`, one `"latitude"` (ellipsoid normal), at most one `"height"` (above the ellipsoid) | as above |
+
+West and south spellings flip the axis sign and are refused, as are arcminutes, arcseconds and
+the degree sign; axes with role `None`, radius and height keep the Cartesian refusal of angular
+units. An angular system cannot be oriented, and `axis_codes` refuses it. Euclidean quantities
+are refused on angular frames: `Lattice.spacing` and `Lattice.direction` raise (`matrix` still
+gives the steps axis by axis), and box methods refuse to average along latitude, since a mean
+over degrees of latitude is not an area mean; longitude slabs and pass-through latitude are
+allowed. `coordinate_system_change` refuses two systems that differ in representation or roles
+when either is angular. Longitude labels are not wrapped yet: a target beyond the outer source
+labels is outside, as on any axis. Transitions to Cartesian charts, seam-aware resampling and a
+CF reader follow.
 
 **`ReferenceFrame`**: identifier, `coordinate_system`, optional `role`, `definition`, `context`,
 `display`; constructed by `ReferenceFrame.local(coordinate_system, ...)`,
@@ -1001,8 +1030,9 @@ Intervals are not encoded in stages 1 or 2. Schema 1 is not frozen.
 
 ## Units
 
-Open CF/UDUNITS strings compared exactly; no conversion; Cartesian axes refuse known angular
-spellings including CF geographic degrees. Pint-backed conversion is an optional later helper.
+Open CF/UDUNITS strings compared exactly; no conversion; Cartesian axes, and the axes of an angular
+system that are not longitude or latitude, refuse known angular spellings including CF
+geographic degrees. Pint-backed conversion is an optional later helper.
 `xarrayrf.units.canonical(unit)` maps the UDUNITS-2 names and plurals that OME-NGFF prefers to
 the CF symbols every adapter emits (`"micrometer"` to `"um"`), and `udunits_name(unit)` maps
 back for export; unknown spellings pass through. Adapters apply it at their boundary so frames

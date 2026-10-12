@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 
-from xarrayrf import CoordinateSystem, DirectionVocabulary
+from xarrayrf import GEODETIC, AxisRole, CoordinateSystem, DirectionVocabulary
 
 ANATOMY = DirectionVocabulary(
     "test-anatomy", ("right-to-left", "anterior-to-posterior", "inferior-to-superior")
@@ -158,7 +158,7 @@ def test_axis_names_must_be_unique_and_present() -> None:
 
 def test_unsupported_representation_is_rejected() -> None:
     with pytest.raises(ValueError, match="not implemented"):
-        CoordinateSystem(("x",), ("mm",), representation="spherical")
+        CoordinateSystem(("x",), ("mm",), representation="cylindrical")
 
 
 @pytest.mark.parametrize(
@@ -237,3 +237,154 @@ def test_axis_type_declarations_are_validated(
 def test_an_oriented_axis_needs_a_unit() -> None:
     with pytest.raises(ValueError, match="oriented but declares no unit"):
         CoordinateSystem(("x", "y", "z"), ("mm", None, "mm"), vocabulary=ANATOMY, orientation=LPS)
+
+
+# Angular representations: longitude/latitude charts declared through axis roles.
+
+
+def lon_lat(
+    representation: str = "spherical",
+    units: tuple[str | None, ...] = ("degrees_east", "degrees_north"),
+    roles: Sequence[str | None] = ("longitude", "latitude"),
+    axes: tuple[str, ...] = ("lon", "lat"),
+) -> CoordinateSystem:
+    return CoordinateSystem(
+        axes,
+        units,
+        representation=representation,
+        axis_roles=cast(Sequence[AxisRole | None], roles),
+    )
+
+
+def test_an_angular_system_declares_roles_beside_ordinary_axes() -> None:
+    system = lon_lat(
+        "geodetic",
+        units=("s", "deg", "deg", "m"),
+        roles=(None, "latitude", "longitude", "height"),
+        axes=("time", "lat", "lon", "h"),
+    )
+    assert system.representation == GEODETIC
+    assert system.axis_roles == (None, "latitude", "longitude", "height")
+    assert system.orientation == (None,) * 4
+    assert "axis_roles=(None, 'latitude', 'longitude', 'height')" in repr(system)
+
+
+def test_cartesian_systems_have_no_roles_and_an_unchanged_repr() -> None:
+    system = CoordinateSystem(("x",), ("mm",))
+    assert system.axis_roles == (None,)
+    assert repr(system) == "CoordinateSystem(axes=('x',), units=('mm',))"
+
+
+@pytest.mark.parametrize("radians", ["rad", "radian", "radians"])
+def test_radians_are_accepted_on_both_angles(radians: str) -> None:
+    assert lon_lat(units=(radians, radians)).units == (radians, radians)
+
+
+def test_roles_take_part_in_equality_and_hashing() -> None:
+    a = lon_lat(units=("deg", "deg"))
+    swapped = lon_lat(units=("deg", "deg"), roles=("latitude", "longitude"))
+    geodetic = lon_lat("geodetic", units=("deg", "deg"))
+    assert a == lon_lat(units=("deg", "deg"))
+    assert hash(a) == hash(lon_lat(units=("deg", "deg")))
+    assert a != swapped
+    assert a != geodetic
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error", "message"),
+    [
+        pytest.param(
+            {"representation": "cartesian", "units": ("m", "m")},
+            ValueError,
+            "Cartesian coordinate system has none",
+            id="roles-on-cartesian",
+        ),
+        pytest.param({"roles": None}, ValueError, "needs axis_roles", id="missing"),
+        pytest.param({"roles": "longitude"}, TypeError, "sequence of roles", id="string"),
+        pytest.param({"roles": ("longitude",)}, ValueError, "one entry per axis", id="length"),
+        pytest.param({"roles": ("longitude", 1)}, TypeError, "string or None", id="type"),
+        pytest.param(
+            {"roles": ("longitude", "colatitude")}, ValueError, "not one of", id="unknown"
+        ),
+        pytest.param(
+            {"roles": ("longitude", None), "units": ("deg", "m")},
+            ValueError,
+            "exactly one latitude",
+            id="no-latitude",
+        ),
+        pytest.param(
+            {
+                "roles": ("longitude", "latitude", "height"),
+                "units": ("deg", "deg", "m"),
+                "axes": ("lon", "lat", "h"),
+            },
+            ValueError,
+            "no height axis",
+            id="height-in-spherical",
+        ),
+        pytest.param(
+            {
+                "representation": "geodetic",
+                "roles": ("longitude", "latitude", "radius"),
+                "units": ("deg", "deg", "m"),
+                "axes": ("lon", "lat", "r"),
+            },
+            ValueError,
+            "no radius axis",
+            id="radius-in-geodetic",
+        ),
+        pytest.param(
+            {
+                "roles": ("longitude", "latitude", "radius", "radius"),
+                "units": ("deg", "deg", "m", "m"),
+                "axes": ("lon", "lat", "r", "s"),
+            },
+            ValueError,
+            "one radius axis",
+            id="two-radii",
+        ),
+        pytest.param({"units": ("m", "deg")}, ValueError, "degree or radian", id="metres"),
+        pytest.param({"units": (None, "deg")}, ValueError, "degree or radian", id="no-unit"),
+        pytest.param({"units": ("degrees_west", "deg")}, ValueError, "degree or radian", id="west"),
+        pytest.param(
+            {"units": ("deg", "degrees_south")}, ValueError, "degree or radian", id="south"
+        ),
+        pytest.param(
+            {"units": ("deg", "degrees_east")}, ValueError, "degree or radian", id="east-lat"
+        ),
+        pytest.param({"units": ("arcsec", "deg")}, ValueError, "degree or radian", id="arcsec"),
+        pytest.param(
+            {
+                "roles": ("longitude", "latitude", None),
+                "units": ("deg", "deg", "deg"),
+                "axes": ("lon", "lat", "t"),
+            },
+            ValueError,
+            "is angular",
+            id="angle-without-role",
+        ),
+    ],
+)
+def test_invalid_angular_declarations_are_refused(
+    kwargs: dict[str, object], error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=message):
+        lon_lat(**kwargs)  # type: ignore[arg-type]
+
+
+def test_an_angular_system_cannot_be_oriented() -> None:
+    vocabulary = DirectionVocabulary("test-up", ("down-to-up",))
+    with pytest.raises(ValueError, match="cannot be oriented"):
+        CoordinateSystem(
+            ("lon", "lat", "h"),
+            ("deg", "deg", "m"),
+            representation="geodetic",
+            axis_roles=("longitude", "latitude", "height"),
+            vocabulary=vocabulary,
+            orientation=(None, None, "down-to-up"),
+        )
+
+
+def test_axis_codes_are_refused_on_an_angular_system() -> None:
+    with pytest.raises(ValueError, match="spherical coordinate system has none"):
+        lon_lat().axis_codes([1.0, 0.0])

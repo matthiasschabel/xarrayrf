@@ -16,13 +16,23 @@ import numpy as np
 import numpy.typing as npt
 
 
+def _cf_degrees(full: str, letter: str) -> frozenset[str]:
+    """CF/UDUNITS spellings of one geographic direction's degrees, such as ``degrees_east``."""
+    return frozenset(
+        spelling
+        for stem in ("degree", "degrees")
+        for spelling in (f"{stem}_{full}", f"{stem}_{letter}", f"{stem}{letter}")
+    )
+
+
 def _cf_geographic_degrees() -> frozenset[str]:
     """CF/UDUNITS spellings of geographic degrees, such as ``degrees_east`` or ``degree_N``."""
-    spellings = set()
-    for stem in ("degree", "degrees"):
-        for full, letter in (("east", "E"), ("west", "W"), ("north", "N"), ("south", "S")):
-            spellings.update({f"{stem}_{full}", f"{stem}_{letter}", f"{stem}{letter}"})
-    return frozenset(spellings)
+    return frozenset().union(
+        *(
+            _cf_degrees(full, letter)
+            for full, letter in (("east", "E"), ("west", "W"), ("north", "N"), ("south", "S"))
+        )
+    )
 
 
 ANGULAR_UNITS: Final = frozenset(
@@ -53,6 +63,25 @@ ANGULAR_UNITS: Final = frozenset(
 
 Best effort: with open unit strings only these spellings are recognized as angular.
 """
+
+_PLAIN_DEGREES: Final = frozenset({"deg", "degree", "degrees"})
+_RADIANS: Final = frozenset({"rad", "radian", "radians"})
+
+
+LONGITUDE_UNITS: Final = _PLAIN_DEGREES | _RADIANS | _cf_degrees("east", "E")
+"""Units a longitude axis accepts. West spellings flip the sign and are refused."""
+
+LATITUDE_UNITS: Final = _PLAIN_DEGREES | _RADIANS | _cf_degrees("north", "N")
+"""Units a latitude axis accepts. South spellings flip the sign and are refused."""
+
+
+def angular_period(unit: str) -> float:
+    """Return the full turn in an accepted angular unit: 360 for degrees, 2π for radians."""
+    if unit in _RADIANS:
+        return 2.0 * math.pi
+    assert unit in LONGITUDE_UNITS | LATITUDE_UNITS, unit
+    return 360.0
+
 
 REAL_KINDS: Final = frozenset({"i", "u", "f"})
 """NumPy dtype kinds accepted as coordinate values: signed, unsigned and floating."""

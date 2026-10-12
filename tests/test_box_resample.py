@@ -354,3 +354,58 @@ def test_point_on_an_edge_within_roundoff_takes_both_slabs() -> None:
     for offset in (-1e-13, 0.0, 1e-13):
         target = xrf.Grid(slab_grid([[0, 1]]).transform, {"z": ("slice", [1.0 + offset])})
         assert_allclose(source.rf.resample_to(target, method="step"), [1.0], atol=ATOL, rtol=0)
+
+
+LON_LAT = xrf.ReferenceFrame.local(
+    xrf.CoordinateSystem(
+        ("lon", "lat"),
+        ("degrees_east", "degrees_north"),
+        representation="spherical",
+        axis_roles=("longitude", "latitude"),
+    )
+)
+
+
+def lon_lat_grid(lon: npt.ArrayLike, lat: npt.ArrayLike) -> xrf.Grid:
+    """Cells one degree wide in both angles, centred on the given values."""
+    centers = {"lon": np.asarray(lon, dtype=float), "lat": np.asarray(lat, dtype=float)}
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(
+            ("lon", "lat"), ("degrees_east", "degrees_north"), sample_offset=(0.5, 0.5)
+        ),
+        target=LON_LAT,
+        matrix=np.eye(2),
+        translation=(0.0, 0.0),
+    )
+    return xrf.Grid(
+        transform,
+        {name: (name, values) for name, values in centers.items()},
+        intervals={name: values[:, None] + [-0.5, 0.5] for name, values in centers.items()},
+    )
+
+
+@pytest.mark.parametrize("method", ["step", "overlap_mean"])
+def test_box_methods_refuse_averaging_along_latitude(method: xrf.Method) -> None:
+    source = frame_array(np.ones((4, 4)), lon_lat_grid(np.arange(4), np.arange(4)))
+    with pytest.raises(ValueError, match="source axis 'lat', which runs along latitude"):
+        xrf.resample(
+            source.rf.geometry,
+            lon_lat_grid(np.arange(4), [0.5, 2.5]),
+            method=method,
+            support="average",
+        )
+
+
+def test_box_methods_average_longitude_at_unchanged_latitudes() -> None:
+    """Latitude passes through by index, so only longitude is averaged."""
+    values = np.arange(16.0).reshape(4, 4)
+    source = frame_array(values, lon_lat_grid(np.arange(4), np.arange(4)))
+    result = xrf.resample(
+        source.rf.geometry,
+        lon_lat_grid([0.5, 2.5], np.arange(4)),
+        method="overlap_mean",
+        support="average",
+    )
+    # The grid's dims follow its coordinate order: (lon, lat).
+    assert result.dims == ("lon", "lat")
+    assert_allclose(result, (values[0::2] + values[1::2]) / 2, atol=ATOL, rtol=0)

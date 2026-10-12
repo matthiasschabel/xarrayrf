@@ -12,6 +12,7 @@ from numpy.testing import assert_allclose
 
 from xarrayrf import (
     AxisCode,
+    AxisRole,
     CoordinateSystem,
     DirectionVocabulary,
     ReferenceFrame,
@@ -264,3 +265,31 @@ def test_an_unoriented_axis_without_a_unit_passes_through() -> None:
     )
     change = coordinate_system_change(frame, frame.with_coordinate_system(ras))
     assert_allclose(change.matrix, np.diag([1.0, -1.0, -1.0, 1.0]), atol=ATOL)
+
+
+def _angular(representation: str, roles: tuple[AxisRole, ...]) -> CoordinateSystem:
+    return CoordinateSystem(
+        ("u", "v"), ("deg", "deg"), representation=representation, axis_roles=roles
+    )
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param(_angular("geodetic", ("longitude", "latitude")), id="spherical-geodetic"),
+        pytest.param(_angular("spherical", ("latitude", "longitude")), id="roles-swapped"),
+        pytest.param(CoordinateSystem(("u", "v"), ("m", "m")), id="cartesian"),
+    ],
+)
+def test_angular_declarations_that_differ_derive_no_change(target: CoordinateSystem) -> None:
+    """Matching names and units would otherwise pass unoriented axes through as an identity."""
+    source = ReferenceFrame.declared(UID, _angular("spherical", ("longitude", "latitude")))
+    with pytest.raises(ValueError, match="explicit transition transform"):
+        coordinate_system_change(source, source.with_coordinate_system(target))
+    with pytest.raises(ValueError, match="explicit transition transform"):
+        coordinate_system_change(source.with_coordinate_system(target), source)
+
+
+def test_an_equal_angular_system_derives_the_identity() -> None:
+    frame = ReferenceFrame.declared(UID, _angular("spherical", ("longitude", "latitude")))
+    assert_allclose(coordinate_system_change(frame, frame).matrix, np.eye(2), atol=0, rtol=0)

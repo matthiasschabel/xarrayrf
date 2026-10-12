@@ -33,7 +33,7 @@ from ._affine import INVERSE_CONDITION_LIMIT, AffineTransform
 from ._array_coordinates import ArrayCoordinates
 from ._classification import AffineClass, affine_class
 from ._composite import CompositeTransform, compose
-from ._coordinate_system import CARTESIAN, AxisCode, CoordinateSystem
+from ._coordinate_system import CARTESIAN, GEODETIC, SPHERICAL, AxisCode, AxisRole, CoordinateSystem
 from ._encoding import (
     SCHEMA_VERSION,
     DecoderResultError,
@@ -86,6 +86,7 @@ __all__ = [
     "CARTESIAN",
     "COVECTOR",
     "CROSS_PRODUCT_PSEUDOVECTOR",
+    "GEODETIC",
     "INVERSE_CONDITION_LIMIT",
     "LOCAL_NAMESPACE",
     "ORTHOGONALITY_TOLERANCE",
@@ -94,6 +95,7 @@ __all__ = [
     "SCALAR",
     "SCHEMA_VERSION",
     "SECOND_ORDER_CONTRAVARIANT_TENSOR",
+    "SPHERICAL",
     "SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR",
     "SYMMETRIC_SECOND_ORDER_COVARIANT_TENSOR",
     "SYMMETRY_TOLERANCE",
@@ -103,6 +105,7 @@ __all__ = [
     "AffineTransform",
     "ArrayCoordinates",
     "AxisCode",
+    "AxisRole",
     "CompositeTransform",
     "CoordinateSystem",
     "DecoderResultError",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from ._affine import AffineTransform
+from ._coordinate_system import CARTESIAN
 from ._frame import ReferenceFrame
 
 
@@ -34,8 +35,9 @@ def coordinate_system_change(source: ReferenceFrame, target: ReferenceFrame) -> 
         TypeError: If either argument is not a reference frame.
         ValueError: If the frames are not equivalent, or the change is not derivable: an
             axis is oriented in one system only, the systems use
-            different vocabularies or direction pairs, matched axes have different units, or
-            unoriented axes differ in name, unit or position.
+            different vocabularies or direction pairs, matched axes have different units,
+            unoriented axes differ in name, unit or position, or either system is angular and
+            the two differ in representation or axis roles.
     """
     _check_frame(source, field="source")
     _check_frame(target, field="target")
@@ -47,6 +49,16 @@ def coordinate_system_change(source: ReferenceFrame, target: ReferenceFrame) -> 
         )
     a = source.coordinate_system
     b = target.coordinate_system
+    # Unoriented axes are matched by name, unit and position only, so without this guard two
+    # angular declarations with the same axes, such as spherical and geodetic latitude, would
+    # derive an identity.
+    angular = a.representation != CARTESIAN or b.representation != CARTESIAN
+    if angular and (a.representation, a.axis_roles) != (b.representation, b.axis_roles):
+        raise ValueError(
+            f"a {a.representation} and a {b.representation} coordinate system, or two with "
+            "different axis roles, are not related by an axis permutation; use an explicit "
+            "transition transform",
+        )
     oriented_a = {i: token for i, token in enumerate(a.orientation) if token is not None}
     oriented_b = {i: token for i, token in enumerate(b.orientation) if token is not None}
     if (oriented_a or oriented_b) and a.vocabulary != b.vocabulary:

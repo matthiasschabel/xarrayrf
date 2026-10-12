@@ -450,6 +450,7 @@ def _box_operator(
         raise ValueError(
             "box methods require a separable composed map; non-separable map or unsupported source axes"
         )
+    _refuse_latitude_slabs(source, classes)
     coverage = np.ones(tuple(target.sizes[d] for d in target_dims))
     operators = []
     for axis, cls in zip(target.axes, classes, strict=True):
@@ -494,6 +495,30 @@ def _box_operator(
         assert cls.source_axis.dim is not None
         operators.append((source_dims.index(cls.source_axis.dim), axis.dim, operator))
     return BoxOperator(operators, coverage, min_coverage)
+
+
+def _refuse_latitude_slabs(source: Sampling, classes: tuple[_AxisClass, ...]) -> None:
+    """Refuse box averaging along latitude: a mean over degrees of latitude is not an area mean.
+
+    Longitude slabs stay allowed; at fixed latitude a mean over longitude degrees is an
+    arc-length mean. Pass-through axes are exact index matches and average nothing.
+    """
+    roles = source.frame.coordinate_system.axis_roles
+    if "latitude" not in roles:
+        return
+    assert isinstance(source.transform, SupportsAffine)  # box methods require affine maps
+    latitude = source.transform.matrix[roles.index("latitude")]
+    for cls in classes:
+        if cls.pass_through:
+            continue
+        # Identity, not equality: AxisSampling holds arrays. Columns follow source.axes.
+        column = next(i for i, axis in enumerate(source.axes) if axis is cls.source_axis)
+        if abs(latitude[column]) > ROUNDING_ALLOWANCE * np.max(np.abs(latitude)):
+            raise ValueError(
+                f"box methods refuse source axis {cls.source_axis.axis!r}, which runs along "
+                "latitude: a mean over degrees of latitude is not an area mean. Use a point "
+                "method, or a conservative regridding tool",
+            )
 
 
 @dataclass(frozen=True)

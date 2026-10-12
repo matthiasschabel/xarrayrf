@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 import numpy.typing as npt
 
+from ._coordinate_system import CARTESIAN
 from ._frame import ReferenceFrame
 from ._validation import check_names, frozen_float_array, real_float_array
 
@@ -83,6 +84,18 @@ class Lattice:
         return self._matrix.copy()
 
     def _common_unit(self, name: str) -> None:
+        system = self._frame.coordinate_system
+        if system.representation != CARTESIAN:
+            angular = tuple(
+                axis
+                for axis, role in zip(system.axes, system.axis_roles, strict=True)
+                if role in ("longitude", "latitude")
+            )
+            raise ValueError(
+                f"{name} is a Euclidean length, and frame axes {angular} are angular, so it has "
+                "none. Use matrix, whose columns are the steps axis by axis; distance and area "
+                "on a sphere or ellipsoid need a dedicated tool",
+            )
         units = self._frame.units
         if None in units:
             raise ValueError(
@@ -106,7 +119,8 @@ class Lattice:
         and ``rad/s``, has no single length.
 
         Raises:
-            ValueError: If the frame's axes use different units, or any declares none.
+            ValueError: If the frame is angular, its axes use different units, or any
+                declares none.
         """
         self._common_unit("spacing")
         spacing: npt.NDArray[np.float64] = np.linalg.norm(self._matrix, axis=0)
@@ -121,7 +135,8 @@ class Lattice:
         lattice the columns are unit length but not orthogonal.
 
         Raises:
-            ValueError: If the frame's axes use different units, as for :attr:`spacing`.
+            ValueError: If the frame is angular or its axes use different units, as for
+                :attr:`spacing`.
         """
         self._common_unit("direction")
         direction: npt.NDArray[np.float64] = self._matrix / self.spacing

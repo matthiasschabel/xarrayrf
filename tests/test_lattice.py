@@ -260,3 +260,29 @@ def test_a_fully_selected_point_forms_a_zero_dimensional_lattice() -> None:
     assert lattice.matrix.shape == (1, 0)
     assert_allclose(lattice.origin, [5.0], rtol=0, atol=ATOL)
     assert_allclose(lattice.transform_point(np.zeros((4, 0))), np.full((4, 1), 5.0), atol=ATOL)
+
+
+def test_spacing_and_direction_are_refused_on_angular_axes() -> None:
+    """Degrees on both axes share a unit, yet a degree of longitude is no fixed length."""
+    system = xrf.CoordinateSystem(
+        ("lon", "lat"),
+        ("deg", "deg"),
+        representation="spherical",
+        axis_roles=("longitude", "latitude"),
+    )
+    array = xr.DataArray(
+        np.zeros((3, 4)),
+        dims=("lat", "lon"),
+        coords={"lat": [-2.5, 0, 2.5], "lon": [0, 2.5, 5, 7.5]},
+    )
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(("lon", "lat"), ("deg", "deg")),
+        target=xrf.ReferenceFrame.local(system),
+        matrix=np.eye(2),
+        translation=(0.0, 0.0),
+    )
+    lattice = xrf.Geometry(array, transform, dims=("lat", "lon")).lattice()
+    assert_allclose(lattice.matrix, [[0.0, 2.5], [2.5, 0.0]], atol=ATOL, rtol=0)
+    for name in ("spacing", "direction"):
+        with pytest.raises(ValueError, match=r"axes \('lon', 'lat'\) are angular"):
+            getattr(lattice, name)

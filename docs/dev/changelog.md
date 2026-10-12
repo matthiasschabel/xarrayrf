@@ -1,5 +1,25 @@
 # Changelog
 
+## [2026-10-12] — Angular charts stage 1: declarations, refusals, persistence
+
+- **Problem**: Longitude/latitude data could not be declared: `CoordinateSystem` admitted only
+  Cartesian axes and refused angular units, so GCM grids and celestial coordinates had to
+  disguise angles as unitless Cartesian axes.
+- **Resolution**: `SPHERICAL` and `GEODETIC` representations with `axis_roles` (longitude,
+  latitude, radius, height); degree, CF east/north and radian units on angular axes only;
+  orientation refused on angular systems. Euclidean quantities refused on angular frames
+  (`Lattice.spacing`/`direction`, `axis_codes`, box averaging along latitude);
+  `coordinate_system_change` refuses differing angular declarations, which would otherwise
+  have derived an identity from matching axis names and units. `axis_roles` persists as an
+  optional schema-1 field written only for angular systems, so Cartesian records are
+  unchanged. No wrapping at the longitude seam yet.
+- **Verification**: stock 2,330 passed plus 47 xfailed; patched 2,377; upstream 2,335 plus 42
+  xfailed; ruff and mypy pass.
+- **Files affected**: `src/xarrayrf/_coordinate_system.py`, `_validation.py`, `_orientation.py`,
+  `_lattice.py`, `_resampling.py`, `_encoding.py`, `__init__.py`; tests for each;
+  `docs/core_interface.md`, `docs/design.md`.
+- **Reviewed by**: Codex (gpt-6-sol, high), plan and implementation.
+
 ## [2026-10-12] — Independent QA of value geometry stages 1 to 3
 
 - **Problem**: Review the value geometry work (tensor types and kernel, component declarations,

@@ -21,7 +21,7 @@ import numpy as np
 from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
 from ._composite import CompositeTransform
-from ._coordinate_system import CoordinateSystem
+from ._coordinate_system import CARTESIAN, CoordinateSystem
 from ._frame import ReferenceFrame
 from ._grid import Coordinate, Grid
 from ._symmetric_packing import SymmetricPacking
@@ -195,6 +195,8 @@ def _encode(value: object) -> dict[str, Any]:
             "representation": value.representation,
             "vocabulary": None if value.vocabulary is None else _encode(value.vocabulary),
             "orientation": list(value.orientation),
+            # Written only where roles exist, so Cartesian records are unchanged.
+            **({"axis_roles": list(value.axis_roles)} if value.representation != CARTESIAN else {}),
         }
     if isinstance(value, ReferenceFrame):
         return {
@@ -384,6 +386,9 @@ _FIELDS: Final = {
     "packed_tensor_component_declaration": {"tensor_type", "component_dim", "basis", "packing"},
 }
 
+_OPTIONAL_FIELDS: Final = {"coordinate_system": {"axis_roles"}}
+"""Fields a record of that kind may omit: added within schema 1 and written only when used."""
+
 _EXTENSION_FIELDS: Final = {"version", "source", "target", "data"}
 
 
@@ -398,7 +403,9 @@ class _Decoder:
             raise MalformedDataError(f"an encoded value needs a string 'kind', got {kind!r}")
         fields = {key: item for key, item in record.items() if key != "kind"}
         if kind in _BUILT_IN:
-            self._expect(kind, fields, _FIELDS[kind])
+            self._expect(
+                kind, fields, _FIELDS[kind] | (_OPTIONAL_FIELDS.get(kind, set()) & set(fields))
+            )
             try:
                 return getattr(self, kind)(fields)
             except EncodingError:
@@ -465,6 +472,9 @@ class _Decoder:
             representation=fields["representation"],
             vocabulary=vocabulary,
             orientation=self._list(fields["orientation"], "orientation"),
+            axis_roles=(
+                self._list(fields["axis_roles"], "axis_roles") if "axis_roles" in fields else None
+            ),
         )
 
     def reference_frame(self, fields: Mapping[str, Any]) -> ReferenceFrame:

@@ -4,20 +4,41 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Final, NamedTuple
+from typing import Final, Literal, NamedTuple, get_args
 
 import numpy as np
 import numpy.typing as npt
 
-from ._validation import check_axis_types, check_names, check_str, check_units, real_float_array
+from ._validation import (
+    ANGULAR_UNITS,
+    LATITUDE_UNITS,
+    LONGITUDE_UNITS,
+    check_axis_types,
+    check_names,
+    check_str,
+    check_units,
+    real_float_array,
+)
 from ._vocabulary import DirectionVocabulary
 
 CARTESIAN: Final = "cartesian"
-"""The only coordinate representation implemented so far."""
+"""Cartesian axes: no periodicity, no branch, and Euclidean calculations allowed."""
 
-_REPRESENTATIONS: Final = frozenset({CARTESIAN})
-# Adding a representation must revisit the angular-unit refusal below, ``axis_codes`` and
-# ``coordinate_system_change``, which assume Cartesian axes because nothing else exists.
+SPHERICAL: Final = "spherical"
+"""Longitude, geocentric latitude and optionally a radius measured from the centre."""
+
+GEODETIC: Final = "geodetic"
+"""Longitude, latitude along the ellipsoid normal and optionally a height above the ellipsoid."""
+
+_REPRESENTATIONS: Final = frozenset({CARTESIAN, SPHERICAL, GEODETIC})
+
+type AxisRole = Literal["longitude", "latitude", "radius", "height"]
+"""What an axis of an angular representation measures."""
+
+_AXIS_ROLES: Final = frozenset(get_args(AxisRole.__value__))
+_ANGULAR_UNITS: Final = {"longitude": LONGITUDE_UNITS, "latitude": LATITUDE_UNITS}
+# The third spatial role each representation admits; the other is refused.
+_RADIAL_ROLE: Final = {SPHERICAL: "radius", GEODETIC: "height"}
 
 
 class AxisCode(NamedTuple):
@@ -36,6 +57,12 @@ class AxisCode(NamedTuple):
 class CoordinateSystem:
     """Ordered axes with units, a representation and, optionally, axis orientation.
 
+    ``"cartesian"`` is the default. ``"spherical"`` and ``"geodetic"`` declare longitude and
+    latitude axes through ``axis_roles``; their angles are periodic and bounded, so Euclidean
+    quantities such as :attr:`~xarrayrf.Lattice.spacing` are refused on them, and their axes
+    cannot be oriented. Other axes of an angular system, such as time or a pressure level, are
+    ordinary axes with role ``None``.
+
     A coordinate system carries no identity. The same reference frame can be expressed in
     several coordinate systems, for example LPS and RAS for one patient, and a frame compared
     with :meth:`~xarrayrf.ReferenceFrame.is_equivalent_frame` ignores which one it uses.
@@ -47,7 +74,15 @@ class CoordinateSystem:
     are, so ``x`` and ``L`` can be the same axis.
     """
 
-    __slots__ = ("_axes", "_axis_types", "_orientation", "_representation", "_units", "_vocabulary")
+    __slots__ = (
+        "_axes",
+        "_axis_roles",
+        "_axis_types",
+        "_orientation",
+        "_representation",
+        "_units",
+        "_vocabulary",
+    )
 
     _axes: tuple[str, ...]
     _units: tuple[str | None, ...]
@@ -55,6 +90,7 @@ class CoordinateSystem:
     _representation: str
     _vocabulary: DirectionVocabulary | None
     _orientation: tuple[str | None, ...]
+    _axis_roles: tuple[AxisRole | None, ...]
 
     def __init__(
         self,
@@ -65,6 +101,7 @@ class CoordinateSystem:
         representation: str = CARTESIAN,
         vocabulary: DirectionVocabulary | None = None,
         orientation: Sequence[str | None] | None = None,
+        axis_roles: Sequence[AxisRole | None] | None = None,
     ) -> None:
         """Validate and freeze a coordinate system.
 
@@ -75,19 +112,27 @@ class CoordinateSystem:
             axis_types: One open type string per axis, or ``None`` where undeclared; omitted,
                 none is declared. NGFF's ``"space"``, ``"time"`` and ``"channel"`` are the
                 recommended spellings. Declarative only: nothing here depends on a type.
-            representation: Coordinate representation kind; ``"cartesian"`` so far.
+            representation: ``"cartesian"`` (the default), ``"spherical"`` or ``"geodetic"``.
             vocabulary: The vocabulary orientation tokens come from. Required when any axis
                 is oriented, and discarded when none is.
             orientation: One direction token or ``None`` per axis, naming the direction the
-                axis increases toward. Omitted means no axis is oriented.
+                axis increases toward. Omitted means no axis is oriented. Refused in a
+                non-Cartesian system.
+            axis_roles: For a non-Cartesian representation, required: one of
+                ``"longitude"``, ``"latitude"``, ``"radius"`` (spherical only), ``"height"``
+                (geodetic only) or ``None`` per axis, with exactly one longitude and one
+                latitude. Longitude accepts plain degrees (``"deg"``, ``"degree"``,
+                ``"degrees"``), CF east degrees (``"degrees_east"`` and its variants) and
+                radians; latitude the same with CF north degrees. Refused for Cartesian.
 
         Raises:
             TypeError: If an argument has the wrong Python type.
             ValueError: If names repeat, counts disagree, a unit is malformed or angular on
                 a Cartesian axis, an axis type is empty or padded, the representation is
                 unsupported, orientation is given without a vocabulary, a token is not in the
-                vocabulary, two axes use the same antipodal pair, or an oriented axis declares
-                no unit.
+                vocabulary, two axes use the same antipodal pair, an oriented axis declares
+                no unit, or ``axis_roles`` is missing, misplaced, malformed, or disagrees with
+                the representation or an axis's unit.
         """
         self._axes = check_names(axes, field="axes")
         self._representation = check_str(representation, field="representation")
@@ -96,12 +141,21 @@ class CoordinateSystem:
                 f"representation {self._representation!r} is not implemented; supported "
                 f"representations are {tuple(sorted(_REPRESENTATIONS))}",
             )
-        self._units = check_units(units, field="units", reject_angular=True)
+        self._units = check_units(units, field="units")
         if len(self._units) != len(self._axes):
             raise ValueError(
                 f"units must declare one unit per axis; got {len(self._units)} units for "
                 f"{len(self._axes)} axes",
             )
+        self._axis_roles = self._check_axis_roles(axis_roles)
+        # Angles are allowed only where a role declares them; every other axis declares no
+        # periodicity or branch, so an angle there would be relabelled rather than represented.
+        for unit, role in zip(self._units, self._axis_roles, strict=True):
+            if role not in _ANGULAR_UNITS and unit in ANGULAR_UNITS:
+                raise ValueError(
+                    f"units unit {unit!r} is angular; a Cartesian axis declares no periodicity "
+                    "or branch, so an angle would be relabelled rather than represented",
+                )
         self._axis_types = check_axis_types(axis_types, count=len(self._axes))
         if vocabulary is not None and not isinstance(vocabulary, DirectionVocabulary):
             raise TypeError(
@@ -109,10 +163,72 @@ class CoordinateSystem:
             )
         self._vocabulary = vocabulary
         self._orientation = self._check_orientation(orientation)
+        if self._representation != CARTESIAN and any(
+            token is not None for token in self._orientation
+        ):
+            raise ValueError(
+                f"a {self._representation} coordinate system cannot be oriented; direction "
+                "tokens name constant directions, which longitude and latitude are not",
+            )
         if all(token is None for token in self._orientation):
             # A vocabulary with no oriented axis carries no meaning; dropping it keeps two
             # unoriented systems equal whether or not a caller passed one.
             self._vocabulary = None
+
+    def _check_axis_roles(self, axis_roles: object) -> tuple[AxisRole | None, ...]:
+        if self._representation == CARTESIAN:
+            if axis_roles is not None:
+                raise ValueError(
+                    "axis_roles declare the axes of an angular representation; a Cartesian "
+                    "coordinate system has none",
+                )
+            return (None,) * len(self._axes)
+        if axis_roles is None:
+            raise ValueError(
+                f"a {self._representation} coordinate system needs axis_roles naming its "
+                "longitude and latitude axes",
+            )
+        if isinstance(axis_roles, str) or not isinstance(axis_roles, Sequence):
+            raise TypeError(
+                f"axis_roles must be a sequence of roles or None, got {type(axis_roles).__name__}",
+            )
+        roles = tuple(axis_roles)
+        if len(roles) != len(self._axes):
+            raise ValueError(
+                f"axis_roles must give one entry per axis; got {len(roles)} for "
+                f"{len(self._axes)} axes",
+            )
+        for role in roles:
+            if role is not None and not isinstance(role, str):
+                raise TypeError(
+                    f"each axis role must be a string or None, got {type(role).__name__}",
+                )
+            if role is not None and role not in _AXIS_ROLES:
+                raise ValueError(
+                    f"axis role {role!r} is not one of {tuple(sorted(_AXIS_ROLES))} or None",
+                )
+        for required in ("longitude", "latitude"):
+            if roles.count(required) != 1:
+                raise ValueError(
+                    f"a {self._representation} coordinate system needs exactly one "
+                    f"{required} axis; got {roles.count(required)}",
+                )
+        radial = _RADIAL_ROLE[self._representation]
+        for role in set(_RADIAL_ROLE.values()) - {radial}:
+            if role in roles:
+                raise ValueError(
+                    f"a {self._representation} coordinate system has no {role} axis; its "
+                    f"third spatial axis is {radial!r}",
+                )
+        if roles.count(radial) > 1:
+            raise ValueError(f"a {self._representation} coordinate system has one {radial} axis")
+        for axis, unit, role in zip(self._axes, self._units, roles, strict=True):
+            if role in _ANGULAR_UNITS and unit not in _ANGULAR_UNITS[role]:
+                raise ValueError(
+                    f"{role} axis {axis!r} needs a degree or radian unit, got {unit!r}; "
+                    f"accepted are {tuple(sorted(_ANGULAR_UNITS[role]))}",
+                )
+        return roles
 
     def _check_orientation(self, orientation: object) -> tuple[str | None, ...]:
         if orientation is None:
@@ -174,6 +290,11 @@ class CoordinateSystem:
         return self._representation
 
     @property
+    def axis_roles(self) -> tuple[AxisRole | None, ...]:
+        """One role per axis of an angular representation; all ``None`` for Cartesian."""
+        return self._axis_roles
+
+    @property
     def vocabulary(self) -> DirectionVocabulary | None:
         """The vocabulary orientation tokens come from; ``None`` when no axis is oriented."""
         return self._vocabulary
@@ -207,10 +328,15 @@ class CoordinateSystem:
 
         Raises:
             TypeError: If ``vector`` has a non-real dtype or is a masked array.
-            ValueError: If the system has no oriented axis, or its oriented
+            ValueError: If the system is not Cartesian or has no oriented axis, or its oriented
                 axes use different units, or ``vector`` has the wrong length, is not finite,
                 or is zero along every oriented axis.
         """
+        if self._representation != CARTESIAN:
+            raise ValueError(
+                f"axis codes compare Euclidean angles between oriented axes; a "
+                f"{self._representation} coordinate system has none",
+            )
         vocabulary = self._vocabulary
         oriented = [(i, token) for i, token in enumerate(self._orientation) if token is not None]
         if vocabulary is None or not oriented:
@@ -246,10 +372,11 @@ class CoordinateSystem:
             self._representation,
             self._vocabulary,
             self._orientation,
+            self._axis_roles,
         )
 
     def __eq__(self, other: object) -> bool:
-        """Compare axes, units, axis types, representation, vocabulary and orientation exactly."""
+        """Compare axes, units, axis types, representation, roles and orientation exactly."""
         if not isinstance(other, CoordinateSystem):
             return NotImplemented
         return self._key() == other._key()
@@ -264,7 +391,7 @@ class CoordinateSystem:
         if any(kind is not None for kind in self._axis_types):
             text += f", axis_types={self._axis_types!r}"
         if self._representation != CARTESIAN:
-            text += f", representation={self._representation!r}"
+            text += f", representation={self._representation!r}, axis_roles={self._axis_roles!r}"
         if self._vocabulary is not None:
             text += (
                 f", vocabulary={self._vocabulary.identifier!r}, orientation={self._orientation!r}"
