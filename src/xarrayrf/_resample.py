@@ -11,13 +11,20 @@ import xarray as xr
 
 from ._affine import AffineTransform
 from ._binding import grid_variables
+from ._component_resampling import (
+    ComponentReorientation,
+    ComponentRequest,
+    component_request,
+    resample_components,
+)
 from ._geometry import Geometry
 from ._grid import Grid
 from ._resampling import BLOCK_POINTS, Support, check_options, execute
 from ._resampling import Method as Method
 from ._resampling import plan as _plan
 from ._sampling import Domain, Sampling
-from ._tensor_components import declaration_of
+from ._tensor_component_declaration import ComponentBasis, TensorComponentDeclaration
+from ._tensor_components import attach, declared_coordinates, detach
 from ._transform import SupportsPoints
 
 
@@ -66,6 +73,9 @@ def resample(
     support: Support = "point",
     min_coverage: float = 0.5,
     block_points: int = BLOCK_POINTS,
+    output_component_basis: ComponentBasis | None = None,
+    component_reorientation: ComponentReorientation | None = None,
+    units: str | None = None,
 ) -> xr.DataArray:
     """Resample the source array's values onto a target Geometry or Grid.
 
@@ -112,6 +122,19 @@ def resample(
     Cubic splines can overshoot near sharp edges. Infinities retain SciPy's existing
     interpolation behavior.
 
+    Tensor components: a source declaring them (``rf.declare_tensor_components``) needs
+    ``output_component_basis`` and ``component_reorientation``. The components are
+    interpolated in their source basis, then at each target point ``y`` mapped by
+    ``M_out @ R(L) @ M_in`` per slot, by the slot's law: ``M_in`` from the source basis to the
+    source frame, ``L = (D T(y))^-1`` from the source frame to the target frame (``T`` maps
+    target-frame points to source-frame points), ``R`` the reorientation, and ``M_out`` from
+    the target frame to the output basis. ``"jacobian"`` uses ``L``; ``"polar_orthogonal_factor"``
+    its rotation or reflection (equal units on every frame axis; not for densities); a
+    callable receives maps shaped ``(..., n, n)`` and returns one map per map. A non-affine
+    frame map needs a Jacobian, evaluated per target sample in blocks of ``block_points``.
+    ``fill_value`` must be NaN or 0, the values become floating, and the result declares its
+    components in the output basis.
+
     Empty targets return empty values without locating or interpolating samples. Empty sources
     with non-empty targets raise ValueError, regardless of the domain or ``fill_value``.
 
@@ -140,6 +163,13 @@ def resample(
         min_coverage: Minimum covered fraction in ``(0, 1]``; default 0.5. Validated for
             every method, but used only by box methods; coverage multiplies across axes.
         block_points: Target samples located per block.
+        output_component_basis: For declared components: the result's basis, the target frame
+            or an equivalent frame (``rf.resample_to`` also accepts the target's
+            ``ArrayCoordinates``).
+        component_reorientation: For declared components: ``"jacobian"``,
+            ``"polar_orthogonal_factor"`` or a callable, as above.
+        units: For declared components: the result's ``attrs["units"]``, required exactly when
+            the source and output bases' units differ.
 
     Returns:
         The resampled values over the source's non-geometry dimensions and the target's geometry
@@ -161,9 +191,23 @@ def resample(
             non-geometry dimension of the source, a target geometry coordinate name
             collides with a source non-geometry coordinate, or cubic resampling reads NaN
             source values (raised when the values are read, so at compute time for Dask).
+            For declared components: if the component arguments are missing or given for an
+            undeclared source, a basis is unrelated to its frame, the polar factor's
+            conditions fail, ``units`` is missing or not needed, or ``fill_value`` is not NaN
+            or 0.
         ImportError: If scipy is not installed, after input and frame validation.
     """
-    result, _, _ = _resample_with_intervals(
+    if not isinstance(source, Geometry):
+        raise TypeError("source must be Geometry and target must be Geometry or Grid")
+    request = component_request(
+        source.array,
+        output_component_basis=output_component_basis,
+        component_reorientation=component_reorientation,
+        units=units,
+        fill_value=fill_value,
+        framed_result=False,
+    )
+    result, _, _, declaration = _resample_with_intervals(
         source,
         target,
         transform=transform,
@@ -173,8 +217,14 @@ def resample(
         support=support,
         min_coverage=min_coverage,
         block_points=block_points,
+        components=request,
     )
-    return result
+    if declaration is None:
+        return result
+    typed = attach(result, declared_coordinates(result, declaration, None))
+    if units is not None:
+        typed.attrs["units"] = units
+    return typed
 
 
 def _resample_with_intervals(
@@ -188,17 +238,34 @@ def _resample_with_intervals(
     support: Support = "point",
     min_coverage: float = 0.5,
     block_points: int = BLOCK_POINTS,
-) -> tuple[xr.DataArray, dict[str, npt.NDArray[np.float64]], xr.DataArray | None]:
-    """Return unframed values, interval claims and optional box coverage from one plan."""
+    components: ComponentRequest | None = None,
+) -> tuple[
+    xr.DataArray,
+    dict[str, npt.NDArray[np.float64]],
+    xr.DataArray | None,
+    TensorComponentDeclaration | None,
+]:
+    """Return unframed values, interval claims, optional box coverage and, for declared
+    components, the declaration to attach, from one plan.
+
+    A declared source needs ``components`` from ``component_request``: interpolating the
+    components as independent scalars and stopping there ignores how they change between the
+    source and target bases.
+    """
     if not isinstance(source, Geometry) or not isinstance(target, Geometry | Grid):
         raise TypeError("source must be Geometry and target must be Geometry or Grid")
-    if declaration_of(source.array, verify=False) is not None:
-        # Interpolating components as independent scalars ignores how they change between the
-        # source and target bases: the silent wrong answer value geometry exists to prevent.
-        raise ValueError(
-            "the source declares tensor components, and resampling them is not defined yet "
-            "(value geometry stage 3); to resample the components as independent scalars "
-            "deliberately, call rf.clear_tensor_components() first"
+    source_array = source.array
+    if components is not None:
+        source_array = detach(source_array, components.index)
+    else:
+        # Refuses a declared source: its components need the arguments.
+        component_request(
+            source_array,
+            output_component_basis=None,
+            component_reorientation=None,
+            units=None,
+            fill_value=fill_value,
+            framed_result=False,
         )
     check_options(method, block_points, support, min_coverage)
     target_order = (
@@ -206,7 +273,7 @@ def _resample_with_intervals(
         if isinstance(target, Grid)
         else tuple(str(dim) for dim in target.array.dims if dim in target.dims)
     )
-    other_dims = [str(dim) for dim in source.array.dims if dim not in source.dims]
+    other_dims = [str(dim) for dim in source_array.dims if dim not in source.dims]
 
     def adoption_suffices(adopted: AffineTransform) -> bool:
         source_grid = source.grid()
@@ -220,7 +287,7 @@ def _resample_with_intervals(
         _sampling_for_plan(target),
         source_order=source.dims,
         target_order=target_order,
-        dtype=source.array.dtype,
+        dtype=source_array.dtype,
         other_dims=tuple(other_dims),
         transform=transform,
         method=method,
@@ -231,12 +298,12 @@ def _resample_with_intervals(
         block_points=block_points,
         adoption_suffices=adoption_suffices,
     )
-    source_values = source.array
+    source_values = source_array
     if plan.window is not None:
         source_values = source_values.isel(dict(zip(plan.source_dims, plan.window, strict=True)))
     source_context = {
         name
-        for name, coordinate in source.array.coords.items()
+        for name, coordinate in source_array.coords.items()
         if name not in source.transform.source.axes and set(coordinate.dims) <= set(other_dims)
     }
     collisions = set(target.transform.source.axes) & source_context
@@ -276,12 +343,12 @@ def _resample_with_intervals(
     }
     source_coordinates = {
         name: coordinate.variable
-        for name, coordinate in source.array.coords.items()
+        for name, coordinate in source_array.coords.items()
         if name in source_context and name not in result.xindexes
     }
     for name in result.xindexes:
-        if name in source.array.coords and set(source.array.coords[name].dims) <= set(other_dims):
-            result.coords[name].attrs = dict(source.array.coords[name].attrs)
+        if name in source_array.coords and set(source_array.coords[name].dims) <= set(other_dims):
+            result.coords[name].attrs = dict(source_array.coords[name].attrs)
     result = result.drop_vars(
         [name for name in result.coords if set(result.coords[name].dims) & set(plan.source_dims)],
         errors="ignore",
@@ -295,4 +362,16 @@ def _resample_with_intervals(
             coords=target_coordinates,
         )
     )
-    return result, plan.intervals, coverage
+    declaration = None
+    if components is not None:
+        result, declaration = resample_components(
+            result,
+            components,
+            source_transform=source.transform,
+            target_transform=target.transform,
+            frame_map=plan.frame_map,
+            target_dims=plan.target_dims,
+            target_frame_points=plan.target_frame_points,
+            block_points=block_points,
+        )
+    return result, plan.intervals, coverage, declaration

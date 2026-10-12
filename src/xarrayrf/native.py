@@ -14,6 +14,7 @@ import xarray as xr
 
 from ._array_coordinates import ArrayCoordinates
 from ._binding import BindingIndex, binding_coordinates, grid_from_binding, grid_variables
+from ._component_resampling import ComponentReorientation, component_request
 from ._encoding import Decoder, MalformedDataError, decode_intervals, encode
 from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
@@ -577,6 +578,9 @@ class _ReferenceFrameAccessor:
         support: Support = "point",
         min_coverage: float = 0.5,
         return_coverage: Literal[False] = False,
+        output_component_basis: ComponentBasis | None = None,
+        component_reorientation: ComponentReorientation | None = None,
+        units: str | None = None,
     ) -> xr.DataArray: ...
 
     @overload
@@ -591,6 +595,9 @@ class _ReferenceFrameAccessor:
         support: Support = "point",
         min_coverage: float = 0.5,
         return_coverage: Literal[True],
+        output_component_basis: ComponentBasis | None = None,
+        component_reorientation: ComponentReorientation | None = None,
+        units: str | None = None,
     ) -> tuple[xr.DataArray, xr.DataArray]: ...
 
     @overload
@@ -605,6 +612,9 @@ class _ReferenceFrameAccessor:
         support: Support = "point",
         min_coverage: float = 0.5,
         return_coverage: bool,
+        output_component_basis: ComponentBasis | None = None,
+        component_reorientation: ComponentReorientation | None = None,
+        units: str | None = None,
     ) -> xr.DataArray | tuple[xr.DataArray, xr.DataArray]: ...
 
     def resample_to(
@@ -618,6 +628,9 @@ class _ReferenceFrameAccessor:
         support: Support = "point",
         min_coverage: float = 0.5,
         return_coverage: bool = False,
+        output_component_basis: ComponentBasis | None = None,
+        component_reorientation: ComponentReorientation | None = None,
+        units: str | None = None,
     ) -> xr.DataArray | tuple[xr.DataArray, xr.DataArray]:
         """Resample values onto a target geometry and bind them to its frame.
 
@@ -653,6 +666,13 @@ class _ReferenceFrameAccessor:
                 framed float64 array over target geometry dimensions only, bound to the target
                 transform without intervals. Fractions multiply across axes; pass-through
                 axes contribute 1 and point slab axes contribute 0 or 1.
+            output_component_basis: For declared tensor components: the result's basis, the
+                target frame, an equivalent frame, or the target's ``ArrayCoordinates``.
+            component_reorientation: For declared tensor components: ``"jacobian"``,
+                ``"polar_orthogonal_factor"`` or a callable; see :func:`xarrayrf.resample`.
+            units: For declared tensor components: the result's ``attrs["units"]``, required
+                exactly when the source and output bases' units differ; it replaces the
+                source's.
 
         Returns:
             Framed values with target geometry, source non-geometry coordinates, name and
@@ -674,7 +694,15 @@ class _ReferenceFrameAccessor:
             target_geometry = target
         else:
             raise TypeError("target must be a framed DataArray, Geometry or Grid")
-        result, intervals, coverage = _resample_with_intervals(
+        request = component_request(
+            self._array,
+            output_component_basis=output_component_basis,
+            component_reorientation=component_reorientation,
+            units=units,
+            fill_value=fill_value,
+            framed_result=True,
+        )
+        result, intervals, coverage, declaration = _resample_with_intervals(
             source,
             target_geometry,
             transform=transform,
@@ -683,6 +711,7 @@ class _ReferenceFrameAccessor:
             domain=domain,
             support=support,
             min_coverage=min_coverage,
+            components=request,
         )
         result.name = self._array.name
         result.attrs = {
@@ -696,6 +725,10 @@ class _ReferenceFrameAccessor:
                 intervals=intervals,
             ),
         )
+        if declaration is not None:
+            framed = attach(framed, declared_coordinates(framed, declaration, _binding(framed)))
+        if units is not None:
+            framed.attrs["units"] = units  # after the source attrs, so the new unit wins
 
         if return_coverage:
             assert coverage is not None
@@ -834,7 +867,8 @@ class _ReferenceFrameAccessor:
         The declaration is enforced on selection (a scalar, subset or permutation of
         components drops it, leaving plain labels), alignment and concatenation between
         declared operands (different declarations refuse), renaming, and every xarrayrf
-        operation: ``resample`` and ``rf.resample_to`` refuse a declared source. It is
+        operation: ``resample`` and ``rf.resample_to`` refuse a declared source unless given
+        ``output_component_basis`` and ``component_reorientation``. It is
         **advisory with respect to values**: element-wise operations that are not linear in
         the components (``v ** 2``, ``abs``, a component-by-component product, a mask varying
         along a component dimension, NaN-skipping reductions with components missing at

@@ -245,6 +245,23 @@ def _general_map(
     return positions
 
 
+def _target_frame_points(
+    target: Sampling, target_dims: tuple[str, ...], target_shape: tuple[int, ...]
+) -> Callable[[int, int], npt.NDArray[np.float64]]:
+    """Target-frame points ``(stop - start, k)`` of a flattened block of target samples."""
+
+    def points(start: int, stop: int) -> npt.NDArray[np.float64]:
+        # A fully scalar target is one point with no dimension to index, as in _block_positions.
+        indices = (
+            np.array(np.unravel_index(np.arange(start, stop), target_shape), dtype=np.intp)
+            if target_shape
+            else np.empty((0, stop - start), dtype=np.intp)
+        )
+        return target.transform.transform_point(sample_columns(target.axes, indices, target_dims))
+
+    return points
+
+
 def _output_dtype(
     dtype: np.dtype[np.generic], method: Method, fill_value: float
 ) -> np.dtype[np.generic]:
@@ -499,6 +516,8 @@ class _Plan:
     ndimage: ModuleType
     window: tuple[slice, ...] | None
     intervals: dict[str, npt.NDArray[np.float64]]
+    frame_map: SupportsPoints | None
+    target_frame_points: Callable[[int, int], npt.NDArray[np.float64]]
 
 
 def check_options(
@@ -673,6 +692,8 @@ def plan(
         ndimage=ndimage,
         window=window,
         intervals=_interval_claims(source, target, frame_map, support) if total else {},
+        frame_map=frame_map,
+        target_frame_points=_target_frame_points(target, target_dims, target_shape),
     )
 
 

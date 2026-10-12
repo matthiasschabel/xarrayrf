@@ -397,8 +397,7 @@ or its inverse, between coordinate systems of one frame by `coordinate_system_ch
 between frames through `transform`. Every map must be square and invertible and, for now,
 constant. `units=` is required exactly when the basis units change. Scalars (densities,
 pseudoscalars) have no component dimension: pass `tensor_type=` and `from_basis=` instead.
-`resample` and `rf.resample_to` refuse a declared source until resampling of components is
-defined. `rf.encode` writes the declaration to its own `xarrayrf_tensor_components` attribute,
+`rf.encode` writes the declaration to its own `xarrayrf_tensor_components` attribute,
 beside the binding's.
 
 **Packed symmetric components.** A symmetric order-2 type can hold its `n(n+1)/2` independent
@@ -433,6 +432,32 @@ mandel = matrices.rf.pack_symmetric_components(
 
 `change_component_basis` unpacks, transforms and repacks; it never transforms packed components
 as a vector. Differently packed operands do not combine.
+
+**Resampling declared components.** `resample` and `rf.resample_to` need two arguments for a
+declared source, and refuse them for an undeclared one:
+
+```python
+moved = diffusion.rf.resample_to(
+    fixed_image,
+    transform=registration,  # fixed frame -> moving frame
+    output_component_basis=fixed_image.rf.reference_frame,
+    component_reorientation="polar_orthogonal_factor",
+)
+```
+
+The components are interpolated in their source basis; then at each target point `y`, per
+slot, `M_out · R(L) · M_in` applies by the slot's law. `M_in` takes the source basis to the
+source frame (the binding matrix for `ArrayCoordinates`), `L = (D T(y))⁻¹` pushes the source
+frame to the target frame (`T` maps target-frame points to source-frame points), and `M_out`
+takes the target frame to `output_component_basis`: the target frame, an equivalent frame, or
+(for `rf.resample_to`) the target's `ArrayCoordinates`. `component_reorientation` chooses `R`:
+`"jacobian"` (`L` itself, for fluxes and displacements), `"polar_orthogonal_factor"` (its
+rotation or reflection, as diffusion tensors are usually reoriented; one unit on every frame
+axis, and not for densities), or a callable taking maps shaped `(..., n, n)`. A non-affine
+`transform` needs a Jacobian, evaluated per target sample in blocks of `block_points`.
+`fill_value` must be NaN or 0, the only constants every map leaves unchanged; `units=` is
+required when the source and output bases' units differ. The result declares its components
+in the output basis.
 
 **The declaration is advisory with respect to values.** It is enforced on selection (a scalar,
 subset or permutation of components drops it), alignment and concatenation between declared

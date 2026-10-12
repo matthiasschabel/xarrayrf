@@ -375,14 +375,13 @@ def refuse_component_geometry(array: xr.DataArray, dims: Sequence[str]) -> None:
 
 
 def _binding_matrix(
-    binding: BindingIndex | None, basis: ArrayCoordinates
+    transform: SupportsPoints | None, basis: ArrayCoordinates
 ) -> tuple[npt.NDArray[np.float64], ReferenceFrame]:
-    if binding is None or binding.transform.source != basis:
+    if transform is None or transform.source != basis:
         raise ValueError(
             "an ArrayCoordinates basis must be the source of this array's frame binding; the "
             "binding changed since the components were declared"
         )
-    transform = binding.transform
     if not isinstance(transform, SupportsAffine):
         raise ValueError(
             "change_component_basis supports affine frame bindings only; pointwise maps arrive "
@@ -397,7 +396,7 @@ def basis_map(
     source: ComponentBasis,
     target: ComponentBasis,
     *,
-    binding: BindingIndex | None,
+    binding_transform: SupportsPoints | None,
     transform: SupportsPoints | None,
 ) -> npt.NDArray[np.float64]:
     """The linear map taking components in ``source`` to components in ``target``.
@@ -409,10 +408,10 @@ def basis_map(
     if source == target:
         matrix = np.eye(len(source.axes))
     elif isinstance(source, ArrayCoordinates) and isinstance(target, ReferenceFrame):
-        bound, frame = _binding_matrix(binding, source)
+        bound, frame = _binding_matrix(binding_transform, source)
         matrix = _frame_map(frame, target, transform) @ bound
     elif isinstance(source, ReferenceFrame) and isinstance(target, ArrayCoordinates):
-        bound, frame = _binding_matrix(binding, target)
+        bound, frame = _binding_matrix(binding_transform, target)
         if bound.shape[0] != bound.shape[1]:
             raise ValueError("the frame binding's matrix is not square, so it has no inverse")
         matrix = equilibrated_inverse(bound) @ _frame_map(source, frame, transform)
@@ -448,39 +447,17 @@ def change_basis(
     new_declaration = TensorComponentDeclaration(
         tensor_type, declaration.component_dims, tuple(targets), packing=packing
     )
+    binding_transform = binding.transform if binding is not None else None
     maps = [
-        basis_map(source, target, binding=binding, transform=transform)
+        basis_map(source, target, binding_transform=binding_transform, transform=transform)
         for source, target in zip(declaration.bases, targets, strict=True)
     ]
-    common = all(np.array_equal(matrix, maps[0]) for matrix in maps)
-    if not common and (tensor_type.reflection_parity == "odd" or tensor_type.determinant_exponent):
-        raise ValueError(
-            "a pseudotensor or density needs one map for det J, but its slots change basis by "
-            "different maps; give every slot the same basis"
-        )
+    check_common_map(tensor_type, maps)
     _check_units(declaration.bases, targets, units)
     dims = list(declaration.component_dims)
-
-    def apply(values: npt.NDArray[Any]) -> npt.NDArray[Any]:
-        if packing is not None:
-            # Never transform packed components directly: unpack, transform, repack. The
-            # result is symmetric up to rounding, which the repack averages away.
-            matrices = transform_tensor_components(packing.unpack(values), maps[0], tensor_type)
-            return packing.pack_symmetric_part(matrices)
-        if common:
-            return transform_tensor_components(values, maps[0], tensor_type)
-        order = tensor_type.order
-        for slot, matrix in enumerate(maps):
-            slot_type = TensorType(
-                (tensor_type.index_variance[slot],),
-                requires_orthogonal_map=tensor_type.requires_orthogonal_map,
-            )
-            values = transform_tensor_components(
-                values, matrix, slot_type, component_axes=(values.ndim - order + slot,)
-            )
-        return values
-
-    result = _apply_over(array, apply, dims)
+    result = _apply_over(
+        array, lambda values: transform_declared_components(values, declaration, maps), dims
+    )
     result = result.drop_indexes(list(index.axes)).drop_vars(list(index.axes))
     labelled = result.assign_coords(
         {
@@ -498,6 +475,52 @@ def change_basis(
     return typed
 
 
+def check_common_map(tensor_type: TensorType, maps: Sequence[npt.NDArray[np.float64]]) -> None:
+    """Refuse per-slot maps that differ for a type whose determinant factor needs one map."""
+    common = all(np.array_equal(matrix, maps[0]) for matrix in maps)
+    if not common and (tensor_type.reflection_parity == "odd" or tensor_type.determinant_exponent):
+        raise ValueError(
+            "a pseudotensor or density needs one map for det J, but its slots change basis by "
+            "different maps; give every slot the same basis"
+        )
+
+
+def transform_declared_components(
+    values: npt.NDArray[Any],
+    declaration: TensorComponentDeclaration,
+    maps: Sequence[npt.NDArray[np.float64]],
+) -> npt.NDArray[Any]:
+    """Apply one map per slot to components on the trailing axes (one axis when packed).
+
+    Each map is ``(n, n)`` or a batch ``(*batch, n, n)`` aligned with the axes just before the
+    component axes. Equal maps apply as one, which pseudotensors and densities require.
+    """
+    tensor_type = declaration.tensor_type
+    packing = declaration.packing
+    if packing is not None:
+        # Never transform packed components directly: unpack, transform, repack. The result is
+        # symmetric up to rounding, which the repack averages away.
+        matrices = transform_tensor_components(packing.unpack(values), maps[0], tensor_type)
+        return packing.pack_symmetric_part(matrices)
+    if all(matrix is maps[0] or np.array_equal(matrix, maps[0]) for matrix in maps):
+        return transform_tensor_components(values, maps[0], tensor_type)
+    order = tensor_type.order
+    for slot, matrix in enumerate(maps):
+        slot_type = TensorType(
+            (tensor_type.index_variance[slot],),
+            requires_orthogonal_map=tensor_type.requires_orthogonal_map,
+        )
+        # The kernel aligns a map batch with the values minus this slot's axis, which still
+        # include the other component axes: give the batch unit axes for them.
+        batch = matrix.shape[:-2]
+        if batch:
+            matrix = matrix.reshape(*batch, *(1,) * (order - 1), *matrix.shape[-2:])
+        values = transform_tensor_components(
+            values, matrix, slot_type, component_axes=(values.ndim - order + slot,)
+        )
+    return values
+
+
 def change_scalar_basis(
     array: xr.DataArray,
     tensor_type: TensorType,
@@ -509,7 +532,12 @@ def change_scalar_basis(
     units: str | None,
 ) -> xr.DataArray:
     """Re-express an undeclared scalar (density or pseudoscalar) under a change of basis."""
-    matrix = basis_map(source, target, binding=binding, transform=transform)
+    matrix = basis_map(
+        source,
+        target,
+        binding_transform=binding.transform if binding is not None else None,
+        transform=transform,
+    )
     _check_units((source,), (target,), units)
     result = _apply_over(
         array, lambda values: transform_tensor_components(values, matrix, tensor_type), []

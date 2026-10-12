@@ -1,6 +1,6 @@
 # Value geometry: vectors, tensors, pseudovectors and densities
 
-**Status:** Active (stages 1, 2 and 2b implemented; stage 3 next)
+**Status:** Active (stages 1 to 3 implemented; stage 4, pointwise bases, after angular charts)
 **Last updated:** 2026-10-12
 **Scope:** Core: a tensor type and transform law for basis-dependent values, a component
 index carrying it, passive basis change, resampling of component variables and persistence.
@@ -134,7 +134,8 @@ existing resampling would treat as scalars.
 `O` (`output_component_basis=`, required), the result at `y` is: interpolate the source components at
 `T(y)` in `S`; convert `S` to source-frame components (constant, or the source binding's
 Jacobian at `T(y)` for an array-coordinate basis); push to the target frame with
-`L = (D T(y))^-1`, or its polar rotation; convert to `O`. All four maps are applied per slot
+`L = (D T(y))^-1`, or its polar rotation; convert to `O`. (Stage 3 narrowed the polar
+precondition to one unit on every frame axis and no density; see its plan.) All four maps are applied per slot
 by the law. `component_reorientation=` is required: `"jacobian"`, `"polar_orthogonal_factor"` (only when source and
 target frames and both bases are orthonormal Cartesian with equal units), or a callable
 supplied by a domain policy. For affine `T` and constant bases, interpolating before or after
@@ -245,4 +246,5 @@ Stage 4: GRIB grid-relative to earth-relative wind.
    decided 2026-10-11) adds the component index, `rf.change_component_basis`, the `resample` guard,
    persistence and the operation probe.
 3. Stage 2b, symmetric packing ([plan](value_geometry_stage2b_plan.md)). Done.
-4. Stage 3 after stage 2's probe passes on the patched lane.
+4. Stage 3, resampling declared components ([plan](value_geometry_stage3_plan.md)). Done.
+5. Stage 4, pointwise bases, after angular charts (nonlinear plan stage 2).

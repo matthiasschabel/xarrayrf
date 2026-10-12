@@ -90,6 +90,12 @@
 
 ### Added
 
+- Resampling declared tensor components: `resample` and `rf.resample_to` take
+  `output_component_basis`, `component_reorientation` (`"jacobian"`,
+  `"polar_orthogonal_factor"` or a callable) and `units`, required for a declared source
+  instead of refusing it. Components are interpolated in their source basis, then mapped per
+  target point through the frame map's inverse Jacobian; non-affine transforms need a Jacobian.
+  `fill_value` must be NaN or 0 for declared components.
 - Packed symmetric tensor components: `SymmetricPacking` states the component order and the
   off-diagonal scale (constructors `voigt`, `mandel`, `upper_triangular`, `lower_triangular`,
   or explicit pairs), with NumPy `pack` and `unpack`; `pack` refuses asymmetric matrices beyond
@@ -106,7 +112,7 @@
   `clear_tensor_components` and `change_component_basis` (array coordinates, coordinate
   systems of one frame, or an explicit transform; constant maps). The declaration is advisory
   with respect to values: element-wise operations can keep it after changing the values.
-  `resample` and `rf.resample_to` refuse declared sources, and `rf.unframe` refuses while
+  `resample` and `rf.resample_to` refuse declared sources without the component arguments, and `rf.unframe` refuses while
   components are declared in the array's own coordinates. `rf.encode` and `rf.decode` handle
   the declaration in a separate `xarrayrf_tensor_components` attribute, and either the binding
   or the declaration alone. New persistence kinds `tensor_type` and

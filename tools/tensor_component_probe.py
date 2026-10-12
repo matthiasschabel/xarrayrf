@@ -227,6 +227,20 @@ def run() -> dict[str, object]:
             "resample_to", lambda: image.rf.resample_to(image.rf.grid), image_declaration, "refuse"
         )
     )
+    resampled = xrf.TensorComponentDeclaration(xrf.VECTOR, ("component",), plane)
+    rows.append(
+        _measure(
+            "resample_to_with_components",
+            lambda: image.rf.resample_to(
+                image.rf.grid,
+                output_component_basis=plane,
+                component_reorientation="jacobian",
+                units="mm/s",
+            ),
+            resampled,
+            "keep",
+        )
+    )
     rows.append(_measure("stale_array_basis", stale_basis, image_declaration, "refuse"))
     rows.append(
         _measure(

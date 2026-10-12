@@ -20,6 +20,7 @@ INTEGRATION_MODULES = frozenset(
         "_binding",
         "_grid_selection",
         "_tensor_components",
+        "_component_resampling",
     }
 )
 """Modules allowed to import xarray; everything else in the package is core."""

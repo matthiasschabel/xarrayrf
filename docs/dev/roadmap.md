@@ -71,8 +71,9 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   (role, accuracy, validity region, provenance) as a core value object honoured by `resample`;
   vector, tensor, pseudovector and density value geometry
   ([design](architecture/value_geometry_design.md); stage 1, the NumPy kernel `TensorType` /
-  `transform_tensor_components`, stage 2, advisory declarations on xarray variables, and stage
-  2b, symmetric packing, are implemented; resampling of components is next);
+  `transform_tensor_components`, stage 2, advisory declarations on xarray variables, stage
+  2b, symmetric packing, and stage 3, resampling of components, are implemented; pointwise
+  bases follow angular charts);
   reserved `axis_types` role values. The others start with a design note.
 - **Small follow-ups.** DICOM localizer (mixed-orientation) splitting and a NIfTI writer on top
   of `nifti.to_header`, when a consumer needs them. `DuckArray` already uses a local protocol.
