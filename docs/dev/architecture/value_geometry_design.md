@@ -167,7 +167,7 @@ order > 2 symmetry classes. A domain adapter may supply its own rule through the
 
 Stage 1: the shear oracles in `prior_art_coverage_study.md` (covariant `(1,-1,0)`, which
 matches ITK; `J T J^T` = `[[5,2,0],[2,2,0],[0,0,1]]`, which deliberately does not match ITK's
-`diag(3,2,1)`); rigid `second_rank_tensor` equals the rotation case; under the reflection
+`diag(3,2,1)`); rigid `SECOND_ORDER_CONTRAVARIANT_TENSOR` equals the rotation case; under the reflection
 `diag(-1,1,1)` a vector `(1,1,1)` becomes `(-1,1,1)` and a pseudovector `(1,1,1)` becomes
 `(1,-1,-1)`; `(Ju) x (Jv)` equals the declared cross-product type and `(J^-T F J^-1)`'s dual
 equals the two-form type under a random shear; a scalar density at `w = -1` scales by
