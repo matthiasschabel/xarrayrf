@@ -32,7 +32,7 @@ not own identity, change notification, storage, element topology or any viewer a
 | Placement of a grid of samples | `Grid`, `Geometry`, the `.rf` binding on `DataArray` | implemented; `Dataset`-level `.rf` is new work |
 | Transforms between frames, with meaning | `AffineTransform`, `CompositeTransform`; the edge wrapper with role, accuracy, validity region, provenance (P1) | transforms implemented; P1 direction agreed, design note pending |
 | Resampling onto a target grid | `da.rf.resample_to`, `resample` | implemented for scalars; component variables in value geometry stage 3 |
-| Value transformation law | `TensorType` and `transform_components(values, linear_map, tensor_type, *, component_axes)` in the geometry core; the component index and `rf.express_in` (P2) | staged in the value geometry design |
+| Value transformation law | `TensorType` and `transform_tensor_components(values, linear_map, tensor_type, *, component_axes)` in the geometry core; the component index and `rf.change_component_basis` (P2) | staged in the value geometry design |
 | Axis roles | reserved `axis_types` values `coordinate`, `local`, `component` (P3) | to document in the core interface |
 | Placement of a point set (mesh vertices, landmarks) | value-positioned point sets, viewer boundary plan item 6 | planned; ragged geometry excluded |
 | Format geometry | `dicom`, `nifti`, `ngff`, `geotiff` readers | implemented |
@@ -47,7 +47,7 @@ not own identity, change notification, storage, element topology or any viewer a
 - **Element topology.** Which elements exist and how a field associates with them (vertex
   versus face values on a mesh, polygon membership, ragged readouts) is not geometry. xarrayrf
   places samples; it does not say what they are samples of.
-- **Rank-0 value declarations.** A scalar's kind (density, pseudoscalar, categorical) and its
+- **Order-0 value declarations.** A scalar's kind (density, pseudoscalar, categorical) and its
   interpolation policy have no dimension to carry them, so they are per-call arguments; the
   model stays authoritative and passes them explicitly.
 - **Viewer adapters.** Nothing in xarrayrf imports a viewer.
@@ -67,9 +67,9 @@ sample sets and nothing else:
 ### Interface contract
 
 The viewer model never implements value transformation itself. Inside xarrayrf, the xarray
-binding resolves which bases are involved, reads the component index for rank >= 1 or the
-per-call `tensor_type=` for rank 0, and hands the geometry core a numeric map:
-`transform_components` for a change of basis, and the private resampling plan and execute
+binding resolves which bases are involved, reads the component index for order >= 1 or the
+per-call `tensor_type=` for order 0, and hands the geometry core a numeric map:
+`transform_tensor_components` for a change of basis, and the private resampling plan and execute
 interfaces for `resample`. Upward, the model uses only public xarrayrf API. The
 dependency rule is no upward concrete dependency; the model may register callbacks on its own
 objects and implement xarrayrf-owned protocols.
@@ -84,7 +84,7 @@ objects and implement xarrayrf-owned protocols.
   basis. Basis resolution stays in xarrayrf.
 - Identity and subscriptions as the upper half of xarrayrf: rejected; xarrayrf stays geometry
   only for the wider xarray community.
-- A component index carrying rank-0 declarations: rejected in the value geometry design; no
+- A component index carrying order-0 declarations: rejected in the value geometry design; no
   dimension to hold it.
 
 ## Deferred Work

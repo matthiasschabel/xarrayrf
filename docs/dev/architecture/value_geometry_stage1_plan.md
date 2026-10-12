@@ -24,7 +24,7 @@ runnable without xarray.
 
 New `src/xarrayrf/_tensor_type.py`, geometry-core layer (NumPy only). `tests/test_import_boundary.py`
 already treats every module outside its integration list as core, so the import rule applies
-automatically. Add a `transform_components` call to its `CORE_WITHOUT_XARRAY` subprocess so the
+automatically. Add a `transform_tensor_components` call to its `CORE_WITHOUT_XARRAY` subprocess so the
 guarantee covers execution, not only imports.
 
 ### `TensorType`
@@ -35,34 +35,34 @@ objects:
 | Field | Type | Validation |
 |---|---|---|
 | `index_variance` | `tuple[Literal["contravariant", "covariant"], ...]` | any sequence of those strings, normalised to a tuple; empty means scalar; `"up"` / `"down"` are refused, not aliased |
-| `parity` | `Literal["even", "odd"]` | default `"even"` |
-| `det_power` | `float` | finite real, not `bool`; default `0.0`; stored as `float` so `-1` and `-1.0` are equal and hash equal |
-| `symmetry` | `Literal["symmetric", "antisymmetric"] \| None` | default `None`; only with exactly two slots of equal variance, else `ValueError` naming the shear counterexample |
+| `reflection_parity` | `Literal["even", "odd"]` | default `"even"` |
+| `determinant_exponent` | `float` | finite real, not `bool`; default `0.0`; stored as `float` so `-1` and `-1.0` are equal and hash equal |
+| `index_symmetry` | `Literal["symmetric", "antisymmetric"] \| None` | default `None`; only with exactly two slots of equal variance, else `ValueError` naming the shear counterexample |
 
-Properties: `rank` (`len(index_variance)`). No `basis` field: bases belong to the stage-2 component
+Properties: `order` (`len(index_variance)`), the number of tensor indices. No `basis` field: bases belong to the stage-2 component
 index, never to the type.
 
 Shortcuts, as module constants of plain `TensorType` values (not persisted categories):
 
-| Constant | `index_variance` | parity | `det_power` |
+| Constant | `index_variance` | `reflection_parity` | `determinant_exponent` |
 |---|---|---|---|
 | `SCALAR` | `()` | even | 0 |
 | `PSEUDOSCALAR` | `()` | odd | 0 |
 | `VECTOR` | `("contravariant",)` | even | 0 |
 | `COVECTOR` | `("covariant",)` | even | 0 |
-| `SECOND_RANK_TENSOR` | `("contravariant", "contravariant")` | even | 0 |
-| `CROSS_PRODUCT_VECTOR` | `("covariant",)` | odd | 1 |
-| `TWO_FORM_DUAL` | `("contravariant",)` | odd | -1 |
-| `PSEUDOVECTOR` | `("contravariant",)` | odd | 0, orthogonal maps only |
+| `SECOND_ORDER_CONTRAVARIANT_TENSOR` | `("contravariant", "contravariant")` | even | 0 |
+| `CROSS_PRODUCT_PSEUDOVECTOR` | `("covariant",)` | odd | 1 |
+| `TWO_FORM_DUAL_PSEUDOVECTOR` | `("contravariant",)` | odd | -1 |
+| `ORTHOGONAL_PSEUDOVECTOR` | `("contravariant",)` | odd | 0, orthogonal maps only |
 
-A scalar density is spelled `TensorType((), det_power=-1)`; no constant, since the exponent
-depends on what is counted per volume. `PSEUDOVECTOR` needs a refusal the others do not, so
-`TensorType` carries one more field, `orthogonal_only: bool = False`, set only by this constant
+A scalar density is spelled `TensorType((), determinant_exponent=-1)`; no constant, since the exponent
+depends on what is counted per volume. `ORTHOGONAL_PSEUDOVECTOR` needs a refusal the others do not, so
+`TensorType` carries one more field, `requires_orthogonal_map: bool = False`, set only by this constant
 (and by any caller declaring the same restriction). It participates in equality.
 
-### `transform_components`
+### `transform_tensor_components`
 
-    transform_components(values, linear_map, tensor_type, *, component_axes=None)
+    transform_tensor_components(values, linear_map, tensor_type, *, component_axes=None)
         -> NDArray
 
 - `values`: array-like of real integer, floating or complex dtype. A masked array is refused
@@ -81,9 +81,9 @@ depends on what is counted per volume. `PSEUDOVECTOR` needs a refusal the others
   consumer needs it.
 - `component_axes`: one integer per slot (`TypeError` for non-integers, including `bool`;
   negative allowed; `ValueError` if out of range or repeated), naming which axes of `values`
-  hold the components, in slot order; each must have length `n`. Defaults to the trailing `rank` axes
+  hold the components, in slot order; each must have length `n`. Defaults to the trailing `order` axes
   in slot order, matching the existing calling convention ("a trailing component axis in
-  source-axis order"). Required to be empty for rank 0; the scalar law needs only `det J`.
+  source-axis order"). Required to be empty for order 0; the scalar law needs only `det J`.
 - Returns a new array with exactly the shape and axis order of `values`; dtype is
   `np.result_type(values_array.dtype, np.float64)` (float32 and integers become float64, complex
   stays complex at least complex128).
@@ -93,7 +93,7 @@ Algorithm, all batched, no Python loop over points:
 1. Validate the type and map (finite, real, square, `n` consistent with every component axis).
 2. Move component axes to the end. For each contravariant slot apply `J`, for each covariant slot `J^-T`, by
    `matmul` along that axis with the map broadcast over the other component axes.
-3. If parity is odd or `det_power != 0`, compute `sign, logabsdet = np.linalg.slogdet(J)`
+3. If parity is odd or `determinant_exponent != 0`, compute `sign, logabsdet = np.linalg.slogdet(J)`
    batched. The scalar factor is `exp(w * logabsdet)`, times `sign` **only for odd parity** (an
    even density is never negated by a reflection). A direct `det` is not used: `1e-120 * I_3` and
    `1e120 * I_3` pass the conditioning test with condition number 1, yet `det` (`1e-360`,
@@ -104,46 +104,46 @@ Algorithm, all batched, no Python loop over points:
    and values follows NumPy (inf with a warning), as for any array arithmetic.
 4. Move axes back.
 
-Refusal of singular maps: when the type has a covariant slot, odd parity or `det_power != 0`, the map
+Refusal of singular maps: when the type has a covariant slot, odd parity or `determinant_exponent != 0`, the map
 must pass the equilibrated conditioning test already used by `AffineTransform.inverse`
 (`INVERSE_CONDITION_LIMIT`, unit-independent). `equilibrated_inverse` in `_affine.py` is 2-D
 only; generalise it to `(..., n, n)` with per-matrix row and column equilibration, keeping the
 2-D behaviour and messages, and report the worst offending index for a batch. An up-only even
 type with `w = 0` accepts a singular map (projection is meaningful for vectors).
 
-`orthogonal_only` (`bool` only, `TypeError` otherwise): refuses unless `max |J^T J - I| <= ORTHOGONALITY_TOLERANCE` per matrix, with
+`requires_orthogonal_map` (`bool` only, `TypeError` otherwise): refuses unless `max |J^T J - I| <= ORTHOGONALITY_TOLERANCE` per matrix, with
 `ORTHOGONALITY_TOLERANCE: Final = 1e-6` matching `affine_class`'s default constrained-class
-tolerance. The message names `CROSS_PRODUCT_VECTOR` and `TWO_FORM_DUAL`. Units are invisible to
+tolerance. The message names `CROSS_PRODUCT_PSEUDOVECTOR` and `TWO_FORM_DUAL_PSEUDOVECTOR`. Units are invisible to
 the kernel, so "orthogonal" is about the numbers; a caller mixing units is responsible, as with
 the rest of the kernel.
 
 Distinct bases per slot (stage 2, e.g. an contravariant slot in a frame and a covariant slot in array
 coordinates) need no per-slot map argument: the caller first converts each slot to a common
-basis with a rank-one call on that axis (`TensorType(("contravariant",))` or `(("covariant",))` with
+basis with an order-one call on that axis (`TensorType(("contravariant",))` or `(("covariant",))` with
 `component_axes=(axis,)`), then applies the common map. Stage 2 documents this route.
 
 Symmetry: the kernel does not check that symmetric input is symmetric (that is a carrier
 invariant from stage 2) and does not re-symmetrise output.
 
-### `polar_rotation`
+### `polar_orthogonal_factor`
 
-    polar_rotation(linear_map) -> NDArray
+    polar_orthogonal_factor(linear_map) -> NDArray
 
 The orthogonal factor `U` of the polar decomposition `J = U P`, batched over `(..., n, n)`,
 computed from the SVD (`U = W V^T` for `J = W S V^T`). Refuses singular maps (not unique) with the
-same conditioning test. For an improper `J` it returns the improper orthogonal factor; it is
-documented as "the orthogonal factor", the name kept for continuity with the specified rule.
-Tested on an improper map. It is the `"rotation"` reorientation of stage 3, offered now because it is a pure linear-map
+same conditioning test. For an improper `J` it returns the improper orthogonal factor, which is
+why it is not called a rotation. Tested on an improper map. It is the
+`"polar_orthogonal_factor"` component reorientation of stage 3, offered now because it is a pure linear-map
 helper and is needed for the oracle.
 
 ### Public API
 
-Export from `xarrayrf`: `TensorType`, the eight constants, `transform_components`,
-`polar_rotation`, `ORTHOGONALITY_TOLERANCE`. A NumPy-only user (meshes, point clouds, tables)
+Export from `xarrayrf`: `TensorType`, the eight constants, `transform_tensor_components`,
+`polar_orthogonal_factor`, `ORTHOGONALITY_TOLERANCE`. A NumPy-only user (meshes, point clouds, tables)
 needs the kernel directly; that is the core's stated audience. The specified-but-unimplemented
 `rule(transform, values, *, at)` callables in `core_interface.md` are replaced, not implemented:
 evaluating `transform.jacobian(at)` is the caller's one line, and choosing between `J` and
-`polar_rotation(J)` is exactly the policy decision the design moved out of the type. `point`
+`polar_orthogonal_factor(J)` is exactly the policy decision the design moved out of the type. `point`
 was never a value law and stays `transform_point`.
 
 No encoding: persisting `TensorType` is the stage-2 component-index kind. `TensorType` does
@@ -155,21 +155,21 @@ Oracles, `assert_allclose` with `rtol=1e-12, atol=1e-12` (a few float64 operatio
 numbers):
 
 1. Shear `J = [[1,1,0],[0,1,0],[0,0,1]]`: `COVECTOR (1,0,0) -> (1,-1,0)` (matches ITK);
-   `VECTOR (0,1,0) -> (1,1,0)`; `SECOND_RANK_TENSOR diag(3,2,1) -> [[5,2,0],[2,2,0],[0,0,1]]`
-   (deliberately not ITK's `diag(3,2,1)`); `polar_rotation` of the same shear applied as a
-   second-rank tensor to `diag(2,3,1)` gives upper triangle `[2.2, 0.4, 0, 2.8, 0, 1]`
+   `VECTOR (0,1,0) -> (1,1,0)`; `SECOND_ORDER_CONTRAVARIANT_TENSOR diag(3,2,1) -> [[5,2,0],[2,2,0],[0,0,1]]`
+   (deliberately not ITK's `diag(3,2,1)`); `polar_orthogonal_factor` of the same shear applied as a
+   second-order tensor to `diag(2,3,1)` gives upper triangle `[2.2, 0.4, 0, 2.8, 0, 1]`
    (prior-art oracle 4; these values are exact: `R = [[2,1,0],[-1,2,0],[0,0,√5]]/√5`).
-2. Rotation: `SECOND_RANK_TENSOR` under a rotation equals `R T R^T`. Mixed tensor
+2. Rotation: `SECOND_ORDER_CONTRAVARIANT_TENSOR` under a rotation equals `R T R^T`. Mixed tensor
    `TensorType(("contravariant", "covariant"))` under the shear equals `J T J^-1` (ITK's symmetric-tensor
-   formula, reachable only by declaring mixed variance). Rank 3 `("contravariant", "covariant", "covariant")` on a
+   formula, reachable only by declaring mixed variance). Order 3 `("contravariant", "covariant", "covariant")` on a
    seeded random map equals an explicit `einsum("ai,bj,ck,ibc->ajk", J, Jinv, Jinv, T)`
    (written per index, independent of the kernel's matmul route).
-3. Reflection `diag(-1,1,1)`: `VECTOR (1,1,1) -> (-1,1,1)`; `PSEUDOVECTOR (1,1,1) -> (1,-1,-1)`;
+3. Reflection `diag(-1,1,1)`: `VECTOR (1,1,1) -> (-1,1,1)`; `ORTHOGONAL_PSEUDOVECTOR (1,1,1) -> (1,-1,-1)`;
    `PSEUDOSCALAR 2 -> -2`.
 4. A seeded random map with `det J != ±1`, and the scaled reflection `diag(-2, 1, 1)`, so the
    positive and negative determinant powers are distinguished: `cross(J u, J v)` equals
-   `CROSS_PRODUCT_VECTOR` of `cross(u, v)`; the axial dual of `J^-T F J^-1` for antisymmetric
-   `F` equals `TWO_FORM_DUAL` of the dual of `F`; the two results differ; `PSEUDOVECTOR` refuses
+   `CROSS_PRODUCT_PSEUDOVECTOR` of `cross(u, v)`; the axial dual of `J^-T F J^-1` for antisymmetric
+   `F` equals `TWO_FORM_DUAL_PSEUDOVECTOR` of the dual of `F`; the two results differ; `ORTHOGONAL_PSEUDOVECTOR` refuses
    both maps with the message naming both types.
 5. Scalar density `w = -1` scales by `1 / |det J|`; `PSEUDOSCALAR` gives `sign(det J)` for a
    non-orthogonal improper map.
@@ -182,7 +182,7 @@ numbers):
 8. `component_axes`: a tensor stored `(3, 7, 3)` with `component_axes=(0, 2)` equals the
    transposed trailing-axis call; output axis order preserved.
 9. Complex values: real map applied to complex vectors equals separate real and imaginary calls.
-10. Rank 0 with `w = 0`, even: unchanged values, singular map accepted.
+10. Order 0 with `w = 0`, even: unchanged values, singular map accepted.
 11. Determinant range: `1e-120 * I_3` and `1e120 * I_3` with `w = 1/3` give factors
     `1e-120` and `1e120` (`rtol=1e-12, atol=0`, so zero cannot pass); a factor that
     overflows (`1e120 * I_3`, `w = 1`, factor `1e360`) is refused; an
@@ -196,17 +196,17 @@ numbers):
 
 Refusals, one test per raised error, asserting type and message fragment: masked values;
 boolean and object values; non-integer and `bool` `component_axes`; non-`bool`
-`orthogonal_only`; invalid slot string;
-non-sequence `index_variance`; bad parity; non-finite or `bool` `det_power`; symmetry on rank != 2;
+`requires_orthogonal_map`; invalid slot string;
+non-sequence `index_variance`; bad parity; non-finite or `bool` `determinant_exponent`; symmetry on order != 2;
 symmetry on mixed variance; non-square map; mismatched `n`; wrong number of `component_axes`;
 duplicate or out-of-range axes; non-finite map; singular map where required (single and batched,
-naming the index); `orthogonal_only` with a shear; `polar_rotation` of a singular map.
+naming the index); `requires_orthogonal_map` with a shear; `polar_orthogonal_factor` of a singular map.
 
-Import boundary: the xarray-blocked subprocess calls `transform_components` and
-`polar_rotation`.
+Import boundary: the xarray-blocked subprocess calls `transform_tensor_components` and
+`polar_orthogonal_factor`.
 
-Equality and hashing: `TensorType(("contravariant",)) == VECTOR`; `det_power=-1` vs `-1.0` hash equal;
-`orthogonal_only` distinguishes `PSEUDOVECTOR` from `TensorType(("contravariant",), parity="odd")`.
+Equality and hashing: `TensorType(("contravariant",)) == VECTOR`; `determinant_exponent=-1` vs `-1.0` hash equal;
+`requires_orthogonal_map` distinguishes `ORTHOGONAL_PSEUDOVECTOR` from `TensorType(("contravariant",), reflection_parity="odd")`.
 
 ### Documentation
 
@@ -216,8 +216,8 @@ Equality and hashing: `TensorType(("contravariant",)) == VECTOR`; `det_power=-1`
 - Docstrings with a worked example each (reflection of a vector and a pseudovector).
 - Value geometry design: status to "stage 1 in progress", then "stage 1 implemented". Amended
   now (with this plan): the component index declaration (section 2) and its persistence kind
-  (section 5) carry `orthogonal_only`, and it takes part in index equality, so a persisted
-  `PSEUDOVECTOR` does not decode as an unrestricted odd vector.
+  (section 5) carry `requires_orthogonal_map`, and it takes part in index equality, so a persisted
+  `ORTHOGONAL_PSEUDOVECTOR` does not decode as an unrestricted odd vector.
 - `core_model_design.md` quantity table: point to the constants.
 
 ## Alternatives Considered
@@ -245,9 +245,10 @@ Equality and hashing: `TensorType(("contravariant",)) == VECTOR`; `det_power=-1`
 Codex (gpt-6-astra, high), two passes: two blocking findings (broadcasting that could enlarge
 the output; direct determinants that are 0 or inf for well-conditioned maps) and three
 non-blocking ones, then two oracle corrections, all accepted; no open disagreements.
-`orthogonal_only` stays on the type (a kernel argument is easier to
-lose) and persists in stage 2; `polar_rotation` keeps its name, documented as the orthogonal
-factor including reflections; the private inverse helper is generalised rather than duplicated.
+`requires_orthogonal_map` stays on the type (a kernel argument is easier to
+lose) and persists in stage 2; the polar helper, reviewed as `polar_rotation`, was then renamed
+`polar_orthogonal_factor` in the nomenclature pass, since it returns a reflection for an
+improper map; the private inverse helper is generalised rather than duplicated.
 
 ## Next Steps
 
