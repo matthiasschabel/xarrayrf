@@ -187,7 +187,7 @@ def import_names(source: str) -> set[str]:
 
 
 def forbidden_core_imports(source: str) -> set[str]:
-    forbidden = {"anatomy", "nifti", "dicom", "ngff", "geotiff", "cf"}
+    forbidden = {"anatomy", "nifti", "dicom", "ngff", "geotiff", "cf", "elastix"}
     return {
         name
         for name in import_names(source)
@@ -206,6 +206,7 @@ def forbidden_sampling_imports(source: str) -> set[str]:
         "ngff",
         "geotiff",
         "cf",
+        "elastix",
     }
     names = import_names(source)
     for node in ast.walk(ast.parse(source)):
@@ -219,7 +220,9 @@ def forbidden_sampling_imports(source: str) -> set[str]:
 
 
 def test_sampling_import_scan_can_fail() -> None:
-    for name in sorted(INTEGRATION_MODULES | {"native", "nifti", "dicom", "ngff", "geotiff", "cf"}):
+    for name in sorted(
+        INTEGRATION_MODULES | {"native", "nifti", "dicom", "ngff", "geotiff", "cf", "elastix"}
+    ):
         assert forbidden_sampling_imports(f"def f():\n    from .{name} import value\n") == {
             f".{name}"
         }
@@ -338,6 +341,21 @@ def forbidden_cf_imports(source: str) -> set[str]:
     }
 
 
+def forbidden_elastix_imports(source: str) -> set[str]:
+    """Allow only the core, anatomy and numpy: the elastix reader needs no ITK and no xarray."""
+    allowed = sys.stdlib_module_names | {"numpy"}
+    return {
+        name
+        for name in import_names(source)
+        if not (
+            name.split(".")[0] in allowed
+            or name in {"xarrayrf", "xarrayrf.anatomy"}
+            or name.startswith("xarrayrf._")
+            or (name.startswith(".") and not name.startswith(".."))
+        )
+    }
+
+
 def test_core_never_imports_anatomy_or_nifti() -> None:
     package = Path(xarrayrf.__file__).parent
     core = [package / "__init__.py", *package.glob("_*.py")]
@@ -375,6 +393,10 @@ def test_adapter_imports_stay_within_their_boundaries() -> None:
     assert cf, "no cf modules found; the check would pass vacuously"
     cf_offenders = {path.name: forbidden_cf_imports(path.read_text()) for path in cf}
     assert {name: imports for name, imports in cf_offenders.items() if imports} == {}
+    elastix = sorted((package / "elastix").glob("*.py"))
+    assert elastix, "no elastix modules found; the check would pass vacuously"
+    elastix_offenders = {path.name: forbidden_elastix_imports(path.read_text()) for path in elastix}
+    assert {name: imports for name, imports in elastix_offenders.items() if imports} == {}
 
 
 def test_adapter_import_scan_can_fail() -> None:
@@ -395,4 +417,8 @@ def test_adapter_import_scan_can_fail() -> None:
     assert forbidden_geotiff_imports("import nibabel\n") == {"nibabel"}
     assert forbidden_core_imports("import xarrayrf.cf\n") == {"xarrayrf.cf"}
     assert forbidden_cf_imports("import pyproj\n") == {"pyproj"}
+    assert forbidden_core_imports("import xarrayrf.elastix\n") == {"xarrayrf.elastix"}
+    assert forbidden_elastix_imports("import itk\nimport xarray\n") == {"itk", "xarray"}
+    assert forbidden_elastix_imports("from xarrayrf.native import Report\n") == {"xarrayrf.native"}
+    assert forbidden_elastix_imports("from xarrayrf._grid import Grid\nimport numpy\n") == set()
     assert forbidden_cf_imports("import xarray\nfrom xarrayrf.native import Report\n") == set()

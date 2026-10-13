@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Callable
-from typing import Final, Literal, get_args
+from typing import Any, Final, Literal, get_args
 
 import numpy as np
 import numpy.typing as npt
@@ -44,6 +44,10 @@ from ._validation import REAL_KINDS, real_float_array
 
 type Outside = Literal["raise", "identity", "nearest"]
 """What a field transform does beyond its support."""
+
+Support = Literal["closed", "half-open"]
+"""Whether a B-spline's upper support face is inside: ITK's ``"closed"`` or elastix's
+``"half-open"``."""
 
 OUTSIDE: Final[tuple[Outside, ...]] = get_args(Outside.__value__)
 
@@ -346,7 +350,7 @@ type _Kernel = Callable[
 class _FieldTransform:
     """Shared evaluation: locate, classify against the support, apply the exterior, interpolate."""
 
-    __slots__ = ("_grid", "_lookup", "_outside", "_source", "_stored", "_target")
+    __slots__ = ("_grid", "_lookup", "_outside", "_source", "_stored", "_target", "_upper_closed")
 
     _kernel: _Kernel
     _upper_closed: bool
@@ -362,8 +366,10 @@ class _FieldTransform:
         outside: object,
         *,
         field: str,
+        upper_closed: bool,
     ) -> None:
         _check_endpoints(source, target, what=self._what)
+        self._upper_closed = upper_closed
         assert isinstance(source, ReferenceFrame) and isinstance(target, ReferenceFrame)
         self._source = source
         self._target = target
@@ -506,7 +512,6 @@ class DisplacementFieldTransform(_FieldTransform):
     __slots__ = ()
 
     _kernel = staticmethod(_multilinear)
-    _upper_closed = False
     _clamp_to_support = False
     _what = "displacement field"
 
@@ -541,7 +546,7 @@ class DisplacementFieldTransform(_FieldTransform):
                 grid is not admissible, the field has the wrong shape or is not finite, or
                 ``outside`` is unknown.
         """
-        self._setup(source, target, field, grid, outside, field="field")
+        self._setup(source, target, field, grid, outside, field="field", upper_closed=False)
 
     @property
     def field(self) -> npt.NDArray[np.floating]:
@@ -569,13 +574,13 @@ class BSplineTransform(_FieldTransform):
 
     The representation of ITK's ``BSplineTransform``, elastix and NiftyReg. Coefficients are not
     samples of the displacement and are evaluated without prefiltering. The support is control
-    index ``[1, n - 2]``, closed at both ends as in ITK. Equality is identity.
+    index ``[1, n - 2]``, closed at both ends as in ITK, or ``[1, n - 2)`` as in elastix when
+    declared ``support="half-open"``. Equality is identity.
     """
 
     __slots__ = ()
 
     _kernel = staticmethod(_cubic)
-    _upper_closed = True
     _clamp_to_support = True
     _what = "B-spline transform"
 
@@ -588,6 +593,7 @@ class BSplineTransform(_FieldTransform):
         grid: Grid,
         order: int = 3,
         outside: Outside = "raise",
+        support: Support = "closed",
     ) -> None:
         """Validate the endpoints and control grid, and copy the coefficients.
 
@@ -602,12 +608,15 @@ class BSplineTransform(_FieldTransform):
             order: The spline order; only 3 is implemented.
             outside: ``"raise"``, ``"identity"`` (ITK's semantics) or ``"nearest"`` (evaluated
                 at the nearest point of the support).
+            support: The upper support edge: ``"closed"`` (``[1, n - 2]``, ITK's) or
+                ``"half-open"`` (``[1, n - 2)``, elastix's). Only points on the upper face are
+                classified differently.
 
         Raises:
             NotImplementedError: If ``order`` is not 3.
             TypeError: As :class:`DisplacementFieldTransform`.
-            ValueError: As :class:`DisplacementFieldTransform`, or if an axis has fewer than four
-                control points or is not uniform.
+            ValueError: As :class:`DisplacementFieldTransform`, if an axis has fewer than four
+                control points or is not uniform, or ``support`` is unknown.
         """
         if isinstance(order, bool) or not isinstance(order, int | np.integer):
             raise TypeError(f"order must be an integer, got {type(order).__name__}")
@@ -615,7 +624,17 @@ class BSplineTransform(_FieldTransform):
             raise NotImplementedError(
                 f"only cubic B-splines (order 3) are implemented, got order {order}"
             )
-        self._setup(source, target, coefficients, grid, outside, field="coefficients")
+        if support not in ("closed", "half-open"):
+            raise ValueError(f"support must be 'closed' or 'half-open', got {support!r}")
+        self._setup(
+            source,
+            target,
+            coefficients,
+            grid,
+            outside,
+            field="coefficients",
+            upper_closed=support == "closed",
+        )
 
     @property
     def coefficients(self) -> npt.NDArray[np.floating]:
@@ -626,6 +645,16 @@ class BSplineTransform(_FieldTransform):
     def order(self) -> int:
         """The spline order, 3."""
         return 3
+
+    @property
+    def support(self) -> Support:
+        """``"closed"`` (ITK) or ``"half-open"`` (elastix): whether the upper face is inside."""
+        return "closed" if self._upper_closed else "half-open"
+
+    def __repr__(self) -> str:
+        """As the base, naming a non-default support."""
+        text = super().__repr__()
+        return text if self._upper_closed else f"{text[:-1]}, support='half-open')"
 
     def __reduce__(self) -> tuple[object, ...]:
         """Rebuild through the constructor; the copy is a new, unequal transform."""
@@ -639,6 +668,7 @@ class BSplineTransform(_FieldTransform):
                 np.array(self._stored),
                 self._grid,
                 self._outside,
+                {"support": self.support},
             ),
         )
 
@@ -651,8 +681,10 @@ def _rebuild(
     values: npt.NDArray[np.floating],
     grid: Grid,
     outside: Outside,
+    options: dict[str, object] | None = None,
 ) -> DisplacementFieldTransform | BSplineTransform:
-    return cls(source=source, target=target, grid=grid, outside=outside, **{name: values})  # type: ignore[arg-type]
+    keywords: dict[str, Any] = {name: values, **(options or {})}
+    return cls(source=source, target=target, grid=grid, outside=outside, **keywords)
 
 
 def sample_displacement_field(

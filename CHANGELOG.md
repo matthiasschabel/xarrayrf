@@ -21,6 +21,11 @@
   - `CompositeTransform.declared_inverse()` reverses a chain using exact inverses where members
     have them and declared inverses otherwise; `SupportsDeclaredInverse` is the protocol.
   - `round_trip_residual_report` measures `inverse(transform(x)) - x` on points or a grid.
+- `xarrayrf.elastix` imports elastix registration results without ITK: parameter files and
+  their initial-transform chains, translation, Euler, affine and cubic B-spline stages, between
+  caller-named frames, with LPS-to-frame coordinate changes and a report.
+- `BSplineTransform(..., support="half-open")` declares elastix's B-spline support, which
+  excludes the upper face ITK includes.
 - Angular coordinate systems: `CoordinateSystem(..., representation="spherical" | "geodetic",
   axis_roles=(...))` declares longitude, latitude and a radius or height axis beside ordinary
   axes such as time. Angular axes take degrees, CF `degrees_east`/`degrees_north` or radians;

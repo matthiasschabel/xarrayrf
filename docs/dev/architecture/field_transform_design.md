@@ -1,6 +1,6 @@
 # Field-backed transforms
 
-**Status:** Active (stage 1a in progress: steps 1 and 2 implemented)
+**Status:** Active (stage 1a in progress: steps 1 to 3 implemented)
 **Last updated:** 2026-10-13
 **Scope:** Stage 1 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): transforms
 between Cartesian frames whose values come from a sampled field or a B-spline control grid
@@ -251,7 +251,8 @@ consistent with the rule that identity is never inferred.
 
 - **elastix:** Pirana's parameter-map parser moves as code: translation, Euler, affine and
   B-spline transforms, including the component-major coefficient layout. It needs no ITK
-  runtime.
+  runtime. Implemented in [step 3](field_transform_step3_plan.md): transformix's B-spline
+  support excludes the upper face, so `BSplineTransform` declares `support="half-open"`.
 - **ITK and ANTs files:** read through `nitransforms.io` (the ITK-family extra depends on
   `nitransforms>=25.1` and `nibabel>=5.4`, which brings h5py and a NumPy 2 floor within that
   extra only): affine `.mat`, NIfTI displacement fields and composite `.h5` with affine and

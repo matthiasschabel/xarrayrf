@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026-10-13] — Field transforms, step 3: the elastix importer
+
+- **Problem**: elastix results could only be applied through Pirana or ITK; xarrayrf had no
+  importer, and its B-spline could not express elastix's support.
+- **Resolution**:
+  - `xarrayrf.elastix` (`_parameter_files.py`, `_import.py`), adapted from Pirana's parser:
+    parameter files and chains, translation, 2-D and 3-D Euler, affine and cubic B-spline
+    stages, `space` (LPS mm by default in 3-D) joined to the caller's frames by
+    `coordinate_system_change`, local intermediate frames, and a report.
+  - `BSplineTransform(support="half-open")`, measured against transformix: elastix excludes the
+    upper face.
+  - transformix fixture from `tools/build_elastix_fixture.py` (itk-elastix 0.25.4).
+  - Found while building it: elastix's `RecursiveBSplineTransform` evaluates a nonzero
+    `GridIndex` inconsistently, so it is refused.
+  - Plan reviewed by Codex: refuse a first map naming an initial transform; face probes cover
+    the B-spline stage alone.
+- **Files affected**: `src/xarrayrf/elastix/`, `src/xarrayrf/_field_transform.py`,
+  `tests/test_elastix.py`, `tests/test_field_transforms.py`, `tests/test_import_boundary.py`,
+  `tests/fixtures/elastix_transforms.json`, `tools/build_elastix_fixture.py`,
+  `docs/core_interface.md`, `README.md`, `CHANGELOG.md`.
+- **Reviewed by**: Codex gpt-6-sol (reasoning effort high)
+
 ## [2026-10-13] — Field transforms, step 2: declared inverse pairs
 
 - **Problem**: A field transform has no exact inverse, so a registration result could be

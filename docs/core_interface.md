@@ -1263,8 +1263,8 @@ read from different formats compare equal; the core itself never relabels a unit
 ## Adapters
 
 Format adapters are optional subpackages of the xarrayrf distribution, each with an extra
-(`xarrayrf[dicom]`, `xarrayrf[nifti]`, `xarrayrf[ngff]`, `xarrayrf[geotiff]`; `xarrayrf.cf` needs
-none). They share
+(`xarrayrf[dicom]`, `xarrayrf[nifti]`, `xarrayrf[ngff]`, `xarrayrf[geotiff]`; `xarrayrf.cf` and
+`xarrayrf.elastix` need none). They share
 `xarrayrf.native.frame_array` (duck-array and shape check, then framing on the imported
 `Grid`), `index_coordinate`, and the `CoordinateSpec`,
 `Report` and `DuckArray` aliases.
@@ -1527,6 +1527,41 @@ other = rfcf.frame_variable(xr.open_dataset("tas_Amon_model_2.nc"), "tas", frame
   inferred. Declared bounds decide global longitude coverage for resampling exactly.
 - Report codes: `figure`, `figure-ignored`, `west-longitude`, `south-latitude`, `no-bounds`,
   `bounds-off-centre`.
+
+**elastix import:** `xarrayrf.elastix` reads elastix registration results with NumPy alone; it
+needs no ITK runtime and no extra.
+
+```python
+from xarrayrf import elastix
+
+maps = elastix.read_parameter_files("out/TransformParameters.1.txt")  # initial stage first
+imported = elastix.transform_from_parameter_maps(maps, fixed=fixed, moving=moving)
+moved = moving_image.rf.resample_to(fixed_image, transform=imported.transform)
+```
+
+- `read_parameter_file(path)` returns one file's `{key: (value, ...)}`, the form itk-elastix's
+  `ParameterObject.GetParameterMap` returns. `read_parameter_files(path)` follows
+  `InitialTransformParameterFileName` back to `NoInitialTransform`, resolving a relative name
+  against the referring file's directory, and returns the stages in application order.
+- `transform_from_parameter_maps(maps, *, fixed, moving, space=None, intermediate_frames=None)`
+  takes maps in application order or a `ParameterObject`. The result's `transform` maps fixed
+  points to moving points, as elastix's does, so it resamples the moving image onto the fixed
+  grid. It is one `AffineTransform` when every stage is linear, else a `CompositeTransform`
+  keeping each stage between fresh local frames (or the `intermediate_frames` given).
+- `space` is the coordinate system elastix's physical points were in. For 3-D it defaults to the
+  LPS patient system in mm, since ITK reads medical images into LPS; other dimensions require
+  it. Frames in another system, such as a NIfTI RAS frame, are joined to it by
+  `coordinate_system_change`; an unoriented 3-D frame needs `space`. `fixed` and `moving` must
+  be different frames.
+- Stages: `TranslationTransform`, `EulerTransform` (2-D, and 3-D with `ComputeZYX`),
+  `AffineTransform` (with `CenterOfRotationPoint`), and cubic `BSplineTransform` or
+  `RecursiveBSplineTransform`, combined by `Compose` with `UseDirectionCosines` on. Anything
+  else is refused, as is a first map that names an initial transform not passed.
+- A B-spline stage becomes `BSplineTransform(..., outside="identity", support="half-open")`:
+  transformix displaces points on control index `[1, n - 2)`, excluding the upper face that ITK
+  includes. elastix's `RecursiveBSplineTransform` takes its support from a nonzero `GridIndex`
+  but evaluates as if it were zero, so a nonzero index is refused for it.
+- Report codes: `stage`, `coordinate-system-change`, `bspline-support`.
 
 Application policy stays in the application: multi-image series assembly, pixel handling,
 regions of interest, display conventions and the choice of resampling targets.

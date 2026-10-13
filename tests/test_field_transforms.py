@@ -209,6 +209,60 @@ def test_a_bspline_support_is_closed_at_both_ends(coordinate: float, inside: boo
             transform.transform_point(point)
 
 
+@pytest.mark.parametrize(
+    ("coordinate", "inside"),
+    [
+        (1.0, True),
+        (np.nextafter(1.0, -np.inf), False),
+        (np.nextafter(4.0, -np.inf), True),
+        (4.0, False),
+    ],
+)
+def test_a_half_open_bspline_support_excludes_its_upper_face(
+    coordinate: float, inside: bool
+) -> None:
+    transform = xrf.BSplineTransform(
+        source=FIXED,
+        target=MOVING,
+        coefficients=np.ones((6, 6, 6, 3)),
+        grid=grid((6, 6, 6), source=POINTS),
+        support="half-open",
+    )
+    assert transform.support == "half-open"
+    point = np.array([2.5, coordinate, 2.5])
+    if inside:
+        assert_allclose(transform.transform_point(point), point + 1.0, atol=ATOL)
+    else:
+        with pytest.raises(ValueError, match=r"j: \[1, 4\)"):
+            transform.transform_point(point)
+    # "nearest" still evaluates on the closed face.
+    nearest = xrf.BSplineTransform(
+        source=FIXED,
+        target=MOVING,
+        coefficients=np.ones((6, 6, 6, 3)),
+        grid=grid((6, 6, 6), source=POINTS),
+        outside="nearest",
+        support="half-open",
+    )
+    assert_allclose(nearest.transform_point(point), point + 1.0, atol=ATOL)
+
+
+def test_the_support_declaration_is_checked_kept_and_shown() -> None:
+    options: dict[str, Any] = {
+        "source": FIXED,
+        "target": MOVING,
+        "coefficients": np.ones((6, 6, 6, 3)),
+        "grid": grid((6, 6, 6), source=POINTS),
+    }
+    assert xrf.BSplineTransform(**options).support == "closed"
+    assert "support" not in repr(xrf.BSplineTransform(**options))
+    with pytest.raises(ValueError, match="support must be 'closed' or 'half-open'"):
+        xrf.BSplineTransform(**options, support=cast(Any, "open"))
+    half = xrf.BSplineTransform(**options, support="half-open")
+    assert repr(half).endswith("outside='raise', support='half-open')")
+    assert pickle.loads(pickle.dumps(half)).support == "half-open"
+
+
 # --- Analytic agreement -----------------------------------------------------------------------
 
 
