@@ -779,3 +779,42 @@ def test_a_raise_field_refuses_a_target_point_outside_its_support() -> None:
     field = dense(np.zeros((4, 4, 4, 3)), grid((4, 4, 4)))
     with pytest.raises(ValueError, match="outside the displacement field's support"):
         source.rf.resample_to(target, transform=field)
+
+
+def test_evaluation_without_scipy_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    import builtins
+
+    transform = dense(np.zeros((4, 5, 3, 3)), grid())
+    real_import = builtins.__import__
+
+    def without_scipy(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "scipy" or name.startswith("scipy."):
+            raise ImportError(f"No module named {name!r}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_scipy)
+    with pytest.raises(ImportError, match=r"xarrayrf\[resample\]"):
+        transform.transform_point([1.0, 1.0, 1.0])
+    # Construction and inspection need no SciPy.
+    assert dense(np.zeros((4, 5, 3, 3)), grid()).field.shape == (4, 5, 3, 3)
+
+
+@pytest.mark.parametrize("outside", ["raise", "nearest"])
+def test_bspline_jacobians_are_exact_at_the_support_faces(outside: str) -> None:
+    # Cardinal cubic B-splines reproduce quadratics: coefficients k**2 give p**2 + 1/3, whose
+    # derivative 2p holds on the whole support, faces included. Four control points per axis put
+    # both faces at a tap boundary.
+    k = np.arange(4.0)
+    coefficients = np.zeros((4, 4, 4, 3))
+    coefficients[..., 0] = k[:, None, None] ** 2
+    coefficients[..., 1] = k[None, :, None] ** 2
+    coefficients[..., 2] = k[None, None, :] ** 2
+    spacing = np.array([1.5, 2.0, 0.5])
+    transform = spline(
+        coefficients, grid((4, 4, 4), matrix=np.diag(spacing), source=POINTS), outside
+    )
+    faces = np.array([[1.0, 2.0, 1.0], [2.0, 1.0, 2.0], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0]])
+    points = faces * spacing
+    expected = np.eye(3) + np.einsum("na,ab->nab", 2 * faces, np.diag(1 / spacing))
+    assert_allclose(transform.jacobian(points), expected, atol=ATOL)
+    assert_allclose(transform.transform_point(points), points + faces**2 + 1 / 3, atol=ATOL)

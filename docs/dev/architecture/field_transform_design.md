@@ -1,6 +1,6 @@
 # Field-backed transforms
 
-**Status:** Active (stage 1a in progress: steps 1 to 4 implemented)
+**Status:** Active (stage 1a implemented; 1b and 1c to come)
 **Last updated:** 2026-10-13
 **Scope:** Stage 1 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): transforms
 between Cartesian frames whose values come from a sampled field or a B-spline control grid

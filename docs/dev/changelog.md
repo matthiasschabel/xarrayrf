@@ -1,5 +1,19 @@
 # Changelog
 
+## [2026-10-13] — Field transforms, step 5: benchmark and evaluation backends
+
+- **Problem**: Step 1's NumPy kernels computed values and derivatives on every call and ran at
+  0.29 Mpt/s for B-spline values (57 s for a 256³ image through a 128³ field).
+- **Resolution**: values through `scipy.ndimage.map_coordinates` (linear, or cubic without
+  prefiltering, float64 output), dense Jacobians through the multilinear derivative alone,
+  B-spline Jacobians through a cached `NdBSpline`; the cubic NumPy kernel is removed. Dense values
+  4× faster, B-spline values 6×, B-spline Jacobians 5×, resampling through a field 2.6×. SciPy is
+  now required to evaluate a field transform. `benchmarks/field_transform_benchmark.py` records
+  the numbers against SimpleITK.
+- **Files affected**: `src/xarrayrf/_field_transform.py`, `tests/test_field_transforms.py`,
+  `benchmarks/field_transform_benchmark.py`, docs.
+- **Reviewed by**: Codex gpt-6-sol (reasoning effort high)
+
 ## [2026-10-13] — Field transforms, step 4: ITK and ANTs importers
 
 - **Problem**: ITK and ANTs registration results (transform files, warps, inverse warps) could

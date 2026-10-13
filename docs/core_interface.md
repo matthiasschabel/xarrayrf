@@ -440,7 +440,9 @@ retained scalars. Coordinates must be strictly monotonic and may be nonuniform o
 **Values.** `field` and `coefficients` are shaped `(*grid sizes in grid.dims order, D)`, with
 components ordered as the target axes. float32 and float64 are kept as given; integers are
 stored as float64. The values are copied into immutable storage and exposed as read-only views.
-Evaluation is always in float64.
+Evaluation is always in float64 and needs SciPy (`xarrayrf[resample]`), loaded on first use:
+values through `ndimage.map_coordinates`, B-spline Jacobians through `interpolate.NdBSpline`.
+Constructing and inspecting a field transform needs only NumPy.
 
 **Support edges** follow ITK and are compared exactly. A point exactly on an edge whose index
 is computed through an oblique grid may land on either side by roundoff, as it does in ITK.

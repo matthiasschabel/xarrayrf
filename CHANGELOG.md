@@ -15,6 +15,7 @@
     Jacobian.
   - `sample_displacement_field` rasterizes any such transform onto a grid.
   - Field transforms are not yet persisted.
+  - Evaluating them needs SciPy (`xarrayrf[resample]`); constructing them does not.
 - Declared inverse pairs, for registration tools that write a warp and its inverse:
   - `DeclaredInversePair(forward, backward)` owns both directions, unverified. `pair.forward`
     and `pair.backward` are `PairedTransform`s whose `declared_inverse()` returns the other.

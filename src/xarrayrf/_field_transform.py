@@ -12,13 +12,17 @@ conventions define the support: a dense field covers its cells, half-open at the
 edge (continuous index ``[-0.5, n - 0.5)`` for centred cells), and a cubic B-spline covers
 control index ``[1, n - 2]``, closed. Edges are compared exactly, as ITK compares them.
 
+Evaluation uses SciPy, loaded on first use as resampling loads it: values through
+``ndimage.map_coordinates`` (linear, or cubic without prefiltering), dense Jacobians through the
+multilinear derivative here, whose tie rule on cell faces is part of the contract, and B-spline
+Jacobians through ``interpolate.NdBSpline``. Construction and inspection need only NumPy.
+
 Neither class has an exact inverse, so neither implements ``inverse()``.
 """
 
 from __future__ import annotations
 
 import itertools
-from collections.abc import Callable
 from typing import Any, Final, Literal, get_args
 
 import numpy as np
@@ -260,13 +264,13 @@ class _FieldGrid:
         return scales[:, :, None] * rows[None, :, :]
 
 
-def _multilinear(
+def _multilinear_derivative(
     values: npt.NDArray[np.floating], positions: npt.NDArray[np.float64]
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Values ``(N, C)`` and ``∂u/∂p`` ``(N, C, D)`` at positions already clamped to the samples.
+) -> npt.NDArray[np.float64]:
+    """``∂u/∂p`` ``(N, C, D)`` of the multilinear interpolant at positions clamped to the samples.
 
     The cell is ``floor(p)`` clipped to ``[0, n - 2]``: an interior sample face takes the upper
-    cell's derivative and ``n - 1`` the lower cell's. A single-sample axis has one corner.
+    cell's derivative and ``n - 1`` the lower cell's. A single-sample axis has no derivative.
     """
     shape = values.shape[:-1]
     count, dims = positions.shape
@@ -274,13 +278,11 @@ def _multilinear(
         [np.clip(np.floor(positions[:, k]), 0, max(shape[k] - 2, 0)) for k in range(dims)], axis=-1
     ).astype(np.intp)
     fraction = positions - base
-    result = np.zeros((count, values.shape[-1]))
     derivative = np.zeros((count, values.shape[-1], dims))
     corners = [(0, 1) if shape[k] > 1 else (0,) for k in range(dims)]
     for corner in itertools.product(*corners):
         taps = values[tuple(base[:, k] + corner[k] for k in range(dims))].astype(np.float64)
         factors = [fraction[:, k] if corner[k] else 1.0 - fraction[:, k] for k in range(dims)]
-        result += np.prod(factors, axis=0)[:, None] * taps
         for k in range(dims):
             if shape[k] == 1:
                 continue
@@ -291,68 +293,54 @@ def _multilinear(
             )
             sign = 1.0 if corner[k] else -1.0
             derivative[:, :, k] += (sign * others)[:, None] * taps
-    return result, derivative
+    return derivative
 
 
-def _cubic_weights(
-    t: npt.NDArray[np.float64],
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Uniform cubic B-spline weights of taps ``floor(p) - 1 .. floor(p) + 2``, and derivatives."""
-    s = 1.0 - t
-    weights = (
-        np.stack((s**3, 3 * t**3 - 6 * t**2 + 4, -3 * t**3 + 3 * t**2 + 3 * t + 1, t**3), axis=-1)
-        / 6
-    )
-    slopes = np.stack((-(s**2), 3 * t**2 - 4 * t, -3 * t**2 + 2 * t + 1, t**2), axis=-1) / 2
-    return weights, slopes
+def _scipy_interpolation() -> Any:
+    """SciPy's interpolation modules, loaded on first evaluation as resampling loads them."""
+    try:
+        from scipy import interpolate, ndimage
+    except ImportError as error:
+        raise ImportError(
+            "evaluating a field transform needs SciPy; install xarrayrf[resample]"
+        ) from error
+    return ndimage, interpolate
 
 
-def _cubic(
-    coefficients: npt.NDArray[np.floating], positions: npt.NDArray[np.float64]
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Values ``(N, C)`` and ``∂u/∂p`` ``(N, C, D)`` at positions in ``[1, n - 2]``.
-
-    The base is clipped to ``[1, n - 3]`` so the four taps stay in range; at ``p = n - 2`` the
-    weights at ``t = 1`` give the same value as the centred taps.
-    """
-    shape = coefficients.shape[:-1]
-    count, dims = positions.shape
-    base = np.stack(
-        [np.clip(np.floor(positions[:, k]), 1, shape[k] - 3) for k in range(dims)], axis=-1
-    ).astype(np.intp)
-    weights, slopes = zip(
-        *(_cubic_weights(positions[:, k] - base[:, k]) for k in range(dims)), strict=True
-    )
-    result = np.zeros((count, coefficients.shape[-1]))
-    derivative = np.zeros((count, coefficients.shape[-1], dims))
-    for taps in itertools.product(range(4), repeat=dims):
-        values = coefficients[tuple(base[:, k] + taps[k] - 1 for k in range(dims))].astype(
-            np.float64
+def _sampled_values(
+    stored: npt.NDArray[np.floating], positions: npt.NDArray[np.float64], *, order: int, mode: str
+) -> npt.NDArray[np.float64]:
+    """``(N, C)`` values of the order-``order`` B-spline of ``stored``, without prefiltering."""
+    ndimage, _ = _scipy_interpolation()
+    coordinates = positions.T
+    result = np.empty((len(positions), stored.shape[-1]))
+    for channel in range(stored.shape[-1]):
+        # float64 output keeps the arithmetic in double for float32 storage.
+        result[:, channel] = ndimage.map_coordinates(
+            stored[..., channel],
+            coordinates,
+            order=order,
+            prefilter=False,
+            mode=mode,
+            output=np.float64,
         )
-        factors = [weights[k][:, taps[k]] for k in range(dims)]
-        result += np.prod(factors, axis=0)[:, None] * values
-        for k in range(dims):
-            others = (
-                np.prod([factors[j] for j in range(dims) if j != k], axis=0)
-                if dims > 1
-                else np.ones(count)
-            )
-            derivative[:, :, k] += (slopes[k][:, taps[k]] * others)[:, None] * values
-    return result, derivative
-
-
-type _Kernel = Callable[
-    [npt.NDArray[np.floating], npt.NDArray[np.float64]],
-    tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]],
-]
+    return result
 
 
 class _FieldTransform:
     """Shared evaluation: locate, classify against the support, apply the exterior, interpolate."""
 
-    __slots__ = ("_grid", "_lookup", "_outside", "_source", "_stored", "_target", "_upper_closed")
+    __slots__ = (
+        "_derivative_cache",
+        "_grid",
+        "_lookup",
+        "_outside",
+        "_source",
+        "_stored",
+        "_target",
+        "_upper_closed",
+    )
 
-    _kernel: _Kernel
     _upper_closed: bool
     _clamp_to_support: bool
     _what: str
@@ -370,6 +358,7 @@ class _FieldTransform:
     ) -> None:
         _check_endpoints(source, target, what=self._what)
         self._upper_closed = upper_closed
+        self._derivative_cache: Any = None
         assert isinstance(source, ReferenceFrame) and isinstance(target, ReferenceFrame)
         self._source = source
         self._target = target
@@ -452,17 +441,23 @@ class _FieldTransform:
                 clamped = np.clip(wanted, lookup.lower, lookup.upper)
             else:
                 clamped = np.clip(wanted, 0.0, np.array(lookup.shape, dtype=np.float64) - 1)
-            displacement, derivative = self._kernel(self._stored, clamped)
             target = np.flatnonzero(rows) + start
             if not jacobian:
-                result[target] += displacement
+                result[target] += self._values(clamped)
                 continue
+            derivative = self._derivative(clamped)
             # The constant extension beyond the samples, or beyond the support under "nearest",
             # has no derivative along the clamped axis.
             derivative[np.broadcast_to((clamped != wanted)[:, None, :], derivative.shape)] = 0.0
             result[target] += derivative @ lookup.position_jacobian(clamped)
         shape = (*points.shape[:-1], dims, dims) if jacobian else points.shape
         return result.reshape(shape)
+
+    def _values(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        raise NotImplementedError
+
+    def _derivative(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        raise NotImplementedError
 
     def transform_point(self, points: npt.ArrayLike) -> npt.NDArray[np.float64]:
         """Map points ``(..., D)`` ordered as the source axes to ``x + u(x)`` in the target.
@@ -511,7 +506,6 @@ class DisplacementFieldTransform(_FieldTransform):
 
     __slots__ = ()
 
-    _kernel = staticmethod(_multilinear)
     _clamp_to_support = False
     _what = "displacement field"
 
@@ -548,6 +542,13 @@ class DisplacementFieldTransform(_FieldTransform):
         """
         self._setup(source, target, field, grid, outside, field="field", upper_closed=False)
 
+    def _values(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        # Positions are clamped to the samples, so "nearest" padding is never reached.
+        return _sampled_values(self._stored, positions, order=1, mode="nearest")
+
+    def _derivative(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        return _multilinear_derivative(self._stored, positions)
+
     @property
     def field(self) -> npt.NDArray[np.floating]:
         """The stored displacements, a read-only view."""
@@ -580,7 +581,6 @@ class BSplineTransform(_FieldTransform):
 
     __slots__ = ()
 
-    _kernel = staticmethod(_cubic)
     _clamp_to_support = True
     _what = "B-spline transform"
 
@@ -634,6 +634,27 @@ class BSplineTransform(_FieldTransform):
             outside,
             field="coefficients",
             upper_closed=support == "closed",
+        )
+
+    def _values(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        # Taps floor(p) - 1 .. floor(p) + 2 stay inside the grid on [1, n - 2], except the
+        # fourth at p = n - 2, whose weight is exactly zero, so the padding never contributes.
+        return _sampled_values(self._stored, positions, order=3, mode="grid-constant")
+
+    def _derivative(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """``∂u/∂p`` through NdBSpline with cardinal knots, built once on first use."""
+        if self._derivative_cache is None:
+            _, interpolate = _scipy_interpolation()
+            knots = tuple(np.arange(n + 4, dtype=np.float64) - 2.0 for n in self._lookup.shape)
+            self._derivative_cache = interpolate.NdBSpline(knots, np.asarray(self._stored), 3)
+        spline = self._derivative_cache
+        dims = positions.shape[-1]
+        return np.stack(
+            [
+                np.asarray(spline(positions, nu=tuple(int(a == b) for b in range(dims))))
+                for a in range(dims)
+            ],
+            axis=-1,
         )
 
     @property
