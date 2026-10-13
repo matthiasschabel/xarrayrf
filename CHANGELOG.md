@@ -4,6 +4,17 @@
 
 ### Added
 
+- Field transforms between Cartesian frames, for deformable registration:
+  - `DisplacementFieldTransform`: a displacement sampled on a `Grid` and interpolated linearly.
+  - `BSplineTransform`: cubic B-spline coefficients on a control grid.
+  - Both follow ITK's support conventions and declare their exterior (`"raise"`, `"identity"`
+    or `"nearest"`). Both have analytic pointwise Jacobians, keep float32 or float64 storage
+    and evaluate in float64. They resample through the general path, including declared
+    components.
+  - `jacobian_determinant_report` reports determinants and the folding fraction of any square
+    Jacobian.
+  - `sample_displacement_field` rasterizes any such transform onto a grid.
+  - Field transforms are not yet persisted.
 - Angular coordinate systems: `CoordinateSystem(..., representation="spherical" | "geodetic",
   axis_roles=(...))` declares longitude, latitude and a radius or height axis beside ordinary
   axes such as time. Angular axes take degrees, CF `degrees_east`/`degrees_north` or radians;

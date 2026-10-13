@@ -28,6 +28,7 @@ from ._chart_transitions import (
 )
 from ._composite import CompositeTransform
 from ._coordinate_system import CARTESIAN, CoordinateSystem
+from ._field_transform import BSplineTransform, DisplacementFieldTransform
 from ._frame import ReferenceFrame
 from ._frame_field import EastNorthUp, FrameField
 from ._grid import Coordinate, Grid
@@ -305,6 +306,12 @@ def _encode(value: object) -> dict[str, Any]:
             "component_dims": list(value.component_dims),
             "bases": [_encode(basis) for basis in value.bases],
         }
+    if isinstance(value, DisplacementFieldTransform | BSplineTransform):
+        raise TypeError(
+            f"{type(value).__name__} cannot be encoded yet: field transforms hold arrays that "
+            "an inline record cannot carry, and their persistence by reference is not "
+            "implemented (field transform design, stage 1b)",
+        )
     if isinstance(value, SupportsEncoding) and isinstance(value, SupportsPoints):
         return _encode_extension(value)
     raise TypeError(

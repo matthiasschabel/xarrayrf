@@ -407,6 +407,74 @@ lon_lat_h = to_ecef.inverse().transform_point(xyz)
 Pass a transition to `resample(..., transform=)` to resample between charts of one frame, such
 as a lon/lat/height grid onto Earth-centred Cartesian points.
 
+### Field transforms
+
+A deformable registration maps one Cartesian frame to another by a displacement,
+`y = x + u(x)`. Two classes hold the producer's representation as given. Both provide
+points and a pointwise Jacobian, have no inverse, and compare by identity:
+
+| Class | Representation | Producers | Support, in continuous index |
+|---|---|---|---|
+| `DisplacementFieldTransform(*, source, target, field, grid, outside="raise")` | `u` sampled on a grid, interpolated linearly | ITK and ANTs displacement fields, NGFF `displacements` | The grid's cells, half-open above: `[-0.5, n - 0.5)` for centred cells |
+| `BSplineTransform(*, source, target, coefficients, grid, order=3, outside="raise")` | Cubic B-spline coefficients on a control grid, without prefiltering | ITK `BSplineTransform`, elastix, NiftyReg | `[1, n - 2]`, closed |
+
+```python
+grid = rf.Grid(to_fixed, {axis: (axis, np.arange(n)) for axis, n in zip("ijk", (41, 41, 21))})
+warp = rf.DisplacementFieldTransform(
+    source=fixed, target=moving, field=displacement, grid=grid, outside="identity"
+)
+moved = warp.transform_point(points)  # points in fixed, results in moving
+report = rf.jacobian_determinant_report(warp, grid)  # .determinant, .minimum, .folding_fraction
+```
+
+**Endpoints.** `source` and `target` are Cartesian `ReferenceFrame`s with equal coordinate
+systems, since the displacement is added to the point. Angular charts are refused.
+
+**Grid.** The grid is located in `source` (`grid.frame == source`). Its transform must be an
+affine that is square and invertible, with one varying dimension per frame axis and no
+retained scalars. Coordinates must be strictly monotonic and may be nonuniform or descending.
+- A dense field needs cells on every axis: a `sample_offset`, or intervals that tile the axis.
+  A single-sample axis needs its interval, which gives the slab its thickness.
+- A B-spline needs at least four control points per axis, uniformly spaced to 1e-12 steps.
+
+**Values.** `field` and `coefficients` are shaped `(*grid sizes in grid.dims order, D)`, with
+components ordered as the target axes. float32 and float64 are kept as given; integers are
+stored as float64. The values are copied into immutable storage and exposed as read-only views.
+Evaluation is always in float64.
+
+**Support edges** follow ITK and are compared exactly. A point exactly on an edge whose index
+is computed through an oblique grid may land on either side by roundoff, as it does in ITK.
+Inside the cells but beyond the outer samples, a dense field extends its edge samples as
+constants.
+
+**`outside`** says what happens beyond the support:
+- `"raise"`: refuse, naming the first point and the support.
+- `"identity"`: return the point unchanged with an identity Jacobian; this is ITK's semantics.
+- `"nearest"`: evaluate at the nearest point of the support, which for a dense field is the edge
+  displacement.
+
+`resample(source, target, transform=warp)` pulls through a field from the target image's frame
+to the source image's, by the general path. A `"raise"` field refuses the whole resampling if
+any target sample lies outside its support. Declared vector and tensor components follow the
+field's pointwise Jacobian.
+
+**Jacobian.** `jacobian(at)` is `I + ∂u/∂x`: the interpolant's derivative chained with the
+world-to-index map, using local steps on nonuniform axes. `at` is required.
+- A dense field's derivative on an interior sample face is the upper cell's, and at the last
+  sample the lower cell's.
+- There is no derivative along an axis where the value is clamped (beyond the samples, or by
+  `"nearest"`), nor along a single-sample axis.
+
+**Diagnostics and conversion.**
+- `jacobian_determinant_report(transform, at)` reports the determinant of any square Jacobian at
+  points or at a grid's samples. It returns a `JacobianDeterminantReport` with `determinant`,
+  `minimum` and `folding_fraction`, the fraction of points where the determinant is ≤ 0.
+- `sample_displacement_field(transform, grid, *, outside="raise")` samples any transform
+  between such frames into a float64 dense field. This is the explicit conversion of a B-spline
+  or an affine.
+
+`encode` refuses field transforms until their persistence by reference lands.
+
 ### Tensor transformation
 
 Points move with `transform_point`. Values with a direction (velocities, gradients, stress

@@ -1,5 +1,33 @@
 # Changelog
 
+## [2026-10-12] — Field transforms, step 1: dense and B-spline displacement transforms
+
+- **Problem**: Only affine transforms existed. Deformable registration results could not be
+  applied, differentiated or checked for folding (stage 1a of the field transform design).
+- **Resolution**:
+  - `DisplacementFieldTransform` and `BSplineTransform` (`_field_transform.py`) on an admissible
+    `Grid`.
+  - ITK supports, compared exactly: dense `[lo, hi)` over tiling cells, B-spline `[1, n − 2]`.
+  - `"raise"`, `"identity"` and `"nearest"` exteriors.
+  - One separable float64 kernel per representation for both values and Jacobians, in blocks of
+    2**16 points.
+  - Bytes-backed float32 and float64 storage.
+  - `jacobian_determinant_report`, `sample_displacement_field`, and an explicit `encode`
+    refusal until 1b.
+  - ITK 5.4.7 boundary fixture from `tools/build_itk_field_fixture.py`.
+  - Plan and implementation reviewed by Codex. Findings: exact edges rather than slack,
+    direction-aware interval tiling, B-splines restricted to exact-step grids, and an immutable
+    report.
+- **Verification**: stock 2,570 passed plus 47 xfailed; patched 2,617; upstream 2,575 plus 42
+  xfailed; ruff and mypy pass.
+- **Files affected**: `src/xarrayrf/_field_transform.py`, `src/xarrayrf/_jacobian_determinant.py`,
+  `src/xarrayrf/_encoding.py`, `src/xarrayrf/__init__.py`, `tests/test_field_transforms.py`,
+  `tests/fixtures/itk_field_boundaries.json`, `tools/build_itk_field_fixture.py`,
+  `pyproject.toml`, `docs/core_interface.md`, `CHANGELOG.md`,
+  `docs/dev/architecture/field_transform_design.md`,
+  `docs/dev/architecture/field_transform_step1_plan.md`.
+- **Reviewed by**: Codex (`gpt-6-sol`, reasoning effort high).
+
 ## [2026-10-12] — Independent QA of value geometry stage 4 (FrameField)
 
 - **Problem**: Review pointwise bases (`c8d704b`) for regressions, edge cases and error paths

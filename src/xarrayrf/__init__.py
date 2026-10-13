@@ -52,9 +52,15 @@ from ._encoding import (
     decode,
     encode,
 )
+from ._field_transform import (
+    BSplineTransform,
+    DisplacementFieldTransform,
+    sample_displacement_field,
+)
 from ._frame import LOCAL_NAMESPACE, ReferenceFrame, Role
 from ._frame_field import EastNorthUp, FrameField
 from ._grid import Grid
+from ._jacobian_determinant import JacobianDeterminantReport, jacobian_determinant_report
 from ._lattice import Lattice
 from ._orientation import coordinate_system_change
 from ._symmetric_packing import SYMMETRY_TOLERANCE, SymmetricPacking
@@ -113,18 +119,21 @@ __all__ = [
     "ArrayCoordinates",
     "AxisCode",
     "AxisRole",
+    "BSplineTransform",
     "CartesianToGeodetic",
     "CartesianToSpherical",
     "CompositeTransform",
     "CoordinateSystem",
     "DecoderResultError",
     "DirectionVocabulary",
+    "DisplacementFieldTransform",
     "EastNorthUp",
     "EncodingError",
     "Endpoint",
     "FrameField",
     "GeodeticToCartesian",
     "Grid",
+    "JacobianDeterminantReport",
     "Lattice",
     "MalformedDataError",
     "MissingDecoderError",
@@ -148,7 +157,9 @@ __all__ = [
     "coordinate_system_change",
     "decode",
     "encode",
+    "jacobian_determinant_report",
     "polar_orthogonal_factor",
+    "sample_displacement_field",
     "transform_named",
     "transform_tensor_components",
 ]
