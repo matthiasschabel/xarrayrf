@@ -143,7 +143,10 @@ def resample(
     Performance: when both arrays form regular lattices and every transform is affine, target
     positions map to source positions through one composed affine, and each non-geometry slice
     is interpolated by ``scipy.ndimage.affine_transform`` with a
-    separable outside mask; ``block_points`` does not apply. Otherwise target coordinates are
+    separable outside mask; ``block_points`` does not apply. When both form lattices and the
+    transform is one built-in field transform on a uniform grid between affines, target
+    indices map to field indices and source positions through precomputed affines; boundary
+    decisions agree with the general path to roundoff. Otherwise target coordinates are
     mapped through the transforms and the source's exact inverse in blocks of ``block_points``
     samples, and ``scipy.ndimage.map_coordinates`` interpolates; for nearest and linear each
     block's positions are reused for every slice when no linear NaN handling is needed.

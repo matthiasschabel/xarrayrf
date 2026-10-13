@@ -1196,6 +1196,13 @@ Performance is part of the contract:
   within about 15% and cubic within about 5% of scipy applying the same composed map; the mask
   adds about 0.01 s
   (`benchmarks/resample_benchmark.py`).
+- When both arrays form lattices and the transform is one built-in field transform on a
+  uniform grid between affine maps (including coordinate changes, composites and declared
+  pairs), target indices map to field indices and source positions through precomputed
+  affines, with origins cancelled before scaling; only the field is interpolated per point.
+  Boundary decisions agree with the general path to roundoff (within about `1e-9` index units
+  of a support face or domain edge). A 256³ image through a 128³ dense field resamples at about
+  8 Mpt/s on one thread, against SimpleITK's 36 (`benchmarks/field_resample_benchmark.py`).
 - Otherwise target positions are processed in blocks of `block_points` samples (bounded
   memory), positions are reused for every non-geometry slice when no linear NaN buffers are
   needed, and values are interpolated by `scipy.ndimage.map_coordinates`.

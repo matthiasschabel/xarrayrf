@@ -15,6 +15,9 @@ import numpy.typing as npt
 from ._affine import AffineTransform, equilibrated_inverse
 from ._array_coordinates import ArrayCoordinates
 from ._box import BoxOperator, as_operator, interval_tolerance, weights
+from ._composite import CompositeTransform
+from ._declared_inverse import PairedTransform, _PairedTransformWithJacobian
+from ._field_transform import BSplineTransform, DisplacementFieldTransform
 from ._frame import ReferenceFrame
 from ._frame_adoption import adopt_frame
 from ._frame_compatibility import anonymous_frame_difference
@@ -31,6 +34,7 @@ from ._positions import (
     sample_columns,
 )
 from ._sampling import (
+    EXACT_STEP_TOLERANCE,
     LATTICE_TOLERANCE,
     POSITION_SLACK,
     AxisSampling,
@@ -251,6 +255,126 @@ def _general_map(
             points = frame_map.transform_point(points)
         located = locate(points).T
         return located if identity_order else located[source_axes]
+
+    return positions
+
+
+_PAIRED_TYPES: Final = (PairedTransform, _PairedTransformWithJacobian)
+_FIELD_TYPES: Final = (DisplacementFieldTransform, BSplineTransform)
+
+
+def _chain(transform: SupportsPoints) -> list[SupportsPoints]:
+    """The members of a frame map in application order, composites and declared pairs opened.
+
+    Only the exact built-in types are opened: a subclass may override ``transform_point``, and
+    evaluating its members directly would skip the override.
+    """
+    if type(transform) is CompositeTransform:
+        return [member for inner in transform.transforms for member in _chain(inner)]
+    if type(transform) in _PAIRED_TYPES:
+        return _chain(cast(PairedTransform, transform).transform)
+    return [transform]
+
+
+def _affine_parts(
+    members: list[SupportsPoints], size: int
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]] | None:
+    """Matrix and translation of affine members applied in order, or None for a non-affine."""
+    matrix, translation = np.eye(size), np.zeros(size)
+    for member in members:
+        if not isinstance(member, SupportsAffine):
+            return None
+        linear = np.asarray(member.matrix, dtype=np.float64)
+        if linear.shape != (size, size):
+            return None
+        matrix = linear @ matrix
+        translation = linear @ translation + np.asarray(member.translation, dtype=np.float64)
+    return matrix, translation
+
+
+def _field_lattice_map(
+    source: Sampling,
+    target: Sampling,
+    source_dims: tuple[str, ...],
+    target_dims: tuple[str, ...],
+    frame_map: SupportsPoints | None,
+    domain: Domain,
+) -> PositionMap | None:
+    """Fuse lattice target -> affines -> one field -> affines -> lattice source, if possible.
+
+    With ``x(i)`` the target lattice, ``A`` and ``B`` the affines before and after the field
+    ``F``, and the source lattice ``w = S s + o``, a target index ``i`` maps to field index
+    ``p = P i + c`` and source position ``s = Q i + K u(p) + q``. Every constant cancels its
+    origins before scaling (the target point of index zero against the field's anchor and the
+    source origin), so a large origin never multiplies an index. Boundary decisions may differ
+    from the general path's by roundoff (within about 1e-9 index units). Returns None, for the
+    general path, unless the field is exactly a built-in field type on a uniform grid, composites
+    and pairs are exactly the built-in types, every other member is affine and square, and both
+    samplings are lattices to exact steps without single-sample source dims.
+    """
+    if frame_map is None:
+        return None
+    members = _chain(frame_map)
+    fields = [
+        index for index, member in enumerate(members) if not isinstance(member, SupportsAffine)
+    ]
+    if len(fields) != 1:
+        return None
+    field = members[fields[0]]
+    if type(field) not in _FIELD_TYPES:
+        return None
+    assert isinstance(field, DisplacementFieldTransform | BSplineTransform)
+    if field._lookup.index_map is None:
+        return None
+    size = len(field.source.axes)
+    before = _affine_parts(members[: fields[0]], size)
+    after = _affine_parts(members[fields[0] + 1 :], size)
+    if before is None or after is None or not isinstance(target.transform, SupportsAffine):
+        return None
+    try:
+        # The general path locates with exact steps, so a nearly uniform axis, which the affine
+        # lattice path accepts, would move positions here by more than roundoff.
+        target_origin, target_columns = lattice_parts(
+            target, target_dims, EXACT_STEP_TOLERANCE, single_samples=True
+        )
+        source_lattice = lattice(source, source_dims, tolerance=EXACT_STEP_TOLERANCE)
+        source_inverse = equilibrated_inverse(source_lattice.matrix)
+    except (TypeError, ValueError):
+        return None
+    if source_inverse.shape != (size, size) or target_origin.shape != (size,):
+        return None
+    anchor, linear = field._lookup.index_map
+    (pre, pre_offset), (post, post_offset) = before, after
+    origin = pre @ target_origin + pre_offset
+    field_linear = linear @ pre @ target_columns
+    field_offset = linear @ (origin - anchor)
+    push = source_inverse @ post
+    source_linear = push @ pre @ target_columns
+    source_offset = source_inverse @ ((post @ origin + post_offset) - source_lattice.origin)
+    reach = extents(source, domain)
+    reach = [reach[source.dims.index(dim)] for dim in source_dims]
+    sizes = np.array([source.sizes[dim] for dim in source_dims], dtype=np.float64)
+    lowest = -np.array([low for low, _ in reach])[:, None]
+    highest = (sizes - 1.0 + np.array([high for _, high in reach]))[:, None]
+
+    def positions(indices: npt.NDArray[np.intp]) -> npt.NDArray[np.float64]:
+        steps = indices.astype(np.float64)
+        columns: npt.NDArray[np.float64] = np.einsum("ij,jn->in", field_linear, steps)
+        columns += field_offset[:, None]
+        displacement, first = field._displacement_rows(columns)
+        if first is not None:
+            where = tuple(int(i) for i in indices[:, first])
+            raise field._outside_error(where, columns[:, first])
+        located: npt.NDArray[np.float64] = np.einsum("ij,jn->in", source_linear, steps)
+        located += np.einsum("ij,jn->in", push, displacement)
+        located += source_offset[:, None]
+        # As coordinate_to_position: outside the domain beyond the slack is NaN, else clamped.
+        outside = np.any(
+            (located < lowest - POSITION_SLACK) | (located > highest + POSITION_SLACK), axis=0
+        )
+        np.clip(located, lowest, highest, out=located)
+        located[:, outside] = np.nan
+        return located
 
     return positions
 
@@ -716,9 +840,11 @@ def plan(
         if lattice_map is None:
             # A modulo or a mirror is not affine, and a crop could drop samples across the
             # seam, so a periodic source takes the general path.
-            position_map = _general_map(
-                source, target, source_dims, target_dims, frame_map, domain, periodic
-            )
+            position_map = (
+                _field_lattice_map(source, target, source_dims, target_dims, frame_map, domain)
+                if periodic is None
+                else None
+            ) or _general_map(source, target, source_dims, target_dims, frame_map, domain, periodic)
     output_dtype = _output_dtype(dtype, method, fill_value)
     source_shape = tuple(source.sizes[dim] for dim in source_dims) if total else ()
     window = None

@@ -1,6 +1,6 @@
 # Resampling performance: closing the gap with SimpleITK
 
-**Status:** Active (Steps 0–2 implemented; Step 3 next)
+**Status:** Active (Steps 0–3 implemented; Step 4 next)
 **Last updated:** 2026-10-13
 **Scope:** Point-method resampling (`nearest`, `linear`, `cubic`) on the general path in
 `_resampling.py`; field transform evaluation in `_field_transform.py`; source location in
@@ -181,6 +181,37 @@ must keep passing on both paths.
 
 Target: 1.4–2× over Step 2.
 
+**As implemented:** `_field_lattice_map` in `_resampling.py`, a third `PositionMap` beside the
+lattice and general ones, chosen when the general path would be. The frame map is opened
+through composites and declared pairs (`PairedTransform`); exactly one member must be a
+`_FieldTransform` whose grid has an anchored index map (Step 2), every other member a square
+affine, the target a lattice with single-sample dims allowed, and the source a lattice without
+them. Per block: `p = P i + c`, the field's `_displacement_rows` (shared with
+`transform_point`, so exterior, clamping and the refusal message are one implementation),
+`s = Q i + K u + q`, then the domain test of `coordinate_to_position` with `POSITION_SLACK`.
+Origins cancel before scaling in `c` and `q`. The closed-form parallelepiped classification and
+the plan-time `"raise"` check were dropped: per-block row bounds now cost 0.4 ms per million
+points, and a raise reports the target sample at execution like the general path.
+Differential tests (`tests/test_resample_fields.py`, 76 matrix cases: dense and B-spline; identity
+and nearest; nearest, linear and cubic; samples and cells domains with centred and asymmetric
+offsets; origins 0 and 1e6; chains and declared pairs) assert equal NaN masks and values within
+1e-9, with a fixture failing any fallback to the general path.
+
+Review (Codex gpt-6-astra high): B1, nearly uniform axes (1e-6, accepted by the affine
+lattice path) moved positions by more than roundoff, so fusion requires exact steps
+(`EXACT_STEP_TOLERANCE`), as the general path's locator; B2, subclasses of composites,
+paired transforms and fields could override `transform_point`, so only the exact built-in
+types are opened or fused. N1 added tests: nearly uniform source and target, both subclass
+overrides, large coordinate labels under oblique affines around the field, a refusal first met
+in a later block naming its target sample, and an empty target. Scope of the boundary band:
+the `1e-9` allowance holds while `eps × |origin| / step` stays well below it (origins up to
+about 1e6 at unit steps); beyond that both paths already differ from exact arithmetic by more,
+the general path included, so the band cannot be tighter than the input's own resolution.
+
+Measured (Mpt/s, float32): 3-D dense field 7.77 (5.57 after Step 2), 2-D dense field 15.3
+(10.0), 3-D B-spline 1.81 (1.61). The 3-D dense run is 2.16 s, of which SciPy interpolation is
+1.52 s: the single-threaded floor is near.
+
 ### Step 4: threads
 
 - A bounded thread pool over blocks on the general and fused paths. Eligibility checks the
@@ -270,4 +301,6 @@ Plan review (Codex gpt-6-astra, high, 2026-10-13): Revise.
 4. Done: Step 2 (implementation review, Codex gpt-6-astra high: B1 large-origin cancellation
    in the composed index map, fixed for translations on the first pass and for coordinate
    values after the convergence pass maintained it; both regressions pass).
-5. Steps 3–5 in order, each with an implementation review, docs and changelog.
+5. Done: Step 3 (implementation review: B1 exact-step lattices, B2 exact built-in types, N1
+   coverage; accepted on the second pass).
+6. Steps 4 and 5, each with an implementation review, docs and changelog.

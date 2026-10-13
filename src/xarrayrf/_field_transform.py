@@ -439,6 +439,56 @@ class _FieldTransform:
             )
         return points
 
+    def _outside_error(self, where: tuple[int, ...], position: npt.ArrayLike) -> ValueError:
+        """The refusal of a point outside the support under ``outside="raise"``."""
+        lookup = self._lookup
+        edge = "]" if self._upper_closed else ")"
+        support = ", ".join(
+            f"{dim}: [{lo:g}, {hi:g}{edge}"
+            for dim, lo, hi in zip(self._grid.dims, lookup.lower, lookup.upper, strict=True)
+        )
+        index = tuple(round(float(p), 6) for p in np.asarray(position))
+        return ValueError(
+            f"point {where} lies outside the {self._what}'s support at continuous index "
+            f"{index}; the support is {support}. Declare outside='identity' or 'nearest' to map "
+            "such points",
+        )
+
+    def _displacement_rows(
+        self, columns: npt.NDArray[np.float64]
+    ) -> tuple[npt.NDArray[np.float64], int | None]:
+        """Displacements ``(C, N)`` at continuous index rows ``(D, N)`` under the exterior.
+
+        Under ``"raise"`` a column outside the support returns its number instead, unclamped
+        in ``columns``, for the caller to report; ``"identity"`` gives zero there, and
+        ``"nearest"`` the clamped value. ``columns`` is clamped in place.
+        """
+        lookup = self._lookup
+        samples = np.array(lookup.shape, dtype=np.float64) - 1
+        lowest, highest = (
+            (lookup.lower, lookup.upper)
+            if self._clamp_to_support
+            else (np.zeros_like(samples), samples)
+        )
+        low, high = columns.min(axis=1), columns.max(axis=1)
+        upper = high <= lookup.upper if self._upper_closed else high < lookup.upper
+        if np.all(low >= lookup.lower) and np.all(upper):
+            # The common case: no column to classify, gather or scatter.
+            if np.any(low < lowest) or np.any(high > highest):
+                np.clip(columns, lowest[:, None], highest[:, None], out=columns)
+            return self._values(columns), None
+        bound = lookup.upper[:, None]
+        above = columns > bound if self._upper_closed else columns >= bound
+        outside = np.any((columns < lookup.lower[:, None]) | above, axis=0)
+        if self._outside == "raise":
+            return np.empty((0, 0)), int(np.argmax(outside))
+        result = np.zeros((len(self._target.axes), columns.shape[1]))
+        rows = ~outside if self._outside == "identity" else slice(None)
+        selected = np.clip(columns[:, rows], lowest[:, None], highest[:, None])
+        if selected.size:
+            result[:, rows] = self._values(selected)
+        return result, None
+
     def _evaluate(
         self, points: npt.NDArray[np.float64], *, jacobian: bool
     ) -> npt.NDArray[np.float64]:
@@ -446,52 +496,33 @@ class _FieldTransform:
         lookup = self._lookup
         flat = points.reshape(-1, points.shape[-1])
         dims = flat.shape[-1]
-        if jacobian:
-            result = np.broadcast_to(np.eye(dims), (flat.shape[0], dims, dims)).copy()
-        else:
+
+        def raise_outside(first: int, position: npt.ArrayLike) -> None:
+            where = np.unravel_index(first, points.shape[:-1]) if points.ndim > 1 else ()
+            raise self._outside_error(tuple(int(i) for i in where), position)
+
+        if not jacobian:
             result = np.empty_like(flat)
-        samples = np.array(lookup.shape, dtype=np.float64) - 1
-        block_size = _BLOCK if jacobian else _VALUE_BLOCK
-        for start in range(0, flat.shape[0], block_size):
-            block = flat[start : start + block_size]
-            if not jacobian:
+            for start in range(0, flat.shape[0], _VALUE_BLOCK):
+                block = flat[start : start + _VALUE_BLOCK]
                 columns = lookup.columns(block)
-                low, high = columns.min(axis=1), columns.max(axis=1)
-                inside = np.all(low >= lookup.lower) and np.all(
-                    high <= lookup.upper if self._upper_closed else high < lookup.upper
-                )
-                if inside:
-                    # The common case: no row to classify, gather or scatter.
-                    lowest, highest = (
-                        (lookup.lower, lookup.upper)
-                        if self._clamp_to_support
-                        else (np.zeros_like(samples), samples)
-                    )
-                    if np.any(low < lowest) or np.any(high > highest):
-                        np.clip(columns, lowest[:, None], highest[:, None], out=columns)
-                    result[start : start + len(block)] = block + self._values(columns).T
-                    continue
-                result[start : start + len(block)] = block
+                displacement, first = self._displacement_rows(columns)
+                if first is not None:
+                    raise_outside(start + first, columns[:, first])
+                np.add(block, displacement.T, out=result[start : start + len(block)])
+            return result.reshape(points.shape)
+        result = np.broadcast_to(np.eye(dims), (flat.shape[0], dims, dims)).copy()
+        samples = np.array(lookup.shape, dtype=np.float64) - 1
+        for start in range(0, flat.shape[0], _BLOCK):
+            block = flat[start : start + _BLOCK]
             positions = lookup.positions(block)
             above = (
                 positions >= lookup.upper if not self._upper_closed else positions > lookup.upper
             )
             outside_rows = np.any((positions < lookup.lower) | above, axis=-1)
             if outside_rows.any() and self._outside == "raise":
-                first = start + int(np.argmax(outside_rows))
-                where = np.unravel_index(first, points.shape[:-1]) if points.ndim > 1 else ()
-                row = first - start
-                edge = "]" if self._upper_closed else ")"
-                support = ", ".join(
-                    f"{dim}: [{lo:g}, {hi:g}{edge}"
-                    for dim, lo, hi in zip(self._grid.dims, lookup.lower, lookup.upper, strict=True)
-                )
-                raise ValueError(
-                    f"point {tuple(int(i) for i in where)} lies outside the {self._what}'s support "
-                    f"at continuous index {tuple(round(float(p), 6) for p in positions[row])}; the "
-                    f"support is {support}. Declare outside='identity' or 'nearest' to map such "
-                    "points",
-                )
+                first = int(np.argmax(outside_rows))
+                raise_outside(start + first, positions[first])
             rows = ~outside_rows if self._outside == "identity" else np.ones(len(block), dtype=bool)
             if not rows.any():
                 continue
@@ -501,16 +532,12 @@ class _FieldTransform:
             else:
                 clamped = np.clip(wanted, 0.0, samples)
             target = np.flatnonzero(rows) + start
-            if not jacobian:
-                result[target] += self._values(np.ascontiguousarray(clamped.T)).T
-                continue
             derivative = self._derivative(clamped)
             # The constant extension beyond the samples, or beyond the support under "nearest",
             # has no derivative along the clamped axis.
             derivative[np.broadcast_to((clamped != wanted)[:, None, :], derivative.shape)] = 0.0
             result[target] += derivative @ lookup.position_jacobian(clamped)
-        shape = (*points.shape[:-1], dims, dims) if jacobian else points.shape
-        return result.reshape(shape)
+        return result.reshape((*points.shape[:-1], dims, dims))
 
     def _values(self, columns: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Displacements ``(C, N)`` at index rows ``(D, N)`` already clamped."""

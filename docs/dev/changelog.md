@@ -1,5 +1,20 @@
 # Changelog
 
+## [2026-10-13] — Fused lattice path for resampling through one field (performance plan, Step 3)
+
+- **Problem**: Resampling through a field located every target sample through separate
+  affine stages (target grid, frame changes, field lookup, source inverse), about a third of
+  the remaining time.
+- **Resolution**: `_field_lattice_map` precomputes, for lattice samplings and exactly one
+  built-in field on a uniform grid between square affines (composites and declared pairs of
+  the exact built-in types opened), the target-index to field-index and source-position maps
+  with origins cancelled before scaling; the field's `_displacement_rows` is shared with
+  `transform_point`. Exact-step lattices only; subclasses take the general path. 3-D dense
+  7.77 Mpt/s (5.57), 2-D 15.3 (10.0). Differential tests against the general path.
+- **Files affected**: `src/xarrayrf/_resampling.py`, `src/xarrayrf/_field_transform.py`,
+  `src/xarrayrf/_resample.py`, `tests/test_resample_fields.py`, `docs/core_interface.md`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high)
+
 ## [2026-10-13] — Resampling through fields: memory layout and plumbing (performance plan, Step 2)
 
 - **Problem**: Resampling through a dense field ran at 3.95 Mpt/s against SimpleITK's 36 on
