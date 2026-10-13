@@ -432,11 +432,10 @@ No disagreements remain open; the 1a scope and open decision 2 are maintainer de
 
 ## Next Steps
 
-1. Settle the open decisions with the plan's.
-2. 1a, in order: the two transform classes on `Grid`, adapted from Pirana with its tests, plus
-   analytic tests and the ITK boundary fixtures; Jacobians and the determinant diagnostic; the
-   pair and chain inversion; the elastix parser, then nitransforms readers, with SimpleITK, ANTs,
-   elastix and nitransforms fixtures; the benchmark. Update
-   [the core interface](../../core_interface.md) with each public name as it lands.
-3. 1b once 1a is complete; 1c when a consumer of partial-domain fields appears. Pirana adopts the
+1. Done: 1a in five steps (`field_transform_step1_plan.md` to `field_transform_step5_plan.md`);
+   the ITK and ANTs readers parse files directly rather than through nitransforms (step 4).
+   Field evaluation needs SciPy (`xarrayrf[resample]`), confirmed by the maintainer.
+2. Done: resampling through fields made fast (`resample_performance_plan.md`): fused lattice
+   path, threads, and the optional SimpleITK field engine.
+3. 1b next; 1c when a consumer of partial-domain fields appears. Pirana adopts the
    classes only after xarrayrf's release gate (see the [roadmap](../roadmap.md)).

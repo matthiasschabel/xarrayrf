@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-13
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -63,8 +63,10 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   consumer needs it; overlapping labels would stack samples at the same place.
 - **Nonlinear geometry**, staged in the [plan](architecture/nonlinear_geometry_plan.md):
   field-backed transforms for deformable registration
-  ([design](architecture/field_transform_design.md), starting from Pirana's deformable
-  transforms, which Pirana adopts only after the release gate), then angular charts
+  ([design](architecture/field_transform_design.md); stage 1a, the transforms, declared
+  inverse pairs and the elastix, ITK and ANTs importers, is implemented, with fast resampling
+  through fields ([plan](architecture/resample_performance_plan.md)); 1b persistence and 1c
+  validity come next; Pirana adopts them only after the release gate), then angular charts
   with chart transitions and a minimal CF reader (rectilinear GCM and celestial grids), then
   curvilinear coordinate fields, then provider adapters (pyproj, Astropy). Angular charts change
   core value objects and need their own reviewed design.

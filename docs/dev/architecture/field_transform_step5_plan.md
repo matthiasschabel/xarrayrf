@@ -1,6 +1,6 @@
 # Field transforms, step 5: benchmark and evaluation backends
 
-**Status:** Implemented (2026-10-13; plan and implementation reviewed by Codex gpt-6-sol; N1 awaits the maintainer)
+**Status:** Implemented (2026-10-13; plan and implementation reviewed by Codex gpt-6-sol; N1 decided by the maintainer: SciPy stays required)
 **Last updated:** 2026-10-13
 **Scope:** Design acceptance test 8 (`benchmarks/field_transform_benchmark.py`) and the choice
 of evaluation backends for `DisplacementFieldTransform` and `BSplineTransform`. The last of the
@@ -116,5 +116,6 @@ and escalated to the maintainer (whether core-only installations may lose field 
 ## Next Steps
 
 1. Done: plan review, implementation, implementation review.
-2. Open: the maintainer's decision on N1 (SciPy for evaluation).
+2. Done: the maintainer kept SciPy required for evaluation (N1, 2026-10-13); the resampling
+   performance work that followed is `resample_performance_plan.md`.
 3. Next: the pole sign-flip halo plan, then stages 1b and 1c.

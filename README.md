@@ -343,6 +343,7 @@ Install from a source checkout:
 git clone https://github.com/matthiasschabel/xarrayrf && cd xarrayrf
 python -m pip install .                 # core, with released xarray
 python -m pip install '.[resample]'     # adds SciPy for resampling
+python -m pip install '.[simpleitk]'    # also lets SimpleITK evaluate displacement fields
 python -m pip install '.[nifti,dicom,ngff,geotiff]'  # format readers
 ```
 

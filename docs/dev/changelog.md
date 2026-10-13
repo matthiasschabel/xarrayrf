@@ -1,5 +1,26 @@
 # Changelog
 
+## [2026-10-13] — QA review of the resampling performance work (8d45132..d6301a3)
+
+- **Problem**: After seven commits changing resampling's dtype policy, execution paths,
+  threading and an optional SimpleITK engine, maintainer documents still described the earlier
+  state: the field-transform step 5 plan listed the SciPy decision (N1) as open, the design's
+  next steps still described stage 1a as future work, the roadmap and the `docs/dev` index did
+  not mention the performance plan, and the README did not list the `simpleitk` extra.
+- **Resolution**: Reviewed root causes (memory layout and stage plumbing, not validation),
+  regression risk (differential tests hold every fast path to the general path; the
+  float32-output break is documented), edge cases (empty and single-sample targets, ranks 1
+  and 4, large origins, support faces, subclass overrides, foreign transforms, Dask, NaN and
+  complex data, block bounds) and probed untested combinations (int16 nearest, float16, declared
+  vector components and box-method validation, each with threads): all consistent. Updated the
+  stale documents above. Remaining known limits are recorded as deferred in the plan: design (a),
+  B-spline engine, single-sample target dims in the engine, and thread scaling bounded by this
+  machine's 4 performance cores and memory bandwidth.
+- **Files affected**: `README.md`, `docs/dev/README.md`, `docs/dev/roadmap.md`,
+  `docs/dev/architecture/field_transform_design.md`,
+  `docs/dev/architecture/field_transform_step5_plan.md`, `docs/dev/changelog.md`.
+- **Reviewed by**: Claude Opus 5.5 (claude-opus-5-5)
+
 ## [2026-10-13] — Resampling precision contract: lattice tolerance on every fast path
 
 - **Problem**: The fused field path demanded exactly uniform grids (1e-12) and the SimpleITK

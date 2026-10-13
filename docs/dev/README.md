@@ -50,6 +50,9 @@ reasons. The stable documents are [the design](../design.md),
 - [field_transform_design.md](architecture/field_transform_design.md): stage 1, displacement,
   position and B-spline transforms on `Grid`, declared inverse pairs, a Jacobian-determinant
   diagnostic, importers, and the deformation models to support after it.
+- [resample_performance_plan.md](architecture/resample_performance_plan.md): closing the
+  resampling gap with SimpleITK: output dtype, row layouts, the fused field path, threads, the
+  SimpleITK field engine, the precision contract and the thread-scaling analysis.
 - [persistence_design.md](architecture/persistence_design.md): schema 1 of `encode`/`decode`,
   provisional until frozen.
 - [cross_domain_cases.md](architecture/cross_domain_cases.md): the DICOM, OME-NGFF, astronomy
