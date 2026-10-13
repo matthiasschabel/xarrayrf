@@ -63,6 +63,10 @@
 
 ### Changed
 
+- Resampling runs on threads: `resample` and `rf.resample_to` take `workers` (None for every
+  core, the default; 1 inline). Dask-backed sources and transforms other than the built-in
+  affine and field transforms run on one. Resampling through a field transform is also
+  faster on one thread: 3-D dense fields about 2× and 2-D about 2.6×.
 - Resampling keeps floating precision: float32 values give a float32 result (float16 gives
   float32) and complex64 gives complex64, instead of float64 and complex128. Positions, weights,
   spline filtering and box sums stay in float64. Cast the values to float64 first for the old

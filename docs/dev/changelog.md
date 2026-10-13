@@ -1,5 +1,19 @@
 # Changelog
 
+## [2026-10-13] — Threaded resampling (performance plan, Step 4)
+
+- **Problem**: Resampling ran on one thread while SimpleITK uses every core.
+- **Resolution**: `workers` on `resample` and `rf.resample_to` (None automatic, 1 inline):
+  general and fused blocks, and slabs of target rows on the affine path, run on a thread pool
+  with at most two blocks per worker submitted, results consumed in order (first failing block
+  reported) and blocks sized to share the position budget. Dask sources default to one worker;
+  transforms other than exact built-in affine and field types run inline. 3-D dense field
+  45 Mpt/s on 10 cores (8.4 on one).
+- **Files affected**: `src/xarrayrf/_resampling.py`, `src/xarrayrf/_resample.py`,
+  `src/xarrayrf/native.py`, `tests/test_resample_threads.py`,
+  `benchmarks/field_resample_benchmark.py`, `docs/core_interface.md`, `CHANGELOG.md`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high)
+
 ## [2026-10-13] — Fused lattice path for resampling through one field (performance plan, Step 3)
 
 - **Problem**: Resampling through a field located every target sample through separate

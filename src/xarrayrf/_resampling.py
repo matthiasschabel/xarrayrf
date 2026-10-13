@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import math
+import os
+from collections import deque
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from itertools import product
+from functools import partial
+from itertools import islice, product
 from numbers import Real
 from types import ModuleType
 from typing import Any, Final, Literal, cast
@@ -61,6 +66,13 @@ POSITION_CACHE_BYTES: Final = 1 << 28
 """Largest size of general-path positions kept across source slices (256 MiB)."""
 
 BLOCK_POINTS: Final = 1 << 20
+
+THREAD_BYTES_PER_POINT: Final = 160
+"""Bytes a worker holds per in-flight target point: indices, positions, field rows and their
+temporaries. In-flight blocks share ``POSITION_CACHE_BYTES`` across workers."""
+
+MIN_THREAD_POINTS: Final = 1 << 16
+"""Target points per worker below which threads cost more than they save."""
 """Target samples located per block: bounds the position arrays to a few tens of megabytes."""
 
 CROP_MARGIN: Final = {0: 1, 1: 1, 3: 24}
@@ -698,6 +710,77 @@ class _Plan:
     target_frame_points: Callable[[int, int], npt.NDArray[np.float64]]
     extend: Callable[[npt.NDArray[np.generic]], npt.NDArray[np.generic]] | None = None
     """Halo extension of each source block for a wrapping or pole-crossing source."""
+    workers: int = 1
+    """Threads over blocks or slabs; 1 runs inline."""
+
+
+def check_workers(workers: object) -> int | None:
+    """Validate ``workers``: None for automatic, or a positive integer."""
+    if workers is None:
+        return None
+    if isinstance(workers, bool) or not isinstance(workers, int | np.integer):
+        raise TypeError(f"workers must be None or a positive integer, got {workers!r}")
+    if workers < 1:
+        raise ValueError(f"workers must be None or a positive integer, got {workers!r}")
+    return int(workers)
+
+
+_THREAD_SAFE_TYPES: Final = (AffineTransform, DisplacementFieldTransform, BSplineTransform)
+"""Point transforms whose evaluation keeps no mutable state; anything else runs inline."""
+
+
+def _thread_safe(*transforms: SupportsPoints | None) -> bool:
+    """Whether every member, after opening built-in composites and pairs, is a known type."""
+    return all(
+        transform is None or all(type(member) in _THREAD_SAFE_TYPES for member in _chain(transform))
+        for transform in transforms
+    )
+
+
+def _thread_count(workers: int | None, total: int, safe: bool) -> int:
+    """The worker count: as requested, or automatic (every core, at least
+    ``MIN_THREAD_POINTS`` each); one when the transforms are not known to be thread-safe."""
+    if not safe:
+        return 1
+    if workers is not None:
+        return workers
+    return max(1, min(os.cpu_count() or 1, total // MIN_THREAD_POINTS))
+
+
+def _thread_block(block_points: int, total: int, workers: int) -> int:
+    """Points per block: ``block_points`` inline; threaded, small enough for every worker's
+    in-flight block to share the position budget and for at least two blocks per worker."""
+    if workers == 1:
+        return block_points
+    budget = POSITION_CACHE_BYTES // (THREAD_BYTES_PER_POINT * workers)
+    return max(1, min(block_points, budget, math.ceil(total / (2 * workers))))
+
+
+def _run[T](plan: _Plan, function: Callable[[T], object], items: Iterable[T]) -> None:
+    """Apply ``function`` to each item, on ``plan.workers`` threads when there are several.
+
+    At most two items per worker are submitted at a time, so queued work and the buffers of
+    failed items stay bounded however many items there are. Results are consumed in item
+    order, so the first failing item's exception is raised whatever the threads' timing;
+    queued items are then cancelled.
+    """
+    if plan.workers == 1:
+        for item in items:
+            function(item)
+        return
+    remaining = iter(items)
+    pool = ThreadPoolExecutor(max_workers=plan.workers)
+    pending = deque(pool.submit(function, item) for item in islice(remaining, 2 * plan.workers))
+    try:
+        while pending:
+            pending.popleft().result()
+            pending.extend(pool.submit(function, item) for item in islice(remaining, 1))
+    except BaseException:
+        for future in pending:
+            future.cancel()
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
 
 
 def check_options(
@@ -756,6 +839,7 @@ def plan(
     min_coverage: float = 0.5,
     adoption_suffices: Callable[[AffineTransform], bool] | None = None,
     pole_halos: bool = True,
+    workers: int | None = None,
 ) -> _Plan:
     """Plan interpolation for trailing source axes and output axes in explicit storage order.
 
@@ -766,12 +850,14 @@ def plan(
     ``adoption_suffices`` is called only for the anonymous-frame diagnostic; without it,
     adoption is treated as insufficient. ``pole_halos`` allows interpolation across a pole of
     a global longitude/latitude source; it is off for declared components, whose basis flips
-    there.
+    there. ``workers`` is None for automatic threads, or a count; transforms not known to be
+    thread-safe always run inline.
 
     Raises:
         ValueError: If either storage order does not name exactly its sampling's dims.
     """
     order = check_options(method, block_points, support, min_coverage)
+    workers = check_workers(workers)
     check_box_values(method, dtype, domain)
     for name, storage_order, sampling in (
         ("source_order", source_order, source),
@@ -811,6 +897,7 @@ def plan(
     check_domain(domain)
     lattice_map = None
     position_map = None
+    fused = False
     box = None
     periodic: PeriodicAxes | None = None
     if total and any(source.sizes[dim] == 0 for dim in source_dims):
@@ -844,8 +931,22 @@ def plan(
                 _field_lattice_map(source, target, source_dims, target_dims, frame_map, domain)
                 if periodic is None
                 else None
-            ) or _general_map(source, target, source_dims, target_dims, frame_map, domain, periodic)
+            )
+            # The fused map evaluates only the built-in field; the general one evaluates the
+            # target grid, the frame map and the source's inverse.
+            fused = position_map is not None
+            position_map = position_map or _general_map(
+                source, target, source_dims, target_dims, frame_map, domain, periodic
+            )
     output_dtype = _output_dtype(dtype, method, fill_value)
+    safe = (
+        box is not None
+        or lattice_map is not None
+        or fused
+        or _thread_safe(frame_map, target.transform, source.transform)
+    )
+    threads = 1 if box is not None else _thread_count(workers, total, safe)
+    block_points = _thread_block(block_points, total, threads)
     source_shape = tuple(source.sizes[dim] for dim in source_dims) if total else ()
     window = None
     if lattice_map is not None:
@@ -913,6 +1014,7 @@ def plan(
         frame_map=frame_map,
         target_frame_points=_target_frame_points(target, target_dims, target_shape),
         extend=extend,
+        workers=threads,
     )
 
 
@@ -1070,27 +1172,10 @@ def _lattice_block(
         filtered, missing = (
             _linear_inputs(volume) if plan.order == 1 else (_coefficients(plan, volume), None)
         )
-        plan.ndimage.affine_transform(
-            filtered,
-            lattice_map.linear,
-            offset=lattice_map.offset,
-            output_shape=target_shape,
-            output=output[index],
-            order=plan.order,
-            mode="nearest",
-            prefilter=False,
-        )
+        _affine_slabs(plan, lattice_map, filtered, output[index])
         if missing is not None:
-            weights = plan.ndimage.affine_transform(
-                missing,
-                lattice_map.linear,
-                offset=lattice_map.offset,
-                output_shape=target_shape,
-                output=_weight_dtype(plan),
-                order=plan.order,
-                mode="nearest",
-                prefilter=False,
-            )
+            weights = np.empty(target_shape, dtype=_weight_dtype(plan))
+            _affine_slabs(plan, lattice_map, missing, weights)
             _restore_missing(output[index], weights)
             del weights
         output[index][outside] = plan.fill_value
@@ -1107,6 +1192,39 @@ def _lattice_block(
     return output.reshape((*leading, *plan.target_shape))
 
 
+def _affine_slabs(
+    plan: _Plan,
+    lattice_map: _LatticeMap,
+    values: npt.NDArray[np.generic],
+    output: npt.NDArray[np.generic],
+) -> None:
+    """``affine_transform`` into ``output``, in slabs along its first axis on several workers.
+
+    A slab starting at target row ``a`` is the same map with offset ``offset + linear[:, 0] a``;
+    positions agree with the whole pass to roundoff.
+    """
+    rows = output.shape[0]
+    count = min(rows, 2 * plan.workers) if plan.workers > 1 else 1
+    edges = np.linspace(0, rows, count + 1).astype(int)
+
+    def slab(bounds: tuple[int, int]) -> None:
+        start, stop = bounds
+        if start == stop:
+            return
+        plan.ndimage.affine_transform(
+            values,
+            lattice_map.linear,
+            offset=lattice_map.offset + lattice_map.linear[:, 0] * start,
+            output_shape=(stop - start, *output.shape[1:]),
+            output=output[start:stop],
+            order=plan.order,
+            mode="nearest",
+            prefilter=False,
+        )
+
+    _run(plan, slab, list(zip(edges[:-1].tolist(), edges[1:].tolist(), strict=True)))
+
+
 def _general_block(
     plan: _Plan, slices: list[npt.NDArray[np.generic]], leading: tuple[int, ...]
 ) -> npt.NDArray[np.generic]:
@@ -1119,27 +1237,42 @@ def _general_block(
     needs_masks = plan.order == 1 and any(np.isnan(volume).any() for volume in slices)
     if plan.order <= 1 and not needs_masks:
         # No coefficients to hold: locate each block once and reuse it for every slice.
-        for start, stop in blocks:
+        def every_slice(block: tuple[int, int]) -> None:
+            start, stop = block
             positions = _block_positions(plan, start, stop)
             for index, volume in enumerate(slices):
                 flat[index, start:stop] = _interpolate(plan, volume, positions, stop - start)
-    else:
-        # Hold one slice's coefficients or NaN buffers at a time; keep positions only
-        # when they fit the cache budget, otherwise locate again per slice.
-        cache = plan.total * len(plan.source_dims) * 8 <= POSITION_CACHE_BYTES
-        cached = [_block_positions(plan, start, stop) for start, stop in blocks] if cache else None
-        for index, volume in enumerate(slices):
-            filtered, missing = (
-                _linear_inputs(volume) if plan.order == 1 else (_coefficients(plan, volume), None)
-            )
-            for number, (start, stop) in enumerate(blocks):
-                positions = (
-                    cached[number] if cached is not None else _block_positions(plan, start, stop)
-                )
-                flat[index, start:stop] = _interpolate(
-                    plan, filtered, positions, stop - start, missing
-                )
-            del filtered, missing
+
+        _run(plan, every_slice, blocks)
+        return flat.reshape((*leading, *plan.target_shape))
+    # Hold one slice's coefficients or NaN buffers at a time; keep positions only when they
+    # fit the cache budget, otherwise locate again per slice.
+    cached: list[npt.NDArray[np.float64]] | None = None
+    if plan.total * len(plan.source_dims) * 8 <= POSITION_CACHE_BYTES:
+        cached = [np.empty(0)] * len(blocks)
+
+        def locate(number: int) -> None:
+            assert cached is not None
+            cached[number] = _block_positions(plan, *blocks[number])
+
+        _run(plan, locate, range(len(blocks)))
+
+    def one_slice(
+        index: int,
+        filtered: npt.NDArray[np.generic],
+        missing: npt.NDArray[np.generic] | None,
+        number: int,
+    ) -> None:
+        start, stop = blocks[number]
+        positions = cached[number] if cached is not None else _block_positions(plan, start, stop)
+        flat[index, start:stop] = _interpolate(plan, filtered, positions, stop - start, missing)
+
+    for index, volume in enumerate(slices):
+        filtered, missing = (
+            _linear_inputs(volume) if plan.order == 1 else (_coefficients(plan, volume), None)
+        )
+        _run(plan, partial(one_slice, index, filtered, missing), range(len(blocks)))
+        del filtered, missing
     return flat.reshape((*leading, *plan.target_shape))
 
 

@@ -1203,6 +1203,16 @@ Performance is part of the contract:
   Boundary decisions agree with the general path to roundoff (within about `1e-9` index units
   of a support face or domain edge). A 256³ image through a 128³ dense field resamples at about
   8 Mpt/s on one thread, against SimpleITK's 36 (`benchmarks/field_resample_benchmark.py`).
+- `workers` (on `resample` and `rf.resample_to`) runs blocks of target samples, or on the
+  affine path slabs of target rows, on threads; SciPy and NumPy release the GIL there. The
+  default, None, uses every core with at least 65536 target samples each, in blocks small
+  enough that in-flight buffers share the 256 MiB position budget; `workers=1` runs inline.
+  A Dask-backed source defaults to one worker, leaving parallelism to Dask's tasks, and a
+  frame map, target or source transform that is not a built-in affine or field transform
+  (after opening built-in composites and declared pairs) always runs inline, because its
+  thread safety is unknown. Results equal inline ones (to roundoff on the affine path's
+  slabs), and a failure reports the first failing block. On 10 cores the field above
+  resamples at about 45 Mpt/s, against SimpleITK's 216 on its default threads.
 - Otherwise target positions are processed in blocks of `block_points` samples (bounded
   memory), positions are reused for every non-geometry slice when no linear NaN buffers are
   needed, and values are interpolated by `scipy.ndimage.map_coordinates`.

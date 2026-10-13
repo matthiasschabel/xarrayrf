@@ -12,7 +12,7 @@ SimpleITK ran, the largest difference from it:
     uv run --no-sync --with simpleitk python benchmarks/field_resample_benchmark.py --memory
 
 Native thread pools (OpenMP, BLAS) are pinned to one thread unless the environment sets them;
-SimpleITK runs with one thread and with its default count. Results go to stdout, progress to
+xarrayrf and SimpleITK each run with one thread and with their default count. Results go to stdout, progress to
 stderr.
 """
 
@@ -30,6 +30,7 @@ import time  # noqa: E402
 import tracemalloc  # noqa: E402
 from collections.abc import Callable  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
+from functools import partial  # noqa: E402
 from typing import Any  # noqa: E402
 
 import numpy as np  # noqa: E402
@@ -196,14 +197,22 @@ def run_case(
             sitk_transform.SetTranslation(translation.tolist())
     points = image**dims
     label = f"{name}, {np.dtype(dtype).name}"
-    ours = measure(
-        f"xarrayrf {label}",
-        lambda: moving.rf.resample_to(
-            fixed, transform=transform, method="linear", domain="cells", fill_value=FILL
-        ),
-        points=points,
-        options=options,
-    )
+
+    def resample(workers: int | None) -> Any:
+        return moving.rf.resample_to(
+            fixed,
+            transform=transform,
+            method="linear",
+            domain="cells",
+            fill_value=FILL,
+            workers=workers,
+        )
+
+    for workers in (1, None):
+        count = "1 thread" if workers == 1 else f"{os.cpu_count()} threads"
+        ours = measure(
+            f"xarrayrf {label}, {count}", partial(resample, workers), points=points, options=options
+        )
     if sitk_transform is None:
         return
     moving_itk = sitk_image(sitk, values, step, origin)

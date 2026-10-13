@@ -78,6 +78,7 @@ def resample(
     output_component_basis: ComponentBasis | None = None,
     component_reorientation: ComponentReorientation | None = None,
     units: str | None = None,
+    workers: int | None = None,
 ) -> xr.DataArray:
     """Resample the source array's values onto a target Geometry or Grid.
 
@@ -151,7 +152,12 @@ def resample(
     samples, and ``scipy.ndimage.map_coordinates`` interpolates; for nearest and linear each
     block's positions are reused for every slice when no linear NaN handling is needed.
     Linear NaN buffers and cubic spline coefficients are prepared for one source slice at a
-    time; positions are cached within a bounded budget or recomputed per slice. A Dask-backed
+    time; positions are cached within a bounded budget or recomputed per slice. Blocks (or,
+    on the affine path, slabs of target rows) run on ``workers`` threads, by default every
+    core with at least 65536 target samples each, in smaller blocks so that in-flight buffers
+    share the 256 MiB position budget; a Dask-backed source defaults to one, leaving
+    parallelism to Dask, and a transform that is not a built-in affine or field transform runs
+    on one. A Dask-backed
     source is processed lazily, one task per chunk of its non-geometry dimensions; positions
     and masks are shared within a task, not across tasks.
     Install the ``resample`` extra for scipy.
@@ -175,6 +181,7 @@ def resample(
             ``"polar_orthogonal_factor"`` or a callable, as above.
         units: For declared components: the result's ``attrs["units"]``, required exactly when
             the source and output bases' units differ.
+        workers: Threads for interpolation: None (default) for automatic, 1 to run inline.
 
     Returns:
         The resampled values over the source's non-geometry dimensions and the target's geometry
@@ -225,6 +232,7 @@ def resample(
         min_coverage=min_coverage,
         block_points=block_points,
         components=request,
+        workers=workers,
     )
     if declaration is None:
         return result
@@ -246,6 +254,7 @@ def _resample_with_intervals(
     min_coverage: float = 0.5,
     block_points: int = BLOCK_POINTS,
     components: ComponentRequest | None = None,
+    workers: int | None = None,
 ) -> tuple[
     xr.DataArray,
     dict[str, npt.NDArray[np.float64]],
@@ -306,6 +315,8 @@ def _resample_with_intervals(
         adoption_suffices=adoption_suffices,
         # Components in a basis that varies by position (east/north, the chart basis) reverse
         # across a pole; in a constant Cartesian basis they are continuous there.
+        # Dask already runs one task per chunk in parallel; threads inside would oversubscribe.
+        workers=1 if workers is None and source_array.chunks is not None else workers,
         pole_halos=components is None
         or all(
             isinstance(basis, ReferenceFrame)

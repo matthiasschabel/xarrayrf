@@ -581,6 +581,7 @@ class _ReferenceFrameAccessor:
         output_component_basis: ComponentBasis | None = None,
         component_reorientation: ComponentReorientation | None = None,
         units: str | None = None,
+        workers: int | None = None,
     ) -> xr.DataArray: ...
 
     @overload
@@ -598,6 +599,7 @@ class _ReferenceFrameAccessor:
         output_component_basis: ComponentBasis | None = None,
         component_reorientation: ComponentReorientation | None = None,
         units: str | None = None,
+        workers: int | None = None,
     ) -> tuple[xr.DataArray, xr.DataArray]: ...
 
     @overload
@@ -615,6 +617,7 @@ class _ReferenceFrameAccessor:
         output_component_basis: ComponentBasis | None = None,
         component_reorientation: ComponentReorientation | None = None,
         units: str | None = None,
+        workers: int | None = None,
     ) -> xr.DataArray | tuple[xr.DataArray, xr.DataArray]: ...
 
     def resample_to(
@@ -631,6 +634,7 @@ class _ReferenceFrameAccessor:
         output_component_basis: ComponentBasis | None = None,
         component_reorientation: ComponentReorientation | None = None,
         units: str | None = None,
+        workers: int | None = None,
     ) -> xr.DataArray | tuple[xr.DataArray, xr.DataArray]:
         """Resample values onto a target geometry and bind them to its frame.
 
@@ -673,6 +677,8 @@ class _ReferenceFrameAccessor:
             units: For declared tensor components: the result's ``attrs["units"]``, required
                 exactly when the source and output bases' units differ; it replaces the
                 source's.
+            workers: Threads for interpolation: None (default) for automatic, 1 to run
+                inline; see :func:`xarrayrf.resample`.
 
         Returns:
             Framed values with target geometry, source non-geometry coordinates, name and
@@ -712,6 +718,7 @@ class _ReferenceFrameAccessor:
             support=support,
             min_coverage=min_coverage,
             components=request,
+            workers=workers,
         )
         result.name = self._array.name
         result.attrs = {

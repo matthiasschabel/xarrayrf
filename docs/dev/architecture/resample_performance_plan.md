@@ -1,6 +1,6 @@
 # Resampling performance: closing the gap with SimpleITK
 
-**Status:** Active (Steps 0–3 implemented; Step 4 next)
+**Status:** Active (Steps 0–4 implemented; Step 5 next)
 **Last updated:** 2026-10-13
 **Scope:** Point-method resampling (`nearest`, `linear`, `cubic`) on the general path in
 `_resampling.py`; field transform evaluation in `_field_transform.py`; source location in
@@ -226,6 +226,27 @@ Measured (Mpt/s, float32): 3-D dense field 7.77 (5.57 after Step 2), 2-D dense f
 - Deterministic errors: the lowest failing block's exception is raised.
 - Target: 2–4× over single-threaded, measured at 1, 2, 4, 8 workers.
 
+**As implemented:** `check_workers`, `_thread_safe`, `_thread_count`, `_thread_block` and
+`_run` in `_resampling.py`; `workers` on `resample`, `rf.resample_to` and the internal plan.
+Thread-safety eligibility opens only the exact built-in composites and pairs and accepts
+`AffineTransform`, `DisplacementFieldTransform` and `BSplineTransform`; the general path also
+checks the target and source sampling transforms. The affine lattice path threads too, in
+slabs of target rows (`_affine_slabs`), which Step 0's baseline showed 6× behind SimpleITK.
+`_run` keeps at most two blocks per worker submitted (Step 4 review B1: `pool.map` submitted
+every block at once, so queued futures and failed blocks' buffers were unbounded), consumes
+results in order, so the first failing block's error is raised, and cancels queued work. Blocks shrink when threaded to `POSITION_CACHE_BYTES / (160 B × workers)` points,
+and to at least two per worker. Automatic threads need 65536 target samples per worker.
+Tests: `tests/test_resample_threads.py`.
+
+Measured (Mpt/s, float32, 1 thread / 10 threads on 10 cores; SimpleITK 1 / 10):
+
+| Case | xarrayrf | SimpleITK |
+|---|---|---|
+| 3-D dense field | 8.4 / 45.0 | 37.4 / 216 |
+| 3-D B-spline field | 1.9 / 11.0 | — |
+| 3-D affine | 35.6 / 102 | 216 / 994 |
+| 2-D dense field | 16.9 / 68.4 | 71.3 / 369 |
+
 ### Step 5: SimpleITK engine where valid
 
 Automatic when SimpleITK is importable (new extra `xarrayrf[simpleitk]`); otherwise Steps 2–4.
@@ -303,4 +324,6 @@ Plan review (Codex gpt-6-astra, high, 2026-10-13): Revise.
    values after the convergence pass maintained it; both regressions pass).
 5. Done: Step 3 (implementation review: B1 exact-step lattices, B2 exact built-in types, N1
    coverage; accepted on the second pass).
-6. Steps 4 and 5, each with an implementation review, docs and changelog.
+6. Done: Step 4 (implementation review: B1 bounded submission, N1 Dask-default test, N2
+   coverage; accepted on the second pass).
+7. Step 5, with an implementation review, docs and changelog.
