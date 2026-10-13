@@ -13,6 +13,7 @@ from numpy.testing import assert_allclose, assert_array_equal
 from xarray.indexes import RangeIndex
 
 import xarrayrf as xrf
+import xarrayrf.native  # register the DataArray accessor
 
 pytest.importorskip("scipy", minversion="1.18")
 ndimage = pytest.importorskip("scipy.ndimage")
