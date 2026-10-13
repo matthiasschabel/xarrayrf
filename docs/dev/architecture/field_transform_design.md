@@ -1,7 +1,7 @@
 # Field-backed transforms
 
-**Status:** Active (design; not started)
-**Last updated:** 2026-10-09
+**Status:** Active (stage 1a in progress: step 1 implemented)
+**Last updated:** 2026-10-12
 **Scope:** Stage 1 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): transforms
 between Cartesian frames whose values come from a sampled field or a B-spline control grid
 (deformable registration), declared inverse pairs, a Jacobian-determinant diagnostic, importers,
@@ -383,6 +383,15 @@ dependency for the fixtures it can regenerate.
   B-spline `.h5` reader), drafted for the maintainer to submit, never posted by an agent.
 
 ## Open Decisions
+
+Decisions 1 to 3 were settled with the maintainer on 2026-10-12:
+- Names are kept as written (the pair class is named in step 2).
+- ITK B-spline files are deferred.
+- Importers go in one subpackage per engine: `xarrayrf.elastix`, `xarrayrf.itk` and
+  `xarrayrf.ants`.
+- Where the container-level API lives is decided in 1b.
+
+The steps of 1a are in [the step 1 plan](field_transform_step1_plan.md).
 
 1. Names: `DisplacementFieldTransform`, `PositionFieldTransform`, `BSplineTransform`, the pair
    class, `declared_inverse()`, the masked-evaluation method and the determinant helper.
