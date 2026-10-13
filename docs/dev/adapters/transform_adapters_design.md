@@ -1,6 +1,6 @@
 # Transform adapters
 
-**Status:** Active (ITK-family codec scheduled with stage 1a of the
+**Status:** Active (elastix, ITK and ANTs importers implemented in stage 1a of the
 [field-backed transforms](../architecture/field_transform_design.md); CASTalign deferred)
 **Last updated:** 2026-10-09
 **Scope:** A proposed family of optional adapters that turn registration results from external
@@ -118,9 +118,10 @@ Direction errors need no extra check. Named endpoints turn a reversed transform 
   converge on one.
 - **nitransforms as the engine.** Rejected for evaluation (float32 points, fixed cubic
   interpolation, silent identity outside the domain; see the
-  [field-backed transforms design](../architecture/field_transform_design.md)). Its `io` layer is
-  adopted as the ITK-family codec's reader for formats Pirana's existing elastix and ANTs
-  parsers do not cover, and it is a test oracle.
+  [field-backed transforms design](../architecture/field_transform_design.md)). Its `io` layer
+  was adopted as the ITK-family reader, then replaced by direct float64 readers checked against
+  SimpleITK ([step 4](../architecture/field_transform_step4_plan.md)): it parses `.tfm`
+  parameters and centres as float32 and does not check text transform types.
 
 ## Deferred Work
 

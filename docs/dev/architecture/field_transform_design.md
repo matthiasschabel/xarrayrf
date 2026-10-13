@@ -1,6 +1,6 @@
 # Field-backed transforms
 
-**Status:** Active (stage 1a in progress: steps 1 to 3 implemented)
+**Status:** Active (stage 1a in progress: steps 1 to 4 implemented)
 **Last updated:** 2026-10-13
 **Scope:** Stage 1 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): transforms
 between Cartesian frames whose values come from a sampled field or a B-spline control grid
@@ -253,13 +253,13 @@ consistent with the rule that identity is never inferred.
   B-spline transforms, including the component-major coefficient layout. It needs no ITK
   runtime. Implemented in [step 3](field_transform_step3_plan.md): transformix's B-spline
   support excludes the upper face, so `BSplineTransform` declares `support="half-open"`.
-- **ITK and ANTs files:** read through `nitransforms.io` (the ITK-family extra depends on
-  `nitransforms>=25.1` and `nibabel>=5.4`, which brings h5py and a NumPy 2 floor within that
-  extra only): affine `.mat`, NIfTI displacement fields and composite `.h5` with affine and
-  displacement-field members. nitransforms works in RAS millimetres; the importer declares that
-  coordinate system explicitly. ITK B-spline files are not covered (open decision 2). Pirana's
-  evaluation-based handling of ITK linear types (Euler, Similarity, Affine with any center) is
-  checked against nitransforms' decoding by fixtures before it is relied on.
+- **ITK and ANTs files:** read directly with SciPy (`.mat`), h5py (`.h5`) and nibabel (NIfTI
+  displacement fields), in float64, with the transform type checked; revised in the
+  [step 4 plan](field_transform_step4_plan.md), which found that `nitransforms.io` parses `.tfm`
+  parameters and all centres as float32, does not read a text file's transform type, and is
+  3-D only. Text, MATLAB and HDF5 files, composites, and the affine, translation, Euler,
+  versor-rigid and similarity types are checked against SimpleITK. ITK B-spline files are not
+  covered (open decision 2).
 - **ANTs direction:** ITK composites apply the last-added stage first, so the forward output
   (`1Warp.nii.gz` plus `0GenericAffine.mat`) applies the warp to the fixed point, then the
   affine, mapping fixed to moving; that is also the transform that resamples the moving image
@@ -267,7 +267,7 @@ consistent with the rule that identity is never inferred.
   declared pair sits between the fixed frame and the intermediate frame before the affine. The
   importer builds the whole chain with explicit fixed, intermediate and moving frames, so the
   affine's position in each direction is fixed by construction.
-- **FSL** warps come from the same nitransforms layer, after golden tests for their conventions.
+- **FSL** warps follow later, with golden tests for their conventions.
 - **NGFF (1c):** `xarrayrf.ngff` imports `displacements`, `coordinates` and `bijection` (as a
   declared pair), including inside `sequence`. NGFF names a multiscale group holding the field,
   with its own coordinate transformations from array index to the field's input space and a
@@ -355,7 +355,7 @@ dependency for the fixtures it can regenerate.
 | Alternative | Why not |
 |---|---|
 | nitransforms transform classes as the engine | float32 points, fixed cubic interpolation, silent identity outside the domain, per-point Python loop for B-splines, mutable, no Jacobian (see Context) |
-| Hand-written NIfTI/ANTs/FSL readers | nitransforms already handles the conventions and is light; reimplementing them buys only maintenance |
+| nitransforms `io` as the ITK/ANTs reader | Chosen first, reversed in step 4: float32 parameters and centres, unchecked text transform types, 3-D only; the direct readers are small and checked against SimpleITK |
 | Moving Pirana's ANTs reader | It reads files through antspyx, far too heavy a dependency for xarrayrf |
 | A new lattice declaration for the sampling grid | Drops nonuniform slices and slab domains; `Grid` already provides them |
 | `Grid`'s `outside` words as the exterior vocabulary | They are lookup policies; ITK's half-open support, edge clamping and identity exterior are not expressible with them |

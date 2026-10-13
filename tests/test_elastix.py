@@ -101,6 +101,8 @@ def test_imported_chains_match_transformix(name: str) -> None:
         for entry in case["maps"]
     ):
         assert isinstance(result.transform, xrf.AffineTransform)
+    elif stages == 1:
+        assert isinstance(result.transform, xrf.BSplineTransform)
     else:
         assert isinstance(result.transform, xrf.CompositeTransform)
         assert len(result.transform.transforms) == stages
@@ -129,9 +131,7 @@ def test_parameter_files_round_trip_through_the_reader(name: str, tmp_path: Path
 def test_bspline_faces_match_transformix_up_to_roundoff(name: str) -> None:
     case = FIXTURE[name]
     # The generator probes the B-spline stage alone.
-    spline = imported(case["maps"][-1:], case).transform
-    assert isinstance(spline, xrf.CompositeTransform)
-    (member,) = spline.transforms
+    member = spline = imported(case["maps"][-1:], case).transform
     assert isinstance(member, xrf.BSplineTransform)
     assert member.support == "half-open" and member.outside == "identity"
     points = np.asarray(case["face_points"])
@@ -223,7 +223,7 @@ def test_space_is_required_beyond_three_dimensions_and_must_fit() -> None:
     fixed, moving = frames(PLANE)
     with pytest.raises(ValueError, match="space is required for 2-D maps"):
         rfe.transform_from_parameter_maps(case["maps"], fixed=fixed, moving=moving)
-    with pytest.raises(ValueError, match="space has 3 axes but the maps are 2-D"):
+    with pytest.raises(ValueError, match="space has 3 axes but the elastix transform is 2-D"):
         rfe.transform_from_parameter_maps(case["maps"], fixed=fixed, moving=moving, space=LPS_MM)
     with pytest.raises(TypeError, match="space must be a CoordinateSystem"):
         rfe.transform_from_parameter_maps(

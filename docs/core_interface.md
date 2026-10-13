@@ -1263,8 +1263,8 @@ read from different formats compare equal; the core itself never relabels a unit
 ## Adapters
 
 Format adapters are optional subpackages of the xarrayrf distribution, each with an extra
-(`xarrayrf[dicom]`, `xarrayrf[nifti]`, `xarrayrf[ngff]`, `xarrayrf[geotiff]`; `xarrayrf.cf` and
-`xarrayrf.elastix` need none). They share
+(`xarrayrf[dicom]`, `xarrayrf[nifti]`, `xarrayrf[ngff]`, `xarrayrf[geotiff]`, `xarrayrf[itk]`,
+`xarrayrf[ants]`; `xarrayrf.cf` and `xarrayrf.elastix` need none). They share
 `xarrayrf.native.frame_array` (duck-array and shape check, then framing on the imported
 `Grid`), `index_coordinate`, and the `CoordinateSpec`,
 `Report` and `DuckArray` aliases.
@@ -1562,6 +1562,53 @@ moved = moving_image.rf.resample_to(fixed_image, transform=imported.transform)
   includes. elastix's `RecursiveBSplineTransform` takes its support from a nonzero `GridIndex`
   but evaluates as if it were zero, so a nonzero index is refused for it.
 - Report codes: `stage`, `coordinate-system-change`, `bspline-support`.
+
+**ITK and ANTs import:** `xarrayrf.itk` (`xarrayrf[itk]`: SciPy, h5py, nibabel) reads ITK
+transform files in float64, with no ITK runtime; `xarrayrf.ants` (`xarrayrf[ants]`) assembles an
+ANTs registration from them.
+
+```python
+from xarrayrf import ants, itk
+
+affine = itk.read_transform("rigid.tfm", fixed=fixed, moving=moving).transform
+result = ants.transform_from_registration(
+    fixed=fixed,
+    moving=moving,
+    affine="out/0GenericAffine.mat",
+    warp="out/1Warp.nii.gz",
+    inverse_warp="out/1InverseWarp.nii.gz",
+)
+moved = moving_image.rf.resample_to(fixed_image, transform=result.transform)
+back = result.transform.declared_inverse()  # moving -> fixed, ANTs' own inverse
+```
+
+- `itk.read_transform(path, *, fixed, moving, space=None, intermediate_frames=None)` reads
+  `.tfm`/`.txt`, `.mat`, `.h5` and `.nii`/`.nii.gz` displacement fields. The result maps fixed
+  points to moving points, as ITK's transform does. A composite applies its last-added member
+  first, as ITK does. Linear members collapse to one `AffineTransform`, and a single field is
+  returned as itself.
+- Types: `AffineTransform`, `MatrixOffsetTransformBase`, `TranslationTransform`,
+  `IdentityTransform`, `Euler2DTransform`/`Rigid2DTransform`, `Euler3DTransform` (with its
+  `ComputeZYX` flag), `VersorRigid3DTransform`, `Similarity3DTransform` and
+  `DisplacementFieldTransform`, in 2-D or 3-D, double or float. Any other type, ITK B-spline
+  files among them, is refused, as is a text file holding several transforms without a
+  composite header.
+- Displacement fields become `DisplacementFieldTransform(..., outside="identity")`. In NIfTI the
+  field is `(x, y, z, 1, 3)` or `(x, y, 1, 1, 2)` with LPS vectors and a coded sform or qform.
+  When both are coded they must agree. The spatial unit must be millimetres; an unknown unit is
+  read as millimetres and reported. NIfTI keeps its geometry in float32, and ITK
+  re-orthonormalizes the direction, so points can differ from ITK's by about 1e-8 of their
+  distance from the origin.
+- `ants.transform_from_registration(*, fixed, moving, affine=None, warp=None,
+  inverse_warp=None, intermediate=None, space=None)` chains the warp (fixed to intermediate)
+  and then the affine (intermediate to moving), as `antsApplyTransforms` applies
+  `[1Warp, 0GenericAffine]`. With `inverse_warp`, the warp is the forward direction of a
+  `DeclaredInversePair`. `declared_inverse()` is then ANTs' inverse, and
+  `round_trip_residual_report` measures how well it holds.
+- `space` is as in `xarrayrf.elastix`: LPS in mm by default for 3-D, required for 2-D. Frames in
+  another system are joined by `coordinate_system_change`.
+- Report codes: `stage`, `coordinate-system-change`, `declared-inverse`, `nifti-intent`,
+  `nifti-units`.
 
 Application policy stays in the application: multi-image series assembly, pixel handling,
 regions of interest, display conventions and the choice of resampling targets.

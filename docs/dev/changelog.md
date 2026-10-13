@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026-10-13] — Field transforms, step 4: ITK and ANTs importers
+
+- **Problem**: ITK and ANTs registration results (transform files, warps, inverse warps) could
+  not be read into xarrayrf; the design's choice of `nitransforms.io` turned out to parse `.tfm`
+  parameters and centres as float32, ignore text transform types and support 3-D only.
+- **Resolution**:
+  - `xarrayrf.itk` (`_files.py`, `_import.py`): direct float64 readers for text, MATLAB, HDF5
+    and NIfTI files, composites in ITK's last-added-first order, linear types and displacement
+    fields, NIfTI units and xform rules.
+  - `xarrayrf.ants`: the warp-then-affine chain with the inverse warp as a
+    `DeclaredInversePair`, so `declared_inverse()` is ANTs' inverse.
+  - `_transform_import.py`: the frame joining shared by the elastix, ITK and ANTs importers; a
+    single imported member is returned as itself.
+  - SimpleITK and antspyx fixture from `tools/build_itk_transform_fixture.py`.
+  - Plan reviewed by Codex: NIfTI units and xform rules, the 2-D projection, and a fixture
+    matrix per reader.
+- **Files affected**: `src/xarrayrf/itk/`, `src/xarrayrf/ants/`, `src/xarrayrf/_transform_import.py`,
+  `src/xarrayrf/elastix/_import.py`, `tests/test_itk.py`, `tests/test_ants.py`,
+  `tests/test_elastix.py`, `tests/test_import_boundary.py`, `tests/fixtures/itk/`,
+  `tools/build_itk_transform_fixture.py`, `pyproject.toml`, `uv.lock`, docs.
+- **Reviewed by**: Codex gpt-6-sol (reasoning effort high)
+
 ## [2026-10-13] — Field transforms, step 3: the elastix importer
 
 - **Problem**: elastix results could only be applied through Pirana or ITK; xarrayrf had no

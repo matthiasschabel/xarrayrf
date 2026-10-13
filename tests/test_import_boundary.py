@@ -187,7 +187,7 @@ def import_names(source: str) -> set[str]:
 
 
 def forbidden_core_imports(source: str) -> set[str]:
-    forbidden = {"anatomy", "nifti", "dicom", "ngff", "geotiff", "cf", "elastix"}
+    forbidden = {"anatomy", "nifti", "dicom", "ngff", "geotiff", "cf", "elastix", "itk", "ants"}
     return {
         name
         for name in import_names(source)
@@ -207,6 +207,8 @@ def forbidden_sampling_imports(source: str) -> set[str]:
         "geotiff",
         "cf",
         "elastix",
+        "itk",
+        "ants",
     }
     names = import_names(source)
     for node in ast.walk(ast.parse(source)):
@@ -221,7 +223,8 @@ def forbidden_sampling_imports(source: str) -> set[str]:
 
 def test_sampling_import_scan_can_fail() -> None:
     for name in sorted(
-        INTEGRATION_MODULES | {"native", "nifti", "dicom", "ngff", "geotiff", "cf", "elastix"}
+        INTEGRATION_MODULES
+        | {"native", "nifti", "dicom", "ngff", "geotiff", "cf", "elastix", "itk", "ants"}
     ):
         assert forbidden_sampling_imports(f"def f():\n    from .{name} import value\n") == {
             f".{name}"
@@ -356,6 +359,24 @@ def forbidden_elastix_imports(source: str) -> set[str]:
     }
 
 
+def forbidden_itk_imports(source: str, *, ants: bool = False) -> set[str]:
+    """ITK reads with SciPy, h5py and nibabel; ANTs reads through xarrayrf.itk alone."""
+    allowed = sys.stdlib_module_names | {"numpy"}
+    if not ants:
+        allowed |= {"scipy", "h5py", "nibabel"}
+    return {
+        name
+        for name in import_names(source)
+        if not (
+            name.split(".")[0] in allowed
+            or name in {"xarrayrf", "xarrayrf.anatomy"}
+            or (ants and name == "xarrayrf.itk")
+            or name.startswith("xarrayrf._")
+            or (name.startswith(".") and not name.startswith(".."))
+        )
+    }
+
+
 def test_core_never_imports_anatomy_or_nifti() -> None:
     package = Path(xarrayrf.__file__).parent
     core = [package / "__init__.py", *package.glob("_*.py")]
@@ -397,6 +418,14 @@ def test_adapter_imports_stay_within_their_boundaries() -> None:
     assert elastix, "no elastix modules found; the check would pass vacuously"
     elastix_offenders = {path.name: forbidden_elastix_imports(path.read_text()) for path in elastix}
     assert {name: imports for name, imports in elastix_offenders.items() if imports} == {}
+    for engine in ("itk", "ants"):
+        modules = sorted((package / engine).glob("*.py"))
+        assert modules, f"no {engine} modules found; the check would pass vacuously"
+        offenders = {
+            path.name: forbidden_itk_imports(path.read_text(), ants=engine == "ants")
+            for path in modules
+        }
+        assert {name: imports for name, imports in offenders.items() if imports} == {}
 
 
 def test_adapter_import_scan_can_fail() -> None:
@@ -421,4 +450,10 @@ def test_adapter_import_scan_can_fail() -> None:
     assert forbidden_elastix_imports("import itk\nimport xarray\n") == {"itk", "xarray"}
     assert forbidden_elastix_imports("from xarrayrf.native import Report\n") == {"xarrayrf.native"}
     assert forbidden_elastix_imports("from xarrayrf._grid import Grid\nimport numpy\n") == set()
+    assert forbidden_core_imports("import xarrayrf.itk\n") == {"xarrayrf.itk"}
+    assert forbidden_itk_imports("import h5py\nimport nibabel\nimport scipy.io\n") == set()
+    assert forbidden_itk_imports("import xarray\nimport SimpleITK\n") == {"xarray", "SimpleITK"}
+    assert forbidden_itk_imports("import nibabel\n", ants=True) == {"nibabel"}
+    assert forbidden_itk_imports("from xarrayrf.itk import read_transform\n", ants=True) == set()
+    assert forbidden_itk_imports("from xarrayrf.itk import read_transform\n") == {"xarrayrf.itk"}
     assert forbidden_cf_imports("import xarray\nfrom xarrayrf.native import Report\n") == set()

@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 
 import numpy as np
-import SimpleITK as sitk  # type: ignore[import-not-found]  # noqa: N813 (conventional alias)
+import SimpleITK as sitk  # noqa: N813 (conventional alias)
 
 
 def main() -> int:

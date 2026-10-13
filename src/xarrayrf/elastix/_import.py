@@ -12,13 +12,12 @@ import numpy.typing as npt
 
 from xarrayrf._affine import AffineTransform
 from xarrayrf._array_coordinates import ArrayCoordinates
-from xarrayrf._composite import CompositeTransform, compose
 from xarrayrf._coordinate_system import CoordinateSystem
 from xarrayrf._field_transform import BSplineTransform
 from xarrayrf._frame import ReferenceFrame
 from xarrayrf._grid import Grid
-from xarrayrf._orientation import coordinate_system_change
 from xarrayrf._transform import SupportsPoints
+from xarrayrf._transform_import import check_space, joined, stage_frames
 from xarrayrf.anatomy import LPS, patient_coordinate_system
 
 from ._parameter_files import NO_INITIAL_TRANSFORM
@@ -37,12 +36,13 @@ class ElastixImport:
     Attributes:
         transform: Fixed-frame points to moving-frame points, as elastix's result maps them;
             this is the transform that resamples the moving image onto the fixed grid. One
-            :class:`~xarrayrf.AffineTransform` when every stage is linear, else a
-            :class:`~xarrayrf.CompositeTransform` keeping each stage.
+            :class:`~xarrayrf.AffineTransform` when every stage is linear, the B-spline itself for a
+            single B-spline stage, else a :class:`~xarrayrf.CompositeTransform` keeping each
+            stage.
         report: ``(code, message)`` for every normalization made.
     """
 
-    transform: AffineTransform | CompositeTransform
+    transform: SupportsPoints
     report: Report
 
 
@@ -262,14 +262,6 @@ def transform_from_parameter_maps(
     stages = _stage_maps(maps)
     if not stages:
         raise ValueError("maps holds no stages")
-    for name, frame in (("fixed", fixed), ("moving", moving)):
-        if not isinstance(frame, ReferenceFrame):
-            raise TypeError(f"{name} must be a ReferenceFrame, got {type(frame).__name__}")
-    if fixed.is_equivalent_frame(moving):
-        raise ValueError(
-            "fixed and moving are the same frame; a non-identity map from a frame to itself "
-            "contradicts frame identity, so give the moving image its own frame"
-        )
     first = _Stage(stages[0], 0)
     initial = first.word("InitialTransformParameterFileName", NO_INITIAL_TRANSFORM)
     if initial != NO_INITIAL_TRANSFORM:
@@ -286,38 +278,16 @@ def transform_from_parameter_maps(
                 "physical points were in"
             )
         space = patient_coordinate_system(LPS, "mm")
-    if not isinstance(space, CoordinateSystem):
-        raise TypeError(f"space must be a CoordinateSystem, got {type(space).__name__}")
-    if len(space.axes) != dimension:
-        raise ValueError(f"space has {len(space.axes)} axes but the maps are {dimension}-D")
-    boundaries = len(stages) - 1
-    if intermediate_frames is None:
-        between = [ReferenceFrame.local(space) for _ in range(boundaries)]
-    else:
-        between = list(intermediate_frames)
-        if len(between) != boundaries:
-            raise ValueError(
-                f"intermediate_frames needs one frame per boundary between stages ({boundaries}), "
-                f"got {len(between)}"
-            )
-        for position, frame in enumerate(between):
-            if not isinstance(frame, ReferenceFrame) or frame.coordinate_system != space:
-                raise ValueError(
-                    f"intermediate frame {position} must be a ReferenceFrame with coordinate "
-                    "system space"
-                )
-    start, end = fixed.with_coordinate_system(space), moving.with_coordinate_system(space)
-    frames = [start, *between, end]
+    space = check_space(space, dimension, engine="elastix")
+    frames = stage_frames(
+        len(stages),
+        fixed=fixed,
+        moving=moving,
+        space=space,
+        intermediate_frames=intermediate_frames,
+    )
     report: list[tuple[str, str]] = []
     members: list[SupportsPoints] = []
-    if fixed.coordinate_system != space:
-        members.append(coordinate_system_change(fixed, start))
-        report.append(
-            (
-                "coordinate-system-change",
-                f"the fixed frame {fixed.identifier} is converted to elastix's {space.axes} first",
-            )
-        )
     splines = False
     for position, entry in enumerate(stages):
         stage = _Stage(entry, position)
@@ -355,15 +325,8 @@ def transform_from_parameter_maps(
         report.append(
             ("stage", f"stage {position}: {name} from {source.identifier} to {target.identifier}")
         )
-    if moving.coordinate_system != space:
-        members.append(coordinate_system_change(end, moving))
-        report.append(
-            (
-                "coordinate-system-change",
-                f"the result is converted from elastix's {space.axes} to the moving frame "
-                f"{moving.identifier} last",
-            )
-        )
+    transform, changes = joined(members, fixed=fixed, moving=moving, space=space, engine="elastix")
+    report.extend(changes)
     if splines:
         report.append(
             (
@@ -372,4 +335,4 @@ def transform_from_parameter_maps(
                 "identity outside it",
             )
         )
-    return ElastixImport(transform=compose(*members), report=tuple(report))
+    return ElastixImport(transform=transform, report=tuple(report))

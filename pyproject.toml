@@ -35,6 +35,10 @@ nifti = ["nibabel>=5.4", "dask[array]>=2025.1"]
 dicom = ["pydicom>=3.0", "dask[array]>=2025.1"]
 # ome-zarr-models provides the OME-Zarr 0.6 metadata models for xarrayrf.ngff; 1.8 is the release tested.
 ngff = ["ome-zarr-models>=1.8", "dask[array]>=2025.1", "zarr>=3"]
+# xarrayrf.itk reads ITK transform files: .mat through SciPy, .h5 through h5py, NIfTI
+# displacement fields through nibabel. xarrayrf.ants reads an ANTs registration's files with it.
+itk = ["nibabel>=5.4", "scipy>=1.18", "h5py>=3.11"]
+ants = ["nibabel>=5.4", "scipy>=1.18", "h5py>=3.11"]
 dev = [
     "pytest>=8",
     "ruff>=0.9",
@@ -49,6 +53,7 @@ dev = [
     "ome-zarr-models>=1.8",
     "rasterio>=1.4",
     "pyproj>=3.7",
+    "h5py>=3.11",
 ]
 # rasterio reads GeoTIFF/COG for xarrayrf.geotiff and pyproj supplies CRS axes and authority codes;
 # 1.5 and 3.8 are the releases tested.
@@ -93,7 +98,7 @@ mypy_path = "src"
 # Dask is used only by the lazy-evaluation tests, to prove no pixel task runs. It does not
 # publish type information, and this is a no-op if a future release starts doing so.
 [[tool.mypy.overrides]]
-module = ["astropy.*", "dask.*", "itk.*", "scipy.*"]
+module = ["SimpleITK.*", "ants.*", "astropy.*", "dask.*", "h5py.*", "itk.*", "scipy.*"]
 ignore_missing_imports = true
 
 # nbformat and nbclient publish no annotations; only the notebook builders call them.

@@ -121,7 +121,7 @@ to actual coordinates, and xarray's own operations carry the binding.
 | The binding (`array.rf`) | A private xarray index that owns the geometry coordinates of a framed `DataArray`, so selection, arithmetic and alignment carry or refuse it. | Frame, query, resample, re-identify and persist arrays. |
 | `xarrayrf.anatomy` | Anatomical vocabulary and grid operations: `orientation_codes`, `reoriented`, `cardinal_grid`. | Name orientations and reformat to axial, coronal or sagittal planes. |
 | Adapters | `dicom`, `nifti`, `ngff`, `geotiff`: read headers into grids and frames, and pixels lazily. | Load data with its geometry attached. |
-| Transform importers | `elastix`: registration results as transforms between frames you name. | Apply a registration computed elsewhere. |
+| Transform importers | `elastix`, `itk`, `ants`: registration results as transforms between frames you name, with ANTs' inverse warp as a declared inverse. | Apply a registration computed elsewhere, in either direction. |
 
 Typical uses, and where they live:
 

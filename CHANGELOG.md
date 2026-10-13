@@ -26,6 +26,11 @@
   caller-named frames, with LPS-to-frame coordinate changes and a report.
 - `BSplineTransform(..., support="half-open")` declares elastix's B-spline support, which
   excludes the upper face ITK includes.
+- `xarrayrf.itk` (`xarrayrf[itk]`) reads ITK transform files in float64 without ITK: text,
+  MATLAB and HDF5 files and composites (affine, translation, Euler, versor-rigid, similarity),
+  and NIfTI displacement fields.
+- `xarrayrf.ants` (`xarrayrf[ants]`) imports an ANTs registration's affine, warp and inverse
+  warp as one chain whose `declared_inverse()` is ANTs' inverse.
 - Angular coordinate systems: `CoordinateSystem(..., representation="spherical" | "geodetic",
   axis_roles=(...))` declares longitude, latitude and a radius or height axis beside ordinary
   axes such as time. Angular axes take degrees, CF `degrees_east`/`degrees_north` or radians;
