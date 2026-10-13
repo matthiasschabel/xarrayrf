@@ -40,6 +40,25 @@ def test_box_average_weights(method: xrf.Method, target_rows: Any, expected: Any
 
 
 @pytest.mark.parametrize("method", ["step", "overlap_mean"])
+def test_box_float32_values_return_float32(method: xrf.Method) -> None:
+    values = np.linspace(0.1, 1.0, 10, dtype=np.float32)
+    rows = slab_grid(np.arange(10)[:, None] + [0, 1])
+    target = slab_grid([[0, 5], [5, 10]])
+    single = xrf.resample(
+        frame_array(values, rows).rf.geometry, target, method=method, support="average"
+    )
+    double = xrf.resample(
+        frame_array(values.astype(np.float64), rows).rf.geometry,
+        target,
+        method=method,
+        support="average",
+    )
+    assert single.dtype == np.float32
+    # Sums accumulate in float64, so the result is the float64 one rounded once.
+    assert_allclose(single, double.astype(np.float32), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("method", ["step", "overlap_mean"])
 @pytest.mark.parametrize("rows", [[[0, 1], [1, 3], [3, 6]], [[0, 1], [2, 4], [7, 10]]])
 def test_box_average_identity(method: xrf.Method, rows: Any) -> None:
     source = frame_array(np.array([2.0, 11.0, 7.0]), slab_grid(rows))

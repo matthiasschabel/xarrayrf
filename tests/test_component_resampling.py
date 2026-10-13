@@ -146,6 +146,17 @@ def test_a_vector_follows_the_inverse_of_the_registration() -> None:
     assert result.rf.reference_frame == FIXED
 
 
+def test_float32_components_stay_float32() -> None:
+    field = constant_field(VECTOR_VALUE).astype(np.float32)
+    result = resample(field, ROTATION)
+    assert result.dtype == np.float32
+    expected = (ROTATION.T @ VECTOR_VALUE).astype(np.float32)
+    # One float32 rounding of the float64 map product.
+    np.testing.assert_allclose(
+        geometry_first(result), np.broadcast_to(expected, (3, 3, 3, 3)), rtol=1e-6
+    )
+
+
 def test_a_rotation_gives_the_same_vector_under_both_reorientations() -> None:
     field = constant_field(VECTOR_VALUE)
     jacobian = resample(field, 2.0 * ROTATION)

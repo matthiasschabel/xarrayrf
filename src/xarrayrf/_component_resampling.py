@@ -215,7 +215,8 @@ def resample_components(
         )
 
     total = int(np.prod([result.sizes[dim] for dim in target_dims], dtype=np.int64))
-    dtype = np.result_type(result.dtype, np.float64)
+    # The resampled values already carry the output dtype; the maps apply in float64.
+    dtype = result.dtype if result.dtype.kind in "fc" else np.result_type(result.dtype, np.float64)
     fields = any(isinstance(side, FrameField) for side in (*inputs, output_side))
     pointwise = fields or (frame_map is not None and not isinstance(frame_map, SupportsAffine))
     if total == 0 or factor == 1.0:
@@ -422,8 +423,13 @@ def _apply(
         # The interpolation leaves component dims as loop dims, so they may be split; the maps
         # need each point's components and each block's target samples in one chunk.
         array = array.chunk(dict.fromkeys(core, -1))
+
+    def typed(values: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        # The maps apply in float64; the result takes the resampled values' dtype.
+        return function(values).astype(dtype, copy=False)
+
     result = xr.apply_ufunc(
-        function,
+        typed,
         array,
         input_core_dims=[core],
         output_core_dims=[core],

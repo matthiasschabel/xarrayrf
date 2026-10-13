@@ -176,9 +176,11 @@ def resample(
     Returns:
         The resampled values over the source's non-geometry dimensions and the target's geometry
         dimensions, with the target's geometry coordinates and the source's non-geometry ones.
-        Complex128 for complex sources and float64 otherwise, except that nearest-neighbour
-        resampling of an integer or boolean array keeps its dtype when ``fill_value`` is
-        representable in it.
+        Floating values keep their precision: float32 (and float16) give float32, complex64
+        gives complex64, wider types float64 or complex128; positions and weights stay
+        float64 throughout. Integer and boolean values give float64, except that
+        nearest-neighbour resampling keeps their dtype when ``fill_value`` is representable
+        in it. Cast the values to float64 first for a float64 result.
 
     Raises:
         TypeError: If an argument has the wrong type, ``transform`` is not a point transform,
@@ -196,7 +198,7 @@ def resample(
             For declared components: if the component arguments are missing or given for an
             undeclared source, a basis is unrelated to its frame, the polar factor's
             conditions fail, ``units`` is missing or not needed, or ``fill_value`` is not NaN
-            or 0.
+            or 0. If a finite ``fill_value`` overflows the result dtype.
         ImportError: If scipy is not installed, after input and frame validation.
     """
     if not isinstance(source, Geometry):

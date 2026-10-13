@@ -276,15 +276,34 @@ def _target_frame_points(
 def _output_dtype(
     dtype: np.dtype[np.generic], method: Method, fill_value: float
 ) -> np.dtype[np.generic]:
+    """The result dtype: floating data keeps its precision, everything else becomes float64.
+
+    Data stored as float32 (or complex64) declares that precision sufficient, so the result,
+    the largest array a resampling allocates, keeps it; positions and weights stay float64.
+    float16 becomes float32, which SciPy interpolates, and wider types become float64.
+    """
     if dtype.kind == "c":
-        return np.dtype(np.complex128)
-    representable = (
+        output = np.dtype(np.complex64 if dtype.itemsize <= 8 else np.complex128)
+    elif dtype.kind == "f":
+        output = np.dtype(np.float32 if dtype.itemsize <= 4 else np.float64)
+    elif (
         method == "nearest"
         and dtype.kind in "biu"
         and not np.isnan(fill_value)
         and float(np.asarray(fill_value).astype(dtype)) == fill_value
-    )
-    return dtype if representable else np.dtype(np.float64)
+    ):
+        return dtype
+    else:
+        output = np.dtype(np.float64)
+    if np.isfinite(fill_value):
+        with np.errstate(over="ignore"):
+            overflows = not np.isfinite(np.asarray(fill_value, dtype=output))
+        if overflows:
+            raise ValueError(
+                f"fill_value {fill_value!r} overflows the {output} result of {dtype} values; "
+                "use a smaller fill_value, or cast the values to float64 first"
+            )
+    return output
 
 
 def _same_grid_indices(
@@ -776,11 +795,27 @@ def _coefficients(plan: _Plan, volume: npt.NDArray[np.generic]) -> npt.NDArray[n
     """Cubic spline coefficients for one slice; nearest and linear use values directly."""
     if plan.order <= 1:
         return volume
-    coefficient_dtype = np.complex128 if plan.output_dtype.kind == "c" else np.float64
+    # SciPy filters each line in double precision and stores the coefficients in the result
+    # dtype between axes. The cubic prefilter gains at most 3 per axis (at the Nyquist
+    # frequency), so values within 3**ndim of the dtype's maximum keep double coefficients
+    # rather than overflow where the interpolated result would fit.
+    dtype = plan.output_dtype
+    if dtype in _COMPACT_DTYPES and volume.size:
+        limit = float(np.finfo(cast(Any, dtype)).max) / 3.0**volume.ndim
+        if float(np.abs(volume).max()) > limit:
+            dtype = np.dtype(np.complex128 if dtype.kind == "c" else np.float64)
     filtered: npt.NDArray[np.generic] = plan.ndimage.spline_filter(
-        volume, order=plan.order, mode="nearest", output=coefficient_dtype
+        volume, order=plan.order, mode="nearest", output=dtype
     )
     return filtered
+
+
+_COMPACT_DTYPES: Final = (np.dtype(np.float32), np.dtype(np.complex64))
+
+
+def _weight_dtype(plan: _Plan) -> np.dtype[np.generic]:
+    """Missing-value weights stay double: they are compared with ``ROUNDING_ALLOWANCE``."""
+    return np.dtype(np.complex128 if plan.output_dtype.kind == "c" else np.float64)
 
 
 def _linear_inputs(
@@ -790,7 +825,8 @@ def _linear_inputs(
     if not np.isnan(volume).any():
         return volume, None
     values = cast(npt.NDArray[np.number[Any]], volume.copy())
-    missing = np.zeros(volume.shape, dtype=np.complex128 if np.iscomplexobj(volume) else np.float64)
+    # Zero and one are exact in any floating dtype, so the mask matches the values' dtype.
+    missing = np.zeros(volume.shape, dtype=volume.dtype)
     if np.iscomplexobj(volume):
         for component, mask in ((values.real, missing.real), (values.imag, missing.imag)):
             absent = np.isnan(component)
@@ -840,7 +876,7 @@ def _interpolate(
             order=plan.order,
             mode="nearest",
             prefilter=False,
-            output=plan.output_dtype,
+            output=_weight_dtype(plan),
         )
         _restore_missing(sampled, weights)
     block[inside] = sampled
@@ -918,7 +954,7 @@ def _lattice_block(
                 lattice_map.linear,
                 offset=lattice_map.offset,
                 output_shape=target_shape,
-                output=plan.output_dtype,
+                output=_weight_dtype(plan),
                 order=plan.order,
                 mode="nearest",
                 prefilter=False,
@@ -981,7 +1017,10 @@ def execute(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.gene
     if plan.total == 0:
         return np.empty((*leading, *plan.target_shape), dtype=plan.output_dtype)
     if plan.box is not None:
-        return plan.box.apply(values, len(plan.source_dims), plan.target_dims, plan.fill_value)
+        # Box sums accumulate in float64; only the result takes the output dtype.
+        return plan.box.apply(
+            values, len(plan.source_dims), plan.target_dims, plan.fill_value
+        ).astype(plan.output_dtype, copy=False)
     if plan.order == 3 and np.isnan(values).any():
         # The spline prefilter is global along each line, so one NaN would empty its line,
         # except where the same-grid gather bypasses the prefilter: refuse both alike.
@@ -989,6 +1028,9 @@ def execute(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.gene
             "cubic resampling refuses missing (NaN) source values, which the spline prefilter "
             "spreads along whole lines; fill or mask them first, or use method='linear'"
         )
+    if values.dtype.kind == "f" and values.dtype.itemsize < 4:
+        # SciPy does not interpolate float16; the float32 result dtype holds it exactly.
+        values = values.astype(plan.output_dtype)
     slices = [values[index] for index in np.ndindex(*leading)]
     if plan.extend is not None:
         slices = [plan.extend(volume) for volume in slices]

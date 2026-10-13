@@ -1117,8 +1117,8 @@ requires target intervals there. Axes selecting coincident source samples pass t
 for average support, target intervals must be absent or match mapped source intervals to
 qualify. Resample other axes first with a point method or declare their intervals. Non-default
 `domain` refuses because declared support defines the box domain. NaN components propagate
-only from positive weights, independently for real and imaginary parts. Output is float64 or
-complex128. This path uses sparse tensor weights without cropping or same-grid gathering;
+only from positive weights, independently for real and imaginary parts. Sums accumulate in
+float64 and the output takes the result dtype of point methods (below). This path uses sparse tensor weights without cropping or same-grid gathering;
 Dask remains lazy, with geometry dimensions rechunked as core dimensions.
 
 Native `return_coverage=True` returns `(values, coverage)` for box methods only. Coverage is a
@@ -1204,8 +1204,17 @@ Performance is part of the contract:
   (256 MiB), or recomputed per slice beyond that budget. A Dask-backed source is processed
   lazily, one task per chunk of its non-geometry dimensions; positions and masks are shared
   within a task, not across tasks.
-- A single-sample target dimension (a one-slice target) keeps the fast path. Complex sources
-  are resampled as complex128.
+- A single-sample target dimension (a one-slice target) keeps the fast path.
+- The result keeps floating precision: float32 values give float32 (float16 gives float32,
+  which SciPy interpolates), complex64 gives complex64, and float64 or complex128 stay. Integer
+  and boolean values give float64, except that nearest keeps them when `fill_value` fits. The
+  result is the largest array a resampling allocates, and float32 data declares float32
+  precision enough for it. Positions, missing-value weights and box sums stay in float64 and
+  round once at the end; cubic coefficients are filtered in double precision along each line
+  but stored in the result dtype between axes (in double when the values come within
+  `3**ndim` of the dtype's maximum, where float32 coefficients could overflow). Cast the values to float64 first for a float64 result. A finite
+  `fill_value` that overflows the result dtype (`1e40` for float32) raises ValueError; NaN,
+  infinities and ordinary rounding (`0.1`) are accepted.
 - scipy is the optional `resample` extra; the core does not import it.
 
 - Equivalent frames in the same coordinate system need no frame transform.

@@ -63,6 +63,10 @@
 
 ### Changed
 
+- Resampling keeps floating precision: float32 values give a float32 result (float16 gives
+  float32) and complex64 gives complex64, instead of float64 and complex128. Positions, weights,
+  spline filtering and box sums stay in float64. Cast the values to float64 first for the old
+  result. A finite `fill_value` that overflows the result dtype now raises ValueError.
 - NGFF export refuses angular frames: NGFF axes carry no representation, and degree units would
   read back as refused Cartesian axes.
 - Resampling declared tensor components now also names the target sample when the frame map's

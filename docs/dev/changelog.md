@@ -1,5 +1,20 @@
 # Changelog
 
+## [2026-10-13] — Resampling keeps floating precision (performance plan, Step 1)
+
+- **Problem**: Resampling promoted float32 and complex64 values to float64 and complex128,
+  doubling the largest array a resampling allocates and its memory traffic, although float32
+  storage declares float32 precision enough for the data.
+- **Resolution**: The result dtype follows floating data (float16 becomes float32); positions,
+  missing-value weights and box sums stay double; cubic coefficients are stored in the result
+  dtype unless the values come within `3**ndim` of its maximum; a finite `fill_value` that
+  overflows the result dtype raises. Component resampling follows. Breaking change, recorded in
+  CHANGELOG.
+- **Files affected**: `src/xarrayrf/_resampling.py`, `src/xarrayrf/_component_resampling.py`,
+  `src/xarrayrf/_resample.py`, `tests/test_resample.py`, `tests/test_box_resample.py`,
+  `tests/test_component_resampling.py`, `docs/core_interface.md`, `CHANGELOG.md`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high)
+
 ## [2026-10-13] — Field transforms, step 5: benchmark and evaluation backends
 
 - **Problem**: Step 1's NumPy kernels computed values and derivatives on every call and ran at

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import dask.array as da
 import numpy as np
 import numpy.typing as npt
@@ -333,6 +335,113 @@ def test_nearest_keeps_integer_labels_when_the_fill_fits() -> None:
     assert kept.dtype == np.int16
     assert xrf.resample(labels, target, method="linear").dtype == np.float64
     assert xrf.resample(labels, target, method="nearest").dtype == np.float64
+
+
+FLOAT32_RTOL = 1e-6
+"""One float32 rounding of the result (about 6e-8 relative), with headroom for the cubic
+coefficients, which are stored in float32 after SciPy's double-precision line filter."""
+
+
+@pytest.mark.parametrize("method", ["nearest", "linear", "cubic"])
+@pytest.mark.parametrize("general_path", [False, True])
+def test_floating_values_keep_their_precision(method: xrf.Method, general_path: bool) -> None:
+    single = volume(ramp().astype(np.float32))
+    double = volume(ramp().astype(np.float32).astype(np.float64))
+    target = volume(np.zeros((4, 5, 6)), translation=(0.4, 0.3, 0.2))
+    other = xrf.ReferenceFrame.declared(("test", "moved"), LPS.coordinate_system)
+    transform = None
+    if general_path:
+        target = volume(np.zeros((4, 5, 6)), frame=other)
+        transform = Shift(other, LPS, 0.4)
+    kept = xrf.resample(single, target, method=method, transform=transform)
+    reference = xrf.resample(double, target, method=method, transform=transform)
+    assert kept.dtype == np.float32
+    assert reference.dtype == np.float64
+    assert_allclose(kept.values, reference.values, rtol=FLOAT32_RTOL, atol=0, equal_nan=True)
+
+
+def test_float32_missing_values_keep_their_precision() -> None:
+    values = ramp().astype(np.float32)
+    values[1, 2, 3] = np.nan
+    target = volume(np.zeros((4, 5, 6)), translation=(0.4, 0.0, 0.0))
+    kept = xrf.resample(volume(values), target, method="linear")
+    reference = xrf.resample(volume(values.astype(np.float64)), target, method="linear")
+    assert kept.dtype == np.float32
+    assert_array_equal(np.isnan(kept.values), np.isnan(reference.values))
+    assert_allclose(kept.values, reference.values, rtol=FLOAT32_RTOL, atol=0, equal_nan=True)
+
+
+def plane(values: npt.NDArray[np.generic]) -> xrf.Geometry:
+    """A 2-D geometry with unit spacing in a local frame."""
+    dims = ("i", "j")[: values.ndim]
+    frame = xrf.ReferenceFrame.declared(
+        ("test", f"plane{values.ndim}"), xrf.CoordinateSystem(dims, ("mm",) * values.ndim)
+    )
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(dims, ("1",) * values.ndim),
+        target=frame,
+        matrix=np.eye(values.ndim),
+        translation=np.zeros(values.ndim),
+    )
+    coords = {d: np.arange(n) for d, n in zip(dims, values.shape, strict=True)}
+    return xrf.Geometry(xr.DataArray(values, dims=dims, coords=coords), transform, dims=dims)
+
+
+@pytest.mark.parametrize("stored", [np.float32, np.complex64])
+def test_compact_missing_weights_match_double_near_the_allowance(stored: type) -> None:
+    values: npt.NDArray[Any] = np.array([[1, 1], [1, np.nan]], dtype=stored)
+    source = plane(values)
+    # Missing weights of about 1e-9, straddling ROUNDING_ALLOWANCE.
+    positions = 1e-5 * (1 + np.linspace(-1e-7, 1e-7, 1001))
+    target = xrf.Grid(source.transform, {"i": 1e-4, "j": ("j", positions)})
+    compact = xrf.resample(source, target).values
+    double = xrf.resample(
+        plane(values.astype(np.complex128 if np.iscomplexobj(values) else np.float64)), target
+    ).values
+    assert_array_equal(np.isnan(compact), np.isnan(double))
+
+
+def test_float32_cubic_near_the_maximum_stays_finite() -> None:
+    values = np.tile(np.array([-2e38, 2e38], dtype=np.float32), 32)
+    target = xrf.Grid(plane(values).transform, {"i": 30.25})
+    compact = xrf.resample(plane(values), target, method="cubic").values
+    double = xrf.resample(plane(values.astype(np.float64)), target, method="cubic").values
+    assert compact.dtype == np.float32
+    assert_allclose(compact, double.astype(np.float32), rtol=FLOAT32_RTOL, atol=0)
+
+
+@pytest.mark.parametrize(
+    "stored, expected",
+    [(np.float16, np.float32), (np.complex64, np.complex64), (np.complex128, np.complex128)],
+)
+def test_result_dtype_follows_floating_values(stored: type, expected: type) -> None:
+    target = volume(np.zeros((4, 5, 6)), translation=(0.4, 0.0, 0.0))
+    result = xrf.resample(volume(ramp().astype(stored)), target, method="linear")
+    assert result.dtype == expected
+    assert_allclose(result.values.real, xrf.resample(volume(ramp()), target).values, rtol=1e-3)
+
+
+def test_lazy_result_declares_its_float32_dtype() -> None:
+    eager = volume(np.stack([ramp(), ramp()]).astype(np.float32))
+    lazy = xrf.Geometry(eager.array.chunk({"echo": 1}), eager.transform, dims=eager.dims)
+    result = xrf.resample(lazy, volume(np.zeros((4, 5, 6)), translation=(0.5, 0.0, 0.0)))
+    assert isinstance(result.data, da.Array)
+    assert result.dtype == np.float32
+    assert result.compute().dtype == np.float32
+
+
+@pytest.mark.parametrize("fill_value", [0.1, np.inf, -np.inf, np.nan, 3.0e38])
+def test_float32_fill_values_that_fit_are_kept(fill_value: float) -> None:
+    target = volume(np.zeros((4, 5, 6)), translation=(10.0, 0.0, 0.0))
+    result = xrf.resample(volume(ramp().astype(np.float32)), target, fill_value=fill_value)
+    assert_array_equal(result.values, np.full((4, 5, 6), fill_value, dtype=np.float32))
+
+
+@pytest.mark.parametrize("stored", [np.float32, np.complex64])
+def test_fill_value_overflowing_the_result_raises(stored: type) -> None:
+    target = volume(np.zeros((4, 5, 6)))
+    with pytest.raises(ValueError, match="fill_value 1e\\+40 overflows"):
+        xrf.resample(volume(ramp().astype(stored)), target, fill_value=1e40)
 
 
 def test_small_blocks_give_the_same_result() -> None:
