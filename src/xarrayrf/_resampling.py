@@ -48,6 +48,7 @@ from ._sampling import (
     coordinate_to_position,
     freeze_intervals,
 )
+from ._sitk_engine import FieldEngine, direction_and_spacing, index_transform, simpleitk
 from ._transform import SupportsAffine, SupportsPoints, check_transform
 
 type Method = Literal["nearest", "linear", "cubic", "step", "overlap_mean"]
@@ -304,6 +305,52 @@ def _affine_parts(
     return matrix, translation
 
 
+ENGINE_MARGIN: Final = 1e-9
+"""Index units by which every target-box corner must clear a raising or clamping field's
+support for SimpleITK, whose exterior is the identity, to stand in for it."""
+
+
+def _field_engine(
+    field: DisplacementFieldTransform,
+    field_linear: npt.NDArray[np.float64],
+    field_offset: npt.NDArray[np.float64],
+    target_shape: tuple[int, ...],
+) -> FieldEngine | None:
+    """A SimpleITK engine for this field and target lattice, when ITK's semantics are ours.
+
+    That needs SimpleITK; two or three dimensions, the only ones its transforms have; centred
+    cells on every axis (support ``[-0.5, n - 0.5)``, ITK's);
+    the identity exterior, or every target-box corner inside the support by ``ENGINE_MARGIN``
+    (the box is convex, so then no point reaches the exterior); and a target lattice whose
+    field-index columns are orthogonal, as an ITK image's direction and spacing are.
+    """
+    sitk = simpleitk()
+    lookup = field._lookup
+    if sitk is None or len(lookup.shape) not in (2, 3) or 0 in target_shape:
+        return None
+    if len(target_shape) != len(lookup.shape):
+        return None
+    if not (np.all(lookup.lower == -0.5) and np.all(lookup.upper == np.array(lookup.shape) - 0.5)):
+        return None
+    if field.outside != "identity":
+        corners = np.array(list(product(*((0, n - 1) for n in target_shape))), dtype=np.float64)
+        reached = corners @ field_linear.T + field_offset
+        if np.any(reached < lookup.lower + ENGINE_MARGIN) or np.any(
+            reached >= lookup.upper - ENGINE_MARGIN
+        ):
+            return None
+    split = direction_and_spacing(field_linear)
+    if split is None:
+        return None
+    if field._engine_cache is None:
+        assert lookup.index_map is not None
+        _, linear = lookup.index_map
+        # Displacements in index units: the field's own map from frame vectors to indices.
+        index_field = np.einsum("kj,...j->...k", linear, np.asarray(field.field))
+        field._engine_cache = index_transform(sitk, index_field)
+    return FieldEngine(sitk, field._engine_cache, field_linear, field_offset, target_shape, *split)
+
+
 def _field_lattice_map(
     source: Sampling,
     target: Sampling,
@@ -311,7 +358,7 @@ def _field_lattice_map(
     target_dims: tuple[str, ...],
     frame_map: SupportsPoints | None,
     domain: Domain,
-) -> PositionMap | None:
+) -> tuple[PositionMap, int] | None:
     """Fuse lattice target -> affines -> one field -> affines -> lattice source, if possible.
 
     With ``x(i)`` the target lattice, ``A`` and ``B`` the affines before and after the field
@@ -323,6 +370,10 @@ def _field_lattice_map(
     general path, unless the field is exactly a built-in field type on a uniform grid, composites
     and pairs are exactly the built-in types, every other member is affine and square, and both
     samplings are lattices to exact steps without single-sample source dims.
+
+    With the map comes the block alignment, in target samples: whole rows of the first target
+    dimension when SimpleITK evaluates the field (``_field_engine``), else 1. A block that is
+    not whole rows falls back to the NumPy evaluation.
     """
     if frame_map is None:
         return None
@@ -369,16 +420,40 @@ def _field_lattice_map(
     lowest = -np.array([low for low, _ in reach])[:, None]
     highest = (sizes - 1.0 + np.array([high for _, high in reach]))[:, None]
 
+    shape = tuple(target.sizes[dim] for dim in target_dims)
+    engine = (
+        _field_engine(field, field_linear, field_offset, shape)
+        if type(field) is DisplacementFieldTransform
+        else None
+    )
+    row = math.prod(shape[1:])
+    # Index-unit displacements reach the source through the field's inverse index map.
+    index_push = push @ equilibrated_inverse(field._lookup.index_map[1]) if engine else push
+
+    def whole_rows(indices: npt.NDArray[np.intp]) -> tuple[int, int] | None:
+        count = indices.shape[1]
+        if not count or count % row or np.any(indices[1:, 0]):
+            return None
+        first = int(indices[0, 0])
+        return first, first + count // row
+
     def positions(indices: npt.NDArray[np.intp]) -> npt.NDArray[np.float64]:
         steps = indices.astype(np.float64)
-        columns: npt.NDArray[np.float64] = np.einsum("ij,jn->in", field_linear, steps)
-        columns += field_offset[:, None]
-        displacement, first = field._displacement_rows(columns)
-        if first is not None:
-            where = tuple(int(i) for i in indices[:, first])
-            raise field._outside_error(where, columns[:, first])
+        rows = whole_rows(indices) if engine is not None else None
+        if rows is not None:
+            assert engine is not None
+            displacement = engine.index_displacement(*rows, threads=1)
+            linear_push = index_push
+        else:
+            columns: npt.NDArray[np.float64] = np.einsum("ij,jn->in", field_linear, steps)
+            columns += field_offset[:, None]
+            displacement, first = field._displacement_rows(columns)
+            if first is not None:
+                where = tuple(int(i) for i in indices[:, first])
+                raise field._outside_error(where, columns[:, first])
+            linear_push = push
         located: npt.NDArray[np.float64] = np.einsum("ij,jn->in", source_linear, steps)
-        located += np.einsum("ij,jn->in", push, displacement)
+        located += np.einsum("ij,jn->in", linear_push, displacement)
         located += source_offset[:, None]
         # As coordinate_to_position: outside the domain beyond the slack is NaN, else clamped.
         outside = np.any(
@@ -388,7 +463,7 @@ def _field_lattice_map(
         located[:, outside] = np.nan
         return located
 
-    return positions
+    return positions, row if engine is not None else 1
 
 
 def _target_frame_points(
@@ -898,6 +973,7 @@ def plan(
     lattice_map = None
     position_map = None
     fused = False
+    alignment = 1
     box = None
     periodic: PeriodicAxes | None = None
     if total and any(source.sizes[dim] == 0 for dim in source_dims):
@@ -927,17 +1003,20 @@ def plan(
         if lattice_map is None:
             # A modulo or a mirror is not affine, and a crop could drop samples across the
             # seam, so a periodic source takes the general path.
-            position_map = (
+            mapped = (
                 _field_lattice_map(source, target, source_dims, target_dims, frame_map, domain)
                 if periodic is None
                 else None
             )
             # The fused map evaluates only the built-in field; the general one evaluates the
             # target grid, the frame map and the source's inverse.
-            fused = position_map is not None
-            position_map = position_map or _general_map(
-                source, target, source_dims, target_dims, frame_map, domain, periodic
-            )
+            fused = mapped is not None
+            if mapped is not None:
+                position_map, alignment = mapped
+            else:
+                position_map = _general_map(
+                    source, target, source_dims, target_dims, frame_map, domain, periodic
+                )
     output_dtype = _output_dtype(dtype, method, fill_value)
     safe = (
         box is not None
@@ -947,6 +1026,10 @@ def plan(
     )
     threads = 1 if box is not None else _thread_count(workers, total, safe)
     block_points = _thread_block(block_points, total, threads)
+    # SimpleITK evaluates whole rows of the first target dimension; when a row exceeds the
+    # bounded block, blocks keep their bound and NumPy evaluates them.
+    if alignment <= block_points:
+        block_points = block_points // alignment * alignment
     source_shape = tuple(source.sizes[dim] for dim in source_dims) if total else ()
     window = None
     if lattice_map is not None:

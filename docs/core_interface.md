@@ -1203,6 +1203,20 @@ Performance is part of the contract:
   Boundary decisions agree with the general path to roundoff (within about `1e-9` index units
   of a support face or domain edge). A 256³ image through a 128³ dense field resamples at about
   8 Mpt/s on one thread, against SimpleITK's 36 (`benchmarks/field_resample_benchmark.py`).
+- With SimpleITK installed (`xarrayrf[simpleitk]`), the fused path above hands a
+  `DisplacementFieldTransform` to ITK's C++ field evaluation when ITK's semantics are
+  exactly ours: centred cells on every field axis (support `[-0.5, n - 0.5)`, the edge held
+  in the outer half cells, zero displacement outside), the `"identity"` exterior or a target
+  wholly inside the support, and a target lattice whose axes stay orthogonal in field indices
+  (as an ITK image's direction and spacing require). ITK works in the field's index space, so
+  no frame coordinate or origin reaches it; locating the source, interpolating it, the domain
+  and the fill stay xarrayrf's, for every method and domain. Results agree with the NumPy
+  evaluation to roundoff. The field is converted once per transform to an ITK transform over
+  an index-space float64 image (8 bytes per component per field sample) and kept with it.
+  Two- and three-dimensional fields only, as SimpleITK's transforms are; blocks are whole
+  target rows when a row fits the bounded block, and ITK runs one work unit per block, so
+  `workers` alone sets the parallelism. The field above then resamples at about 12.6 Mpt/s on
+  one thread (8 without SimpleITK) and 48 on 10 cores.
 - `workers` (on `resample` and `rf.resample_to`) runs blocks of target samples, or on the
   affine path slabs of target rows, on threads; SciPy and NumPy release the GIL there. The
   default, None, uses every core with at least 65536 target samples each, in blocks small

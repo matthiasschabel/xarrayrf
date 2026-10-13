@@ -39,6 +39,9 @@ ngff = ["ome-zarr-models>=1.8", "dask[array]>=2025.1", "zarr>=3"]
 # displacement fields through nibabel. xarrayrf.ants reads an ANTs registration's files with it.
 itk = ["nibabel>=5.4", "scipy>=1.18", "h5py>=3.11"]
 ants = ["nibabel>=5.4", "scipy>=1.18", "h5py>=3.11"]
+# Resampling through a dense displacement field hands the field's evaluation to SimpleITK when
+# it is importable and the field's semantics match ITK's; 2.4 is the oldest release tested.
+simpleitk = ["scipy>=1.18", "SimpleITK>=2.4"]
 dev = [
     "pytest>=8",
     "ruff>=0.9",
@@ -54,6 +57,7 @@ dev = [
     "rasterio>=1.4",
     "pyproj>=3.7",
     "h5py>=3.11",
+    "SimpleITK>=2.4",
 ]
 # rasterio reads GeoTIFF/COG for xarrayrf.geotiff and pyproj supplies CRS axes and authority codes;
 # 1.5 and 3.8 are the releases tested.
@@ -100,6 +104,12 @@ mypy_path = "src"
 [[tool.mypy.overrides]]
 module = ["SimpleITK.*", "ants.*", "astropy.*", "dask.*", "h5py.*", "itk.*", "scipy.*"]
 ignore_missing_imports = true
+
+# SimpleITK is now a dev dependency (the resampling engine); its SWIG bindings are untyped, so
+# they are read as Any rather than followed.
+[[tool.mypy.overrides]]
+module = ["SimpleITK", "SimpleITK.*"]
+follow_imports = "skip"
 
 # nbformat and nbclient publish no annotations; only the notebook builders call them.
 [[tool.mypy.overrides]]

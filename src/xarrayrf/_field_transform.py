@@ -371,6 +371,7 @@ class _FieldTransform:
 
     __slots__ = (
         "_derivative_cache",
+        "_engine_cache",
         "_grid",
         "_lookup",
         "_outside",
@@ -398,6 +399,9 @@ class _FieldTransform:
         _check_endpoints(source, target, what=self._what)
         self._upper_closed = upper_closed
         self._derivative_cache: Any = None
+        # The SimpleITK engine's index-space ITK transform, built on first use and kept: a
+        # float64 copy of the field (see _sitk_engine.index_transform).
+        self._engine_cache: Any = None
         assert isinstance(source, ReferenceFrame) and isinstance(target, ReferenceFrame)
         self._source = source
         self._target = target

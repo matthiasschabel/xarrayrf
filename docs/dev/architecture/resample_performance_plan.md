@@ -1,6 +1,6 @@
 # Resampling performance: closing the gap with SimpleITK
 
-**Status:** Active (Steps 0–4 implemented; Step 5 next)
+**Status:** Implemented (Steps 0–5; deferred work below)
 **Last updated:** 2026-10-13
 **Scope:** Point-method resampling (`nearest`, `linear`, `cubic`) on the general path in
 `_resampling.py`; field transform evaluation in `_field_transform.py`; source location in
@@ -295,6 +295,42 @@ Plan review (Codex gpt-6-astra, high, 2026-10-13): Revise.
 | N2: thread resource control | Accepted: `workers` keyword, recursive exact-type eligibility, cap by position budget; default escalated |
 | N3: fill conversion rules | Accepted: NaN/inf kept, rounding allowed, overflow raises; float64 by casting input |
 
+**As implemented (design b, chosen by measurement):** for one 256³ resample, `sitk.Resample`
+took 0.12 s, but returning its x-fastest image to our layout added 0.24 s of transposes, and
+it is valid only for `domain="cells"` with centred cells; ITK's
+`TransformToDisplacementFieldFilter` evaluates the dense field for the whole target in 0.09 s
+(16 slabs: 0.10 s) against about 1.2 s for our three SciPy interpolations. Probing
+`DisplacementFieldTransform.TransformPoint` confirmed its support is `[-0.5, n - 0.5)` with the
+edge held, identical to ours. So `_sitk_engine.FieldEngine` evaluates only the field: the
+field becomes an index-space float64 vector image (displacements in index units, axes and
+components reversed for ITK's x-fastest order, cached on the transform), the reference image
+is a slab of target rows expressed in field indices, and its displacements enter
+`s = Q i + K L⁻¹ u_index + q`. No frame coordinate reaches ITK. Eligibility
+(`_field_engine`): SimpleITK importable, exactly `DisplacementFieldTransform`, support exactly
+`[-0.5, n - 0.5)` on every axis, `"identity"` or every target-box corner inside the support by
+`ENGINE_MARGIN` (1e-9), equal target and field rank, and orthogonal field-index columns of the
+target lattice. Blocks are aligned to whole target rows; any other block uses NumPy.
+`xarrayrf[simpleitk]` and the dev dependencies add SimpleITK; mypy skips its untyped bindings.
+
+Review (Codex gpt-6-astra high): B1, SimpleITK transforms are 2-D and 3-D only, so other
+ranks keep NumPy; B2, row alignment no longer enlarges a bounded block (rows that do not fit
+use NumPy); B3, `SetNumberOfThreads(1)` alone left the pool threader splitting work, so each
+sampler also gets one work unit; N1, the cache holds the ITK transform itself, reused across
+plans; N2, tests probe support faces and outer half cells with exact values, the excluded
+upper face, an interval-declared single slab, uncentred cells, the corner margin both ways,
+ranks 1 and 4, and the block bound.
+
+Measured after B3 (Mpt/s, float32, engine off / on): 3-D dense one thread 8.0 / 12.6,
+10 threads 38.2 / 48.2; 2-D one thread 15.8 / 20.7, 10 threads 61.8 / 72.9. (Before B3 the
+one-thread figure, 15.1, included ITK's own threads.) One thread now spends most of its time in
+SciPy's image interpolation and the remaining position arithmetic. Tests: `tests/test_resample_engine.py`
+(engine against NumPy for all methods and both domains, origins 0 and 1e6, reflections,
+permuted axes, 2-D, exteriors inside and overhanging the support, anisotropic oblique
+fallback, threads).
+
+Deferred: design (a), ITK interpolating the image too, for `domain="cells"` with centred
+cells, where its domain is ours; B-spline fields (ITK's B-spline support rules differ).
+
 ## Alternatives Considered
 
 | Alternative | Why not |
@@ -310,6 +346,11 @@ Plan review (Codex gpt-6-astra, high, 2026-10-13): Revise.
 - Reusing prepared positions across slices for cubic and NaN-containing linear workloads beyond
   the cache budget (Codex N3, design part).
 - B-spline field in the SimpleITK engine (ITK file support is deferred; boundary rules differ).
+- Design (a): ITK interpolating the image as well, for `domain="cells"` with centred source
+  cells, where ITK's domain is ours; the one-thread run is now dominated by SciPy's image
+  interpolation and the remaining position arithmetic.
+- Single-sample target dims in the engine: their zero lattice columns need an orthonormal
+  completion before ITK can take them as a direction.
 - Box methods' performance.
 
 ## Next Steps
@@ -326,4 +367,5 @@ Plan review (Codex gpt-6-astra, high, 2026-10-13): Revise.
    coverage; accepted on the second pass).
 6. Done: Step 4 (implementation review: B1 bounded submission, N1 Dask-default test, N2
    coverage; accepted on the second pass).
-7. Step 5, with an implementation review, docs and changelog.
+7. Done: Step 5 (implementation review: B1 ranks, B2 block bound, B3 work units, N1 cache,
+   N2 boundary tests; accepted on the second pass).

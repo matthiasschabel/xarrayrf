@@ -63,6 +63,10 @@
 
 ### Changed
 
+- With SimpleITK installed (the new `xarrayrf[simpleitk]` extra), resampling through a
+  `DisplacementFieldTransform` with centred cells lets ITK evaluate the field where its
+  boundary behaviour is exactly xarrayrf's, about 1.6× faster on one thread; everything else,
+  including the domain and fill, stays as before, and results agree to roundoff.
 - Resampling runs on threads: `resample` and `rf.resample_to` take `workers` (None for every
   core, the default; 1 inline). Dask-backed sources and transforms other than the built-in
   affine and field transforms run on one. Resampling through a field transform is also

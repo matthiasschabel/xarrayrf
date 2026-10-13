@@ -1,5 +1,21 @@
 # Changelog
 
+## [2026-10-13] — SimpleITK field engine for resampling (performance plan, Step 5)
+
+- **Problem**: Three SciPy interpolations of a dense field cost about 1.2 s per 16.7M target
+  points, the largest part of resampling through it.
+- **Resolution**: `_sitk_engine.FieldEngine` lets ITK's `TransformToDisplacementFieldFilter`
+  evaluate a `DisplacementFieldTransform` in the field's index space, slab by slab of target
+  rows, when ITK's semantics are exactly ours (2-D or 3-D, support `[-0.5, n - 0.5)`, identity
+  exterior or a target wholly inside, orthogonal field-index columns); xarrayrf keeps the
+  source side. The ITK transform is cached per field; one work unit per call. New extra
+  `xarrayrf[simpleitk]`; SimpleITK in dev; mypy skips its bindings. One thread 12.6 Mpt/s
+  (8.0), 10 threads 48 (38).
+- **Files affected**: `src/xarrayrf/_sitk_engine.py`, `src/xarrayrf/_resampling.py`,
+  `src/xarrayrf/_field_transform.py`, `tests/test_resample_engine.py`, `pyproject.toml`,
+  `uv.lock`, `docs/core_interface.md`, `CHANGELOG.md`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high)
+
 ## [2026-10-13] — Threaded resampling (performance plan, Step 4)
 
 - **Problem**: Resampling ran on one thread while SimpleITK uses every core.
