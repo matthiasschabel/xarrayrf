@@ -1,7 +1,7 @@
 # Field-backed transforms
 
-**Status:** Active (stage 1a in progress: step 1 implemented)
-**Last updated:** 2026-10-12
+**Status:** Active (stage 1a in progress: steps 1 and 2 implemented)
+**Last updated:** 2026-10-13
 **Scope:** Stage 1 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): transforms
 between Cartesian frames whose values come from a sampled field or a B-spline control grid
 (deformable registration), declared inverse pairs, a Jacobian-determinant diagnostic, importers,
@@ -213,7 +213,9 @@ it. A producer-declared pair (an NGFF `bijection`; an ANTs `1Warp` and `1Inverse
 immutable pair object that owns both directions. Each direction exposes the other through a
 separately named capability, `declared_inverse()`, which returns it without verifying it.
 Owning both in one object avoids mutually referencing transforms, which would make equality and
-encoding cyclic. A half's equality is its own identity, independent of its partner.
+encoding cyclic. Revised in the [step 2 plan](field_transform_step2_plan.md): a direction
+compares its pair and its direction, so equal directions have equal declared inverses; there is
+still no cycle, since the pair compares its members.
 
 `CompositeTransform.inverse()` keeps its current rule and refuses a chain containing a field.
 `CompositeTransform.declared_inverse()` is offered when every member is exactly invertible or

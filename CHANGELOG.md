@@ -15,6 +15,12 @@
     Jacobian.
   - `sample_displacement_field` rasterizes any such transform onto a grid.
   - Field transforms are not yet persisted.
+- Declared inverse pairs, for registration tools that write a warp and its inverse:
+  - `DeclaredInversePair(forward, backward)` owns both directions, unverified. `pair.forward`
+    and `pair.backward` are `PairedTransform`s whose `declared_inverse()` returns the other.
+  - `CompositeTransform.declared_inverse()` reverses a chain using exact inverses where members
+    have them and declared inverses otherwise; `SupportsDeclaredInverse` is the protocol.
+  - `round_trip_residual_report` measures `inverse(transform(x)) - x` on points or a grid.
 - Angular coordinate systems: `CoordinateSystem(..., representation="spherical" | "geodetic",
   axis_roles=(...))` declares longitude, latitude and a radius or height axis beside ordinary
   axes such as time. Angular axes take degrees, CF `degrees_east`/`degrees_north` or radians;

@@ -104,6 +104,15 @@ class SupportsInverse(Transform, Protocol):
         ...
 
 
+@runtime_checkable
+class SupportsDeclaredInverse(Transform, Protocol):
+    """A transform whose producer declared an inverse, which is not verified to be exact."""
+
+    def declared_inverse(self) -> Transform:
+        """Return the declared inverse, with source and target exchanged."""
+        ...
+
+
 def check_endpoint(value: object, *, field: str) -> Endpoint:
     """Require a :class:`~xarrayrf.ReferenceFrame` or :class:`~xarrayrf.ArrayCoordinates`."""
     if not isinstance(value, ReferenceFrame | ArrayCoordinates):

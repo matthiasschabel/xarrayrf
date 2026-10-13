@@ -40,6 +40,7 @@ from ._chart_transitions import (
 from ._classification import AffineClass, affine_class
 from ._composite import CompositeTransform, compose
 from ._coordinate_system import CARTESIAN, GEODETIC, SPHERICAL, AxisCode, AxisRole, CoordinateSystem
+from ._declared_inverse import DeclaredInversePair, PairedTransform
 from ._encoding import (
     SCHEMA_VERSION,
     DecoderResultError,
@@ -63,6 +64,7 @@ from ._grid import Grid
 from ._jacobian_determinant import JacobianDeterminantReport, jacobian_determinant_report
 from ._lattice import Lattice
 from ._orientation import coordinate_system_change
+from ._round_trip_residual import RoundTripResidualReport, round_trip_residual_report
 from ._symmetric_packing import SYMMETRY_TOLERANCE, SymmetricPacking
 from ._tensor_component_declaration import TensorComponentDeclaration
 from ._tensor_type import (
@@ -84,6 +86,7 @@ from ._tensor_type import (
 from ._transform import (
     Endpoint,
     SupportsAffine,
+    SupportsDeclaredInverse,
     SupportsInverse,
     SupportsJacobian,
     SupportsPoints,
@@ -124,6 +127,7 @@ __all__ = [
     "CartesianToSpherical",
     "CompositeTransform",
     "CoordinateSystem",
+    "DeclaredInversePair",
     "DecoderResultError",
     "DirectionVocabulary",
     "DisplacementFieldTransform",
@@ -137,10 +141,13 @@ __all__ = [
     "Lattice",
     "MalformedDataError",
     "MissingDecoderError",
+    "PairedTransform",
     "ReferenceFrame",
     "Role",
+    "RoundTripResidualReport",
     "SphericalToCartesian",
     "SupportsAffine",
+    "SupportsDeclaredInverse",
     "SupportsEncoding",
     "SupportsInverse",
     "SupportsJacobian",
@@ -159,6 +166,7 @@ __all__ = [
     "encode",
     "jacobian_determinant_report",
     "polar_orthogonal_factor",
+    "round_trip_residual_report",
     "sample_displacement_field",
     "transform_named",
     "transform_tensor_components",

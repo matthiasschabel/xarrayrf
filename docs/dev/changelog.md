@@ -1,5 +1,25 @@
 # Changelog
 
+## [2026-10-13] — Field transforms, step 2: declared inverse pairs
+
+- **Problem**: A field transform has no exact inverse, so a registration result could be
+  applied in one direction only, although tools such as ANTs write the inverse warp too.
+- **Resolution**:
+  - `DeclaredInversePair` owns both directions (`_declared_inverse.py`), so neither transform
+    refers to the other. Its `PairedTransform` directions expose a Jacobian exactly when the
+    member does, through a private subclass, so the runtime capability checks stay truthful.
+  - `SupportsDeclaredInverse`; `CompositeTransform.declared_inverse()` prefers exact inverses
+    and checks that each inverse reverses its member's endpoints.
+  - `round_trip_residual_report` (`_round_trip_residual.py`) validates both directions'
+    results before subtracting.
+  - Plan reviewed by Codex. Findings: validate user results, check each inverse's endpoints,
+    accept undeclared units as one unit, refuse affine members. The design's half equality is
+    revised: directions compare their pairs, so equal directions have equal declared inverses.
+- **Files affected**: `src/xarrayrf/_declared_inverse.py`, `_round_trip_residual.py`,
+  `_composite.py`, `_transform.py`, `_encoding.py`, `__init__.py`,
+  `tests/test_declared_inverse.py`, `docs/core_interface.md`, `CHANGELOG.md`.
+- **Reviewed by**: Codex gpt-6-sol (reasoning effort high)
+
 ## [2026-10-12] — Field transforms, step 1: dense and B-spline displacement transforms
 
 - **Problem**: Only affine transforms existed. Deformable registration results could not be

@@ -475,6 +475,36 @@ world-to-index map, using local steps on nonuniform axes. `at` is required.
 
 `encode` refuses field transforms until their persistence by reference lands.
 
+#### Declared inverses
+
+A field has no exact `inverse()`. Registration tools often write one anyway, such as ANTs'
+`1InverseWarp` beside `1Warp`. `DeclaredInversePair(forward, backward)` records that
+declaration without verifying it:
+
+```python
+pair = rf.DeclaredInversePair(warp, inverse_warp)  # fixed -> warped, warped -> fixed
+chain = rf.CompositeTransform(pair.forward, affine)  # ANTs: the warp, then the affine to moving
+back = chain.declared_inverse()  # affine.inverse(), then pair.backward
+report = rf.round_trip_residual_report(chain, grid)  # .residual, .distance, .maximum, ...
+```
+
+- `pair.forward` and `pair.backward` are `PairedTransform`s. Each maps points like its member
+  and provides a Jacobian exactly when its member does. `declared_inverse()` returns the other
+  direction. Neither has `inverse()`, so code that needs an exact inverse keeps refusing them.
+- `backward` must run from `forward.target` to `forward.source`. A member that is already a
+  direction of a pair is refused, and so is an affine, which has an exact inverse.
+- Pairs compare their members in order. Two directions are equal when they are the same
+  direction of equal pairs, so equal directions have equal declared inverses.
+- `CompositeTransform.declared_inverse()` reverses the chain. Each member contributes its exact
+  inverse where it has one and its declared inverse otherwise; a nested chain contributes its
+  own `declared_inverse()`. A member with neither, such as an unpaired field, is refused, as is
+  an inverse whose endpoints do not reverse its member's. `inverse()` is unchanged.
+- `round_trip_residual_report(transform, at)` maps points or a grid's samples through the
+  transform and back. It reports `inverse(transform(x)) - x` as `residual`, its length as
+  `distance`, and `maximum`, `root_mean_square` and `unit`. The source must be Cartesian with
+  one unit on every axis. To check the other direction, pass `pair.backward`.
+- `encode` refuses pairs and their directions until stage 1b.
+
 ### Tensor transformation
 
 Points move with `transform_point`. Values with a direction (velocities, gradients, stress

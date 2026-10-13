@@ -28,6 +28,7 @@ from ._chart_transitions import (
 )
 from ._composite import CompositeTransform
 from ._coordinate_system import CARTESIAN, CoordinateSystem
+from ._declared_inverse import DeclaredInversePair, PairedTransform
 from ._field_transform import BSplineTransform, DisplacementFieldTransform
 from ._frame import ReferenceFrame
 from ._frame_field import EastNorthUp, FrameField
@@ -311,6 +312,12 @@ def _encode(value: object) -> dict[str, Any]:
             f"{type(value).__name__} cannot be encoded yet: field transforms hold arrays that "
             "an inline record cannot carry, and their persistence by reference is not "
             "implemented (field transform design, stage 1b)",
+        )
+    if isinstance(value, DeclaredInversePair | PairedTransform):
+        raise TypeError(
+            f"{type(value).__name__} cannot be encoded yet: a declared inverse pair is encoded "
+            "as one record owning both directions, which is not implemented (field transform "
+            "design, stage 1b)",
         )
     if isinstance(value, SupportsEncoding) and isinstance(value, SupportsPoints):
         return _encode_extension(value)

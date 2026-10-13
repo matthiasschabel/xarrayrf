@@ -13,6 +13,7 @@ from ._array_coordinates import ArrayCoordinates
 from ._transform import (
     Endpoint,
     SupportsAffine,
+    SupportsDeclaredInverse,
     SupportsInverse,
     SupportsJacobian,
     SupportsPoints,
@@ -53,8 +54,9 @@ class CompositeTransform:
     Capabilities follow the members. Points are always mapped. The Jacobian is available when
     every member provides one and follows the chain rule; ``at`` is required unless every member
     is affine. The inverse is available when every member's is, and applies their inverses in
-    reverse order. Where a member lacks a capability, the corresponding method raises rather
-    than approximating.
+    reverse order. The declared inverse follows the same rule but also admits a member's
+    producer-declared inverse, unverified, where it has no exact one. Where a member lacks a
+    capability, the corresponding method raises rather than approximating.
 
     Use :func:`compose` to obtain a single collapsed :class:`~xarrayrf.AffineTransform` when
     every member is affine.
@@ -199,6 +201,44 @@ class CompositeTransform:
             inverses.append(check_transform(member.inverse()))
         return CompositeTransform(*inverses)
 
+    def declared_inverse(self) -> CompositeTransform:
+        """Return the chain of exact or declared inverses in reverse order.
+
+        A member's exact ``inverse()`` is used where it has one, and its producer-declared
+        inverse otherwise, such as the other direction of a
+        :class:`~xarrayrf.DeclaredInversePair`; a nested chain contributes its own
+        ``declared_inverse()``. Declared inverses are not verified:
+        :func:`~xarrayrf.round_trip_residual_report` measures them.
+
+        Raises:
+            TypeError: If a member has neither an exact nor a declared inverse, such as a
+                field transform without its pair.
+            ValueError: If a member's inverse is not determined, such as a non-square affine,
+                or does not run from the member's target to its source.
+        """
+        missing = [
+            index
+            for index, member in enumerate(self._members)
+            if not has_exact_or_declared_inverse(member)
+        ]
+        if missing:
+            raise TypeError(
+                f"transforms {missing} have neither an exact nor a declared inverse, so the "
+                "chain has no declared inverse; a field transform needs its producer's inverse, "
+                "paired with DeclaredInversePair",
+            )
+        inverses = []
+        for index in reversed(range(len(self._members))):
+            member = self._members[index]
+            inverse = check_transform(exact_or_declared_inverse(member))
+            if inverse.source != member.target or inverse.target != member.source:
+                raise ValueError(
+                    f"the inverse of transform {index} maps {inverse.source!r} to "
+                    f"{inverse.target!r}; expected {member.target!r} to {member.source!r}",
+                )
+            inverses.append(inverse)
+        return CompositeTransform(*inverses)
+
     def __eq__(self, other: object) -> bool:
         """Compare members in order."""
         if not isinstance(other, CompositeTransform):
@@ -212,6 +252,25 @@ class CompositeTransform:
     def __repr__(self) -> str:
         """Return a representation listing the members."""
         return f"CompositeTransform({', '.join(repr(member) for member in self._members)})"
+
+
+def has_exact_or_declared_inverse(member: object) -> bool:
+    """Whether :func:`exact_or_declared_inverse` can invert ``member``."""
+    return isinstance(member, CompositeTransform | SupportsInverse | SupportsDeclaredInverse)
+
+
+def exact_or_declared_inverse(transform: object) -> object:
+    """A nested chain's declared inverse, else the exact inverse, else the declared one.
+
+    The caller checks :func:`has_exact_or_declared_inverse` (or catches the ``TypeError``) first.
+    """
+    if isinstance(transform, CompositeTransform):
+        return transform.declared_inverse()
+    if isinstance(transform, SupportsInverse):
+        return transform.inverse()
+    if isinstance(transform, SupportsDeclaredInverse):
+        return transform.declared_inverse()
+    raise TypeError(f"{type(transform).__name__} has neither an exact nor a declared inverse")
 
 
 def _trusted(member: SupportsPoints) -> bool:
