@@ -1,6 +1,6 @@
 # Resampling performance: closing the gap with SimpleITK
 
-**Status:** Active (plan reviewed and revised; decisions made; Step 0 next)
+**Status:** Active (Steps 0 and 1 implemented; Step 2 next)
 **Last updated:** 2026-10-13
 **Scope:** Point-method resampling (`nearest`, `linear`, `cubic`) on the general path in
 `_resampling.py`; field transform evaluation in `_field_transform.py`; source location in
@@ -53,7 +53,8 @@ suite green, including the ITK fixture, edge-probe and golden resampling tests.
 
 ### Step 0: benchmark hardening
 
-`benchmarks/field_transform_benchmark.py` and a new `benchmarks/resample_benchmark.py`:
+`benchmarks/field_transform_benchmark.py` keeps field evaluation; a new
+`benchmarks/field_resample_benchmark.py` measures whole resampling against SimpleITK:
 
 - warmed, median of three timed runs; `tracemalloc` peak in a separate untimed run;
 - record native thread limits (set `OMP_NUM_THREADS`/`OPENBLAS_NUM_THREADS` to 1 for
@@ -61,6 +62,21 @@ suite green, including the ITK fixture, edge-probe and golden resampling tests.
 - compare like for like: SimpleITK with `domain="cells"` semantics and the same `fill_value`;
 - lines: dense field, B-spline field, affine-only (lattice path reference), 2-D field; each at
   float32 and float64 input; worker counts 1, 2, 4, 8 once Step 4 lands.
+
+Baseline before Step 1 (`field_resample_benchmark.py`, median of three warmed runs, native
+pools pinned to one thread; 16.7M points; Mpt/s; max difference from SimpleITK):
+
+| Case | xarrayrf | SimpleITK 1 thread | SimpleITK 10 threads | max diff |
+|---|---|---|---|---|
+| 3-D dense field, float32 | 3.95 | 36.3 | 190 | 3.0e-8 |
+| 3-D dense field, float64 | 3.66 | 36.6 | 181 | 7.9e-14 |
+| 3-D B-spline field, float32 | 1.52 | — | — | — |
+| 3-D affine (lattice path), float32 | 34.6 | 214 | 899 | 3.0e-8 |
+| 2-D dense field, float32 | 6.55 | 68.4 | 311 | 3.0e-8 |
+
+The agreement confirms the like-for-like setup (the float32 difference is SimpleITK's float32
+output). The affine lattice path, `scipy.ndimage.affine_transform`, is itself 6× behind
+SimpleITK single-threaded; Step 4's threads and Step 5's engine apply to it too.
 
 ### Step 1: output dtype follows the data
 
@@ -212,4 +228,7 @@ Plan review (Codex gpt-6-astra, high, 2026-10-13): Revise.
 
 1. Done: Codex plan review (gpt-6-astra, high); revised.
 2. Done: maintainer decisions.
-3. Steps 0–5 in order, each with an implementation review, docs and changelog.
+3. Done: Steps 0 and 1 (implementation review, Codex gpt-6-astra high: B1 missing weights kept
+   double, B2 cubic coefficients kept double near the dtype maximum, N1 field benchmark
+   hardened, N2 docs; accepted on the second pass).
+4. Steps 2–5 in order, each with an implementation review, docs and changelog.
