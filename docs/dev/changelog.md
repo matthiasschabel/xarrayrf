@@ -1,5 +1,20 @@
 # Changelog
 
+## [2026-10-13] — Resampling through fields: memory layout and plumbing (performance plan, Step 2)
+
+- **Problem**: Resampling through a dense field ran at 3.95 Mpt/s against SimpleITK's 36 on
+  one thread; profiling showed most time outside SciPy, in narrow `(N, 3)` reductions and
+  products, strided field components, and per-row classification, gathers and scatters for
+  blocks wholly inside the field.
+- **Resolution**: Field components stored contiguously; index rows `(D, N)` from one anchored
+  linear map per uniform grid; a per-block bounds check that skips classification for inside
+  blocks; `locate` builds rows; `_interpolate` skips unneeded masks and clips; affine
+  evaluation by `einsum`; integer target indices. Validation was measured at about 1% and kept.
+  3-D dense 5.57 Mpt/s, 2-D dense 10.0.
+- **Files affected**: `src/xarrayrf/_field_transform.py`, `src/xarrayrf/_affine.py`,
+  `src/xarrayrf/_positions.py`, `src/xarrayrf/_resampling.py`, `tests/test_field_transforms.py`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high)
+
 ## [2026-10-13] — Resampling keeps floating precision (performance plan, Step 1)
 
 - **Problem**: Resampling promoted float32 and complex64 values to float64 and complex128,

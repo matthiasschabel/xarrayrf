@@ -157,10 +157,11 @@ def locator(
                     roundoff=0.0 if roundoff is None else roundoff[..., axis],
                 )
             columns.append(column)
-        positions = np.stack(columns, axis=-1)
+        # Rows (D, ...) reduce and interpolate fastest; callers receive the (..., D) view.
+        rows = np.stack(columns, axis=0)
         # A point outside along any dimension is outside as a whole.
-        positions[np.isnan(positions).any(axis=-1)] = np.nan
-        return positions
+        rows[:, np.isnan(rows).any(axis=0)] = np.nan
+        return np.moveaxis(rows, 0, -1)
 
     return locate
 

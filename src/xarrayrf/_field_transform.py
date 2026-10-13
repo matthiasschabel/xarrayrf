@@ -56,8 +56,12 @@ Support = Literal["closed", "half-open"]
 OUTSIDE: Final[tuple[Outside, ...]] = get_args(Outside.__value__)
 
 _BLOCK: Final = 2**16
-"""Points evaluated at once, which bounds the gathered-coefficient memory (64 taps per point
-for a 3-D B-spline)."""
+"""Points evaluated at once for Jacobians, which bounds the gathered-coefficient memory (64
+taps per point for a 3-D B-spline)."""
+
+_VALUE_BLOCK: Final = 2**20
+"""Points evaluated at once for values, which gather nothing per point: SciPy's interpolation
+holds only the positions and one output column."""
 
 _STORED_DTYPES: Final = (np.dtype(np.float32), np.dtype(np.float64))
 
@@ -94,7 +98,11 @@ def _check_endpoints(source: object, target: object, *, what: str) -> None:
 def _frozen_values(
     value: object, *, field: str, shape: tuple[int, ...]
 ) -> npt.NDArray[np.floating]:
-    """Copy values into a bytes-backed buffer, keeping float32 or float64 as given."""
+    """Copy values into a bytes-backed buffer, keeping float32 or float64 as given.
+
+    The buffer is component-major, so each component is one contiguous array for SciPy's
+    interpolation (twice as fast as a strided one); the result is its ``(..., C)`` view.
+    """
     if isinstance(value, np.ma.MaskedArray):
         raise TypeError(f"{field} must not be a masked array")
     try:
@@ -115,7 +123,9 @@ def _frozen_values(
         raise ValueError(f"{field} must contain only finite values")
     # Owning bytes, rather than a read-only flag, keeps the published views from being made
     # writeable again (see frozen_float_array).
-    return np.frombuffer(np.ascontiguousarray(array).tobytes(), dtype=dtype).reshape(shape)
+    components = np.ascontiguousarray(np.moveaxis(array, -1, 0))
+    frozen = np.frombuffer(components.tobytes(), dtype=dtype).reshape(components.shape)
+    return np.moveaxis(frozen, 0, -1)
 
 
 def _tiles(sampling: AxisSampling) -> bool:
@@ -139,6 +149,7 @@ class _FieldGrid:
     __slots__ = (
         "affine_inverse",
         "axis_of",
+        "index_map",
         "lower",
         "shape",
         "steps",
@@ -235,9 +246,27 @@ class _FieldGrid:
         self.lower = np.array(lower)
         self.upper = np.array(upper)
         self.shape = tuple(grid.sizes[dim] for dim in grid.dims)
+        # With a uniform step on every axis, frame point to continuous index is one linear map
+        # of the point relative to the first sample's frame point. That anchor is subtracted
+        # before scaling, never folded into an offset: with a large origin, in the translation
+        # or in the coordinate values (projected coordinates near 1e6, or worse), folding it in
+        # would scale the origin and cancel the local coordinate after rounding.
+        self.index_map: tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]] | None = None
+        if all(step is not None for step in self.steps):
+            first = np.zeros(len(self.axis_of))
+            first[self.axis_of] = [values[0] for values in self.values]
+            scale = 1.0 / np.array(self.steps, dtype=np.float64)
+            self.index_map = (
+                self.translation + matrix @ first,
+                scale[:, None] * self.affine_inverse[self.axis_of],
+            )
 
     def positions(self, points: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Continuous indices ``(N, D)`` of frame points ``(N, D)``, extended beyond the samples."""
+        if self.index_map is not None:
+            anchor, linear = self.index_map
+            positions: npt.NDArray[np.float64] = np.einsum("nj,ij->ni", points - anchor, linear)
+            return positions
         coordinates = (points - self.translation) @ self.affine_inverse.T
         return np.stack(
             [
@@ -246,6 +275,15 @@ class _FieldGrid:
             ],
             axis=-1,
         )
+
+    def columns(self, points: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Continuous indices as contiguous rows ``(D, N)``, the layout SciPy interpolates and
+        reduces fastest, of frame points ``(N, D)``."""
+        if self.index_map is None:
+            return np.ascontiguousarray(self.positions(points).T)
+        anchor, linear = self.index_map
+        columns: npt.NDArray[np.float64] = np.einsum("nj,ij->in", points - anchor, linear)
+        return columns
 
     def position_jacobian(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """``∂p/∂x`` shaped ``(N, D, D)``: per-dimension ``1 / local step`` times the affine inverse.
@@ -308,21 +346,22 @@ def _scipy_interpolation() -> Any:
 
 
 def _sampled_values(
-    stored: npt.NDArray[np.floating], positions: npt.NDArray[np.float64], *, order: int, mode: str
+    stored: npt.NDArray[np.floating], columns: npt.NDArray[np.float64], *, order: int, mode: str
 ) -> npt.NDArray[np.float64]:
-    """``(N, C)`` values of the order-``order`` B-spline of ``stored``, without prefiltering."""
+    """``(C, N)`` values of the order-``order`` B-spline of ``stored`` at index rows ``(D, N)``,
+    without prefiltering."""
     ndimage, _ = _scipy_interpolation()
-    coordinates = positions.T
-    result = np.empty((len(positions), stored.shape[-1]))
+    result = np.empty((stored.shape[-1], columns.shape[1]))
     for channel in range(stored.shape[-1]):
-        # float64 output keeps the arithmetic in double for float32 storage.
-        result[:, channel] = ndimage.map_coordinates(
+        # Each component is contiguous (see _frozen_values); float64 output keeps the
+        # arithmetic in double for float32 storage.
+        ndimage.map_coordinates(
             stored[..., channel],
-            coordinates,
+            columns,
             order=order,
             prefilter=False,
             mode=mode,
-            output=np.float64,
+            output=result[channel],
         )
     return result
 
@@ -410,9 +449,29 @@ class _FieldTransform:
         if jacobian:
             result = np.broadcast_to(np.eye(dims), (flat.shape[0], dims, dims)).copy()
         else:
-            result = flat.copy()
-        for start in range(0, flat.shape[0], _BLOCK):
-            block = flat[start : start + _BLOCK]
+            result = np.empty_like(flat)
+        samples = np.array(lookup.shape, dtype=np.float64) - 1
+        block_size = _BLOCK if jacobian else _VALUE_BLOCK
+        for start in range(0, flat.shape[0], block_size):
+            block = flat[start : start + block_size]
+            if not jacobian:
+                columns = lookup.columns(block)
+                low, high = columns.min(axis=1), columns.max(axis=1)
+                inside = np.all(low >= lookup.lower) and np.all(
+                    high <= lookup.upper if self._upper_closed else high < lookup.upper
+                )
+                if inside:
+                    # The common case: no row to classify, gather or scatter.
+                    lowest, highest = (
+                        (lookup.lower, lookup.upper)
+                        if self._clamp_to_support
+                        else (np.zeros_like(samples), samples)
+                    )
+                    if np.any(low < lowest) or np.any(high > highest):
+                        np.clip(columns, lowest[:, None], highest[:, None], out=columns)
+                    result[start : start + len(block)] = block + self._values(columns).T
+                    continue
+                result[start : start + len(block)] = block
             positions = lookup.positions(block)
             above = (
                 positions >= lookup.upper if not self._upper_closed else positions > lookup.upper
@@ -440,10 +499,10 @@ class _FieldTransform:
             if self._clamp_to_support:
                 clamped = np.clip(wanted, lookup.lower, lookup.upper)
             else:
-                clamped = np.clip(wanted, 0.0, np.array(lookup.shape, dtype=np.float64) - 1)
+                clamped = np.clip(wanted, 0.0, samples)
             target = np.flatnonzero(rows) + start
             if not jacobian:
-                result[target] += self._values(clamped)
+                result[target] += self._values(np.ascontiguousarray(clamped.T)).T
                 continue
             derivative = self._derivative(clamped)
             # The constant extension beyond the samples, or beyond the support under "nearest",
@@ -453,7 +512,8 @@ class _FieldTransform:
         shape = (*points.shape[:-1], dims, dims) if jacobian else points.shape
         return result.reshape(shape)
 
-    def _values(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    def _values(self, columns: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Displacements ``(C, N)`` at index rows ``(D, N)`` already clamped."""
         raise NotImplementedError
 
     def _derivative(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
@@ -542,9 +602,9 @@ class DisplacementFieldTransform(_FieldTransform):
         """
         self._setup(source, target, field, grid, outside, field="field", upper_closed=False)
 
-    def _values(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    def _values(self, columns: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         # Positions are clamped to the samples, so "nearest" padding is never reached.
-        return _sampled_values(self._stored, positions, order=1, mode="nearest")
+        return _sampled_values(self._stored, columns, order=1, mode="nearest")
 
     def _derivative(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         return _multilinear_derivative(self._stored, positions)
@@ -636,10 +696,10 @@ class BSplineTransform(_FieldTransform):
             upper_closed=support == "closed",
         )
 
-    def _values(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    def _values(self, columns: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         # Taps floor(p) - 1 .. floor(p) + 2 stay inside the grid on [1, n - 2], except the
         # fourth at p = n - 2, whose weight is exactly zero, so the padding never contributes.
-        return _sampled_values(self._stored, positions, order=3, mode="grid-constant")
+        return _sampled_values(self._stored, columns, order=3, mode="grid-constant")
 
     def _derivative(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """``∂u/∂p`` through NdBSpline with cardinal knots, built once on first use."""

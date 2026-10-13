@@ -316,7 +316,9 @@ class AffineTransform:
                 the wrong trailing length, or evaluation overflows to a non-finite result.
         """
         values = self._points(points, field="points")
-        mapped = values @ self._matrix.T + self._translation
+        # einsum avoids the general matrix product's overhead on a long, narrow array.
+        mapped: npt.NDArray[np.float64] = np.einsum("...j,ij->...i", values, self._matrix)
+        mapped += self._translation
         if not np.isfinite(mapped).all():
             raise ValueError(
                 "affine evaluation produced non-finite coordinates; check the input "

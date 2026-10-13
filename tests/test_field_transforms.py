@@ -818,3 +818,31 @@ def test_bspline_jacobians_are_exact_at_the_support_faces(outside: str) -> None:
     expected = np.eye(3) + np.einsum("na,ab->nab", 2 * faces, np.diag(1 / spacing))
     assert_allclose(transform.jacobian(points), expected, atol=ATOL)
     assert_allclose(transform.transform_point(points), points + faces**2 + 1 / 3, atol=ATOL)
+
+
+def test_a_large_grid_origin_keeps_local_indices() -> None:
+    # A 0.1-spaced axis at 1e15: folding the translation into the index affine would round
+    # 1e15 + 0.125 to index 2 instead of 1.25, and move 1e15 + 0.25 (index 2.5, the excluded
+    # upper face) inside.
+    g = grid((3, 3, 3), matrix=np.diag([0.1, 1.0, 1.0]), translation=(1e15, 0.0, 0.0))
+    field = np.zeros((3, 3, 3, 3))
+    field[..., 1] = np.arange(3.0)[:, None, None]
+    points = np.array([[1e15 + 0.125, 0.0, 0.0], [1e15 + 0.25, 0.0, 0.0]])
+    mapped = dense(field, g, outside="identity").transform_point(points)
+    # Exact: linear interpolation of a linear field at representable positions.
+    assert_allclose(mapped[:, 1], [1.25, 0.0], rtol=0, atol=0)
+    with pytest.raises(ValueError, match="outside the displacement field's support"):
+        dense(field, g).transform_point(points)
+    jacobian = dense(field, g, outside="identity").jacobian(points[:1])
+    assert_allclose(jacobian[0, 1, 0], 10.0, rtol=1e-12)
+
+
+def test_large_coordinate_values_keep_local_indices() -> None:
+    # The origin can sit in the coordinate values rather than the translation; the index map
+    # must cancel it before scaling by 1 / 0.375 too.
+    g = grid((3, 3, 3), coordinates={"i": 1e15 + np.array([0.0, 0.375, 0.75])})
+    field = np.zeros((3, 3, 3, 3))
+    field[..., 1] = np.arange(3.0)[:, None, None]
+    mapped = dense(field, g).transform_point(np.array([[1e15 + 0.125, 0.0, 0.0]]))
+    # 0.125 / 0.375 rounds once.
+    assert_allclose(mapped[:, 1], [1 / 3], rtol=1e-15, atol=0)

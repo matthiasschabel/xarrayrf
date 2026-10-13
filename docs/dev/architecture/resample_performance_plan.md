@@ -1,6 +1,6 @@
 # Resampling performance: closing the gap with SimpleITK
 
-**Status:** Active (Steps 0 and 1 implemented; Step 2 next)
+**Status:** Active (Steps 0–2 implemented; Step 3 next)
 **Last updated:** 2026-10-13
 **Scope:** Point-method resampling (`nearest`, `linear`, `cubic`) on the general path in
 `_resampling.py`; field transform evaluation in `_field_transform.py`; source location in
@@ -120,6 +120,39 @@ SimpleITK single-threaded; Step 4's threads and Step 5's engine apply to it too.
 Target: at least 8 Mpt/s single-threaded on the workload, results bitwise equal or within
 roundoff of today's.
 
+**As implemented (measurement changed the plan):**
+
+- Validation is not the cost: `real_float_array` is 0.05 s of 4.8 s, and a finiteness scan
+  costs 0.5 ms per million points. The private trusted entry points were dropped; they would
+  add API surface for about 1%.
+- Memory layout was the cost. Reductions along the point axis of an `(N, 3)` array take
+  9.4 ms per million points against 0.4 ms on `(3, N)` rows; SciPy interpolates `(D, N)` rows;
+  interpolating one component of an interleaved `(..., 3)` field is twice as slow as a
+  contiguous one (74 against 36 ms per million random points). So:
+  - field transforms store components contiguously (`_frozen_values`; `field` and
+    `coefficients` stay `(..., C)` read-only views);
+  - the value path computes index rows `(D, N)` (`_FieldGrid.columns`), with one composed
+    affine when every grid step is uniform, checks bounds per block, and, for a block wholly
+    inside the support (the common case), clamps only if needed and interpolates each
+    component straight into its output row: no classification, gather or scatter;
+  - `locate` builds `(D, ...)` rows and returns their `(..., D)` view, so the resampler's
+    transpose is contiguous; `_interpolate` skips the inside mask and the clip when no row
+    needs them;
+  - affine evaluation uses `einsum` (14–17 ms per million points against 24 for `matmul` on
+    a narrow array; equal to 4e-16).
+- The composed field-index map subtracts the first sample's frame point (translation plus the
+  matrix applied to the first coordinate values) before scaling; folding an origin into the
+  offset cancels local coordinates at large origins (Step 2 review B1: a 0.1-spaced axis at
+  1e15 read index 2 for 1.25; coordinate values at 1e15 read 0.5 for 1/3). Regressions
+  `test_a_large_grid_origin_keeps_local_indices`, `test_large_coordinate_values_keep_local_indices`.
+- Integer target indices stay integer (B2). Value blocks are `2**20` points; Jacobians keep
+  `2**16`.
+
+Measured after Step 2 (Mpt/s, float32): 3-D dense field 5.22 (3.95 before), 2-D dense field
+10.0 (6.55), 3-D B-spline 1.61 (1.52; cubic taps dominate), affine 32.0 (34.6, noise). The
+profile is now 3.0 s, of which SciPy interpolation is 1.52 s and the three affine stages
+0.44 s, which Step 3 fuses. The 8 Mpt/s target moves to Step 3.
+
 ### Step 3: a fused regular-grid path for one field between affines
 
 When source and target are regular lattices, the frame map flattens to `A_post ∘ F ∘ A_pre`
@@ -130,6 +163,9 @@ regression test of regular images through a nonuniform field):
 
 - precompute `P`: target index → `F`'s continuous grid index, `Q0`: target index → source index
   through `F`'s source point, and `L`: the linear part of moving frame → source index;
+- every composed map is anchored: integer indices relative to the block's first index, and
+  frame points relative to the grids' translations, so no large origin is multiplied before
+  it cancels (Step 2 review B1);
 - per block: `p = P i` by slab broadcasting (no `unravel_index`), `u = F.values(p)` (three
   `map_coordinates` into one buffer), `s = Q0 i + L u`, then interpolate;
 - support classification closed-form: the image under `P` of a block's index box is a
@@ -231,4 +267,7 @@ Plan review (Codex gpt-6-astra, high, 2026-10-13): Revise.
 3. Done: Steps 0 and 1 (implementation review, Codex gpt-6-astra high: B1 missing weights kept
    double, B2 cubic coefficients kept double near the dtype maximum, N1 field benchmark
    hardened, N2 docs; accepted on the second pass).
-4. Steps 2–5 in order, each with an implementation review, docs and changelog.
+4. Done: Step 2 (implementation review, Codex gpt-6-astra high: B1 large-origin cancellation
+   in the composed index map, fixed for translations on the first pass and for coordinate
+   values after the convergence pass maintained it; both regressions pass).
+5. Steps 3–5 in order, each with an implementation review, docs and changelog.

@@ -67,7 +67,7 @@ local: its influence decays by the spline pole |z| = 0.268 per sample, so 24 sam
 0.268**24 ~ 2e-14 of a boundary change, below float64 resolution of the result.
 """
 
-type PositionMap = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
+type PositionMap = Callable[[npt.NDArray[np.intp]], npt.NDArray[np.float64]]
 """Target positions ``(Dt, n)`` to source positions ``(Ds, n)``, NaN where outside."""
 
 
@@ -245,9 +245,8 @@ def _general_map(
     source_axes = [source.dims.index(dim) for dim in source_dims]
     identity_order = source_dims == source.dims
 
-    def positions(target_positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        indices = target_positions.astype(np.intp)
-        points = transform.transform_point(sample_columns(samplings, indices, target_dims))
+    def positions(target_positions: npt.NDArray[np.intp]) -> npt.NDArray[np.float64]:
+        points = transform.transform_point(sample_columns(samplings, target_positions, target_dims))
         if frame_map is not None:
             points = frame_map.transform_point(points)
         located = locate(points).T
@@ -857,11 +856,15 @@ def _interpolate(
 ) -> npt.NDArray[np.generic]:
     """Interpolate one position block, holding edge values within outer cells."""
     inside = ~np.isnan(positions[0])
-    block = np.full(size, plan.fill_value, dtype=plan.output_dtype)
+    every = bool(inside.all())
+    clipped = positions if every else positions[:, inside]
     # Beyond the outer samples, in their cells, the edge value holds; a cubic spline would
-    # otherwise extrapolate there.
-    clipped = np.clip(positions[:, inside], 0.0, plan.source_last)
-    sampled = plan.ndimage.map_coordinates(
+    # otherwise extrapolate there. Most blocks lie within the samples and need no clip.
+    if clipped.size and (
+        clipped.min() < 0.0 or np.any(clipped.max(axis=1, keepdims=True) > plan.source_last)
+    ):
+        clipped = np.clip(clipped, 0.0, plan.source_last)
+    sampled: npt.NDArray[np.generic] = plan.ndimage.map_coordinates(
         volume,
         clipped,
         order=plan.order,
@@ -879,6 +882,9 @@ def _interpolate(
             output=_weight_dtype(plan),
         )
         _restore_missing(sampled, weights)
+    if every:
+        return sampled
+    block = np.full(size, plan.fill_value, dtype=plan.output_dtype)
     block[inside] = sampled
     return block
 
@@ -887,9 +893,9 @@ def _block_positions(plan: _Plan, start: int, stop: int) -> npt.NDArray[np.float
     """Locate a flattened block of target samples in the source."""
     assert plan.position_map is not None
     target_positions = (
-        np.array(np.unravel_index(np.arange(start, stop), plan.target_shape), dtype=np.float64)
+        np.array(np.unravel_index(np.arange(start, stop), plan.target_shape), dtype=np.intp)
         if plan.target_shape
-        else np.empty((0, stop - start), dtype=np.float64)
+        else np.empty((0, stop - start), dtype=np.intp)
     )
     return plan.position_map(target_positions)
 
