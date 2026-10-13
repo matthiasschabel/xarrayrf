@@ -198,8 +198,9 @@ offsets; origins 0 and 1e6; chains and declared pairs) assert equal NaN masks an
 1e-9, with a fixture failing any fallback to the general path.
 
 Review (Codex gpt-6-astra high): B1, nearly uniform axes (1e-6, accepted by the affine
-lattice path) moved positions by more than roundoff, so fusion requires exact steps
-(`EXACT_STEP_TOLERANCE`), as the general path's locator; B2, subclasses of composites,
+lattice path) moved positions by more than roundoff, so fusion first required exact steps
+(`EXACT_STEP_TOLERANCE`), as the general path's locator (later relaxed: see the precision
+contract below); B2, subclasses of composites,
 paired transforms and fields could override `transform_point`, so only the exact built-in
 types are opened or fused. N1 added tests: nearly uniform source and target, both subclass
 overrides, large coordinate labels under oblique affines around the field, a refusal first met
@@ -330,6 +331,40 @@ fallback, threads).
 
 Deferred: design (a), ITK interpolating the image too, for `domain="cells"` with centred
 cells, where its domain is ours; B-spline fields (ITK's B-spline support rules differ).
+
+## Precision Contract and Follow-up (2026-10-13)
+
+The maintainer asked for the fastest valid path to be chosen automatically and for reasonable
+precision expectations. Agreed contract (also in `docs/core_interface.md`): values at the
+data's precision; positions to about `1e-6` of a sample (an axis uniform to
+`LATTICE_TOLERANCE` is a lattice on every fast path, as the affine path always allowed); domain
+and support decisions to roundoff (`1e-9` index units). Changes:
+
+- The fused field path accepts lattices to `LATTICE_TOLERANCE` instead of
+  `EXACT_STEP_TOLERANCE`; a nearly uniform grid no longer drops to the general path
+  (`test_nearly_uniform_grids_take_the_fused_path`, values within 1e-6 of exact inversion).
+- The engine's orthogonality tolerance is `1e-9` (was `1e-12`), above the roundoff of a
+  rotation read from a file (`test_a_rotation_with_input_roundoff_still_uses_the_engine`).
+- Review (Codex gpt-6-astra high): B1, on a nearly uniform grid the domain's edges move by up
+  to the position tolerance too, so a point that close to an edge can take the fill on one
+  path and a value on the other; rejected as a code change (it is the agreed `1e-6` contract,
+  and the affine path has always behaved so) and fixed in the docs, which had claimed `1e-9`
+  agreement at edges for every lattice; N1, nearest choices may differ near, not only at, a
+  half-way point; docs corrected.
+- `_interpolate` writes into its output slice. Per-thread buffer reuse was measured in an
+  interleaved A/B against the previous commit on the same workload: within noise (3-D dense,
+  engine on: 11.5 / 43.0 Mpt/s before, 11.3 / 44.2 after, 1 thread / all), so no buffer
+  machinery was kept.
+
+Thread scaling, measured on the M5 (4 performance and 6 efficiency cores): SciPy's
+`map_coordinates` alone, GIL released, reaches 4.5× on 10 threads; plain NumPy streaming
+arithmetic 1.6× (memory bandwidth: one core already moves about 52 GB/s of the 55–80
+reachable, and fresh temporaries halve that through zero-fill page faults). The NumPy field
+path reaches 4.0×, the engine path 3.0–3.4× (its remainder is the bandwidth-bound arithmetic;
+ITK calls also allocate their output). Smaller, cache-sized blocks were slower (20 against
+37 Mpt/s at 8192 points: Python overhead per block). SimpleITK's 5.8× comes from one fused
+compiled pass per point with no intermediate arrays; matching it needs ITK interpolating the
+image too (design (a)) or a compiled kernel.
 
 ## Alternatives Considered
 

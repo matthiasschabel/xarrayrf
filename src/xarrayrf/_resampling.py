@@ -39,7 +39,6 @@ from ._positions import (
     sample_columns,
 )
 from ._sampling import (
-    EXACT_STEP_TOLERANCE,
     LATTICE_TOLERANCE,
     POSITION_SLACK,
     AxisSampling,
@@ -369,7 +368,7 @@ def _field_lattice_map(
     from the general path's by roundoff (within about 1e-9 index units). Returns None, for the
     general path, unless the field is exactly a built-in field type on a uniform grid, composites
     and pairs are exactly the built-in types, every other member is affine and square, and both
-    samplings are lattices to exact steps without single-sample source dims.
+    samplings are lattices (to ``LATTICE_TOLERANCE``) without single-sample source dims.
 
     With the map comes the block alignment, in target samples: whole rows of the first target
     dimension when SimpleITK evaluates the field (``_field_engine``), else 1. A block that is
@@ -395,12 +394,13 @@ def _field_lattice_map(
     if before is None or after is None or not isinstance(target.transform, SupportsAffine):
         return None
     try:
-        # The general path locates with exact steps, so a nearly uniform axis, which the affine
-        # lattice path accepts, would move positions here by more than roundoff.
+        # As the affine lattice path: an axis uniform to LATTICE_TOLERANCE (1e-6 of a step)
+        # is a lattice; positions, and the domain's edges, then differ from the general path's
+        # exact inversion by at most about that fraction of a sample (the agreed precision).
         target_origin, target_columns = lattice_parts(
-            target, target_dims, EXACT_STEP_TOLERANCE, single_samples=True
+            target, target_dims, LATTICE_TOLERANCE, single_samples=True
         )
-        source_lattice = lattice(source, source_dims, tolerance=EXACT_STEP_TOLERANCE)
+        source_lattice = lattice(source, source_dims, tolerance=LATTICE_TOLERANCE)
         source_inverse = equilibrated_inverse(source_lattice.matrix)
     except (TypeError, ValueError):
         return None
@@ -1162,10 +1162,14 @@ def _interpolate(
     plan: _Plan,
     volume: npt.NDArray[np.generic],
     positions: npt.NDArray[np.float64],
-    size: int,
+    out: npt.NDArray[np.generic],
     missing: npt.NDArray[np.generic] | None = None,
-) -> npt.NDArray[np.generic]:
-    """Interpolate one position block, holding edge values within outer cells."""
+) -> None:
+    """Interpolate one position block into ``out``, holding edge values within outer cells.
+
+    A block wholly inside the domain (the common case) is interpolated straight into ``out``,
+    with no intermediate array, mask or scatter.
+    """
     inside = ~np.isnan(positions[0])
     every = bool(inside.all())
     clipped = positions if every else positions[:, inside]
@@ -1181,7 +1185,7 @@ def _interpolate(
         order=plan.order,
         mode="nearest",
         prefilter=False,
-        output=plan.output_dtype,
+        output=out if every else plan.output_dtype,
     )
     if missing is not None:
         weights = plan.ndimage.map_coordinates(
@@ -1193,11 +1197,9 @@ def _interpolate(
             output=_weight_dtype(plan),
         )
         _restore_missing(sampled, weights)
-    if every:
-        return sampled
-    block = np.full(size, plan.fill_value, dtype=plan.output_dtype)
-    block[inside] = sampled
-    return block
+    if not every:
+        out[...] = plan.fill_value
+        out[inside] = sampled
 
 
 def _block_positions(plan: _Plan, start: int, stop: int) -> npt.NDArray[np.float64]:
@@ -1324,7 +1326,7 @@ def _general_block(
             start, stop = block
             positions = _block_positions(plan, start, stop)
             for index, volume in enumerate(slices):
-                flat[index, start:stop] = _interpolate(plan, volume, positions, stop - start)
+                _interpolate(plan, volume, positions, flat[index, start:stop])
 
         _run(plan, every_slice, blocks)
         return flat.reshape((*leading, *plan.target_shape))
@@ -1348,7 +1350,7 @@ def _general_block(
     ) -> None:
         start, stop = blocks[number]
         positions = cached[number] if cached is not None else _block_positions(plan, start, stop)
-        flat[index, start:stop] = _interpolate(plan, filtered, positions, stop - start, missing)
+        _interpolate(plan, filtered, positions, flat[index, start:stop], missing)
 
     for index, volume in enumerate(slices):
         filtered, missing = (

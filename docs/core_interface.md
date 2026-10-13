@@ -1185,7 +1185,17 @@ Cubic spline prefiltering may spread NaNs throughout coefficients; same-grid gat
 the original samples. Infinity behavior remains SciPy's existing behavior for interpolated
 queries; this is not normalized masked interpolation.
 
-Performance is part of the contract:
+Performance is part of the contract: each resampling takes the fastest path its inputs
+allow, and the paths agree within one precision contract rather than bit for bit:
+
+- Values keep the data's precision (float32 data, float32 result) and are compared at it.
+- Positions are accurate to about `1e-6` of a sample: an axis uniform to `LATTICE_TOLERANCE`
+  (1e-6 of a step) is a lattice on every fast path. So within that distance of a half-way
+  point a nearest-neighbour choice, and within that distance of the domain's edge the choice
+  between a value and the fill, may differ from what exact inversion of the coordinates
+  would give.
+- On exact lattices, domain and support decisions agree across paths to roundoff, within
+  about `1e-9` index units of a face.
 
 - When both arrays form lattices and every transform is affine, target positions map to source
   positions through one composed affine. Signed-permutation maps with integral offset, bounded
@@ -1200,8 +1210,9 @@ Performance is part of the contract:
   uniform grid between affine maps (including coordinate changes, composites and declared
   pairs), target indices map to field indices and source positions through precomputed
   affines, with origins cancelled before scaling; only the field is interpolated per point.
-  Boundary decisions agree with the general path to roundoff (within about `1e-9` index units
-  of a support face or domain edge). A 256³ image through a 128³ dense field resamples at about
+  Both samplings must be lattices to `LATTICE_TOLERANCE`, as on the affine path; boundary
+  decisions agree with the general path to roundoff (within about `1e-9` index units of a
+  support face or domain edge). A 256³ image through a 128³ dense field resamples at about
   8 Mpt/s on one thread, against SimpleITK's 36 (`benchmarks/field_resample_benchmark.py`).
 - With SimpleITK installed (`xarrayrf[simpleitk]`), the fused path above hands a
   `DisplacementFieldTransform` to ITK's C++ field evaluation when ITK's semantics are

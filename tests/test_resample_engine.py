@@ -367,3 +367,14 @@ def test_the_corner_margin_decides_a_raising_field(
     target = geometry(np.zeros((2, 2, 2)), fixed, np.eye(3), (corner, corner, corner))
     xrf.resample(source, target, transform=transform, domain="cells")
     assert bool(calls) is used
+
+
+def test_a_rotation_with_input_roundoff_still_uses_the_engine(calls: list[int]) -> None:
+    # A rotation read from a file, orthogonal only to about 1e-11, is still an ITK direction.
+    fixed, moving = frames(3)
+    source = geometry(np.random.default_rng(10).random((9, 10, 11)), moving, np.eye(3), np.zeros(3))
+    matrix = 1.1 * rotation(3, 0.3) + 1e-11 * np.random.default_rng(11).standard_normal((3, 3))
+    target = geometry(np.zeros((8, 9, 10)), fixed, matrix, np.full(3, 1.0))
+    fused, numpy_only = both(source, target, warp(fixed, moving, (6, 7, 8), 1.5, np.zeros(3)))
+    assert calls
+    assert_allclose(fused, numpy_only, rtol=0, atol=ATOL, equal_nan=True)

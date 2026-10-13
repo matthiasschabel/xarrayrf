@@ -1,5 +1,18 @@
 # Changelog
 
+## [2026-10-13] — Resampling precision contract: lattice tolerance on every fast path
+
+- **Problem**: The fused field path demanded exactly uniform grids (1e-12) and the SimpleITK
+  engine exactly orthogonal axes (1e-12), stricter than the affine path and than coordinates
+  read from files, sending such inputs to slower paths.
+- **Resolution**: A stated contract (values at the data's precision, positions to about 1e-6
+  of a sample, exact-lattice boundary decisions to roundoff); the fused path accepts
+  `LATTICE_TOLERANCE` lattices and the engine `1e-9` orthogonality. `_interpolate` writes into
+  its output slice; buffer reuse measured within noise and not kept.
+- **Files affected**: `src/xarrayrf/_resampling.py`, `src/xarrayrf/_sitk_engine.py`,
+  `tests/test_resample_fields.py`, `tests/test_resample_engine.py`, `docs/core_interface.md`.
+- **Reviewed by**: Codex gpt-6-astra (reasoning effort high)
+
 ## [2026-10-13] — SimpleITK field engine for resampling (performance plan, Step 5)
 
 - **Problem**: Three SciPy interpolations of a dense field cost about 1.2 s per 16.7M target

@@ -23,8 +23,10 @@ import numpy.typing as npt
 ENABLED = True
 """Tests turn the engine off to compare against the NumPy path."""
 
-ORTHOGONALITY_TOLERANCE = 1e-12
-"""Relative departure from orthogonal columns that an ITK direction matrix may absorb."""
+ORTHOGONALITY_TOLERANCE = 1e-9
+"""Departure of the normalized columns' Gram matrix from the identity that an ITK direction
+may absorb: above the roundoff of a rotation typed in or read from a file, far below any
+real shear."""
 
 
 def simpleitk() -> ModuleType | None:

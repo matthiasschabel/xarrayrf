@@ -219,37 +219,33 @@ def zero_warp(outside: Any = "identity") -> xrf.DisplacementFieldTransform:
     )
 
 
-def test_a_nearly_uniform_source_takes_the_general_path() -> None:
-    # 1.0000005 is uniform to the affine lattice path's 1e-6 but not to the general path's
-    # exact steps; fusing it would move the half-way target onto the other nearest sample.
-    values = np.broadcast_to(np.arange(3.0), (3, 3, 3)).copy()
-    regular = geometry(values, MOVING, np.eye(3), np.zeros(3))
-    irregular = xrf.Geometry(
-        xr.DataArray(
-            values,
-            dims=("k", "j", "i"),
-            coords={"i": [0, 1.0000005, 2], "j": range(3), "k": range(3)},
-        ),
-        regular.transform,
-        dims=("k", "j", "i"),
-    )
-    target = geometry(np.zeros((1, 1, 1)), FIXED, np.eye(3), (0.5, 0, 0))
-    fused = xrf.resample(irregular, target, transform=zero_warp(), method="nearest").values
-    general = xrf.resample(irregular, target, transform=Opaque(zero_warp()), method="nearest")
-    assert_array_equal(fused, general.values)
-    # The same for a nearly uniform target.
-    nearly = xrf.Geometry(
-        xr.DataArray(
-            np.zeros((3, 3, 3)),
-            dims=("k", "j", "i"),
-            coords={"i": [0.25, 1.2500005, 2.25], "j": range(3), "k": range(3)},
-        ),
-        geometry(np.zeros((3, 3, 3)), FIXED, np.eye(3), np.zeros(3)).transform,
-        dims=("k", "j", "i"),
-    )
-    fused = xrf.resample(regular, nearly, transform=zero_warp(), method="nearest").values
-    general = xrf.resample(regular, nearly, transform=Opaque(zero_warp()), method="nearest")
-    assert_array_equal(fused, general.values)
+POSITION_PRECISION = 1e-6
+"""Positions on a lattice agree with exact inversion to LATTICE_TOLERANCE of a sample."""
+
+
+@pytest.mark.usefixtures("fused_only")
+@pytest.mark.parametrize("nearly", ["source", "target"])
+def test_nearly_uniform_grids_take_the_fused_path(nearly: str) -> None:
+    # Steps uniform to 5e-7 are a lattice, as on the affine path; values of a unit-slope ramp
+    # then agree with exact inversion to that fraction of a sample.
+    ramp = np.broadcast_to(np.arange(6.0), (6, 6, 6)).copy()
+    regular = geometry(ramp, MOVING, np.eye(3), np.zeros(3))
+    labels = np.arange(6.0) + 5e-7 * np.array([0, 1, 0, -1, 0, 1])
+    if nearly == "source":
+        source = xrf.Geometry(
+            regular.array.assign_coords(i=labels), regular.transform, dims=("k", "j", "i")
+        )
+        target = geometry(np.zeros((3, 3, 4)), FIXED, 1.1 * np.eye(3), (0.3, 0.2, 0.1))
+    else:
+        source = regular
+        frame = geometry(np.zeros((3, 3, 6)), FIXED, np.eye(3), (0.3, 0.2, 0.1))
+        target = xrf.Geometry(
+            frame.array.assign_coords(i=labels), frame.transform, dims=("k", "j", "i")
+        )
+    fused = xrf.resample(source, target, transform=zero_warp()).values
+    general = xrf.resample(source, target, transform=Opaque(zero_warp())).values
+    assert_array_equal(np.isnan(fused), np.isnan(general))
+    assert_allclose(fused, general, rtol=0, atol=POSITION_PRECISION, equal_nan=True)
 
 
 class ShiftedChain(xrf.CompositeTransform):
