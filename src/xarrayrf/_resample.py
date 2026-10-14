@@ -15,10 +15,9 @@ from ._component_resampling import (
     ComponentReorientation,
     ComponentRequest,
     component_request,
+    pole_signs,
     resample_components,
 )
-from ._coordinate_system import CARTESIAN
-from ._frame import ReferenceFrame
 from ._geometry import Geometry
 from ._grid import Grid
 from ._resampling import BLOCK_POINTS, Support, check_options, execute
@@ -298,6 +297,9 @@ def _resample_with_intervals(
             Grid(adopted, source_grid.coordinates, intervals=source_grid.intervals) == target_grid
         )
 
+    # Signs that carry declared components across a pole (east and north reverse there);
+    # None when a slot's basis has no pole rule, which builds no pole halo.
+    signs = None if components is None else pole_signs(components.index.declaration, source.frame)
     plan = _plan(
         _sampling_for_plan(source),
         _sampling_for_plan(target),
@@ -313,17 +315,30 @@ def _resample_with_intervals(
         min_coverage=min_coverage,
         block_points=block_points,
         adoption_suffices=adoption_suffices,
-        # Components in a basis that varies by position (east/north, the chart basis) reverse
-        # across a pole; in a constant Cartesian basis they are continuous there.
         # Dask already runs one task per chunk in parallel; threads inside would oversubscribe.
         workers=1 if workers is None and source_array.chunks is not None else workers,
-        pole_halos=components is None
-        or all(
-            isinstance(basis, ReferenceFrame)
-            and basis.coordinate_system.representation == CARTESIAN
-            for basis in components.index.declaration.bases
-        ),
+        pole_halos=components is None or signs is not None,
     )
+    sign_input = None
+    if (
+        components is not None
+        and signs is not None
+        and plan.pole_halo
+        and plan.total
+        and bool((signs < 0).any())
+    ):
+        if source_array.dtype.kind in "bu":
+            raise ValueError(
+                f"components in {source_array.dtype} cannot be negated, as east and north are "
+                "across a pole; convert them to a signed or floating dtype"
+            )
+        component_dims = components.index.declaration.component_dims
+        sign_input = xr.DataArray(signs, dims=component_dims)
+        if source_array.chunks is not None:
+            # Match the source's chunks so the two inputs align without rechunking.
+            sign_input = sign_input.chunk(
+                {dim: source_array.chunksizes[dim] for dim in component_dims}
+            )
     source_values = source_array
     if plan.window is not None:
         source_values = source_values.isel(dict(zip(plan.source_dims, plan.window, strict=True)))
@@ -343,10 +358,11 @@ def _resample_with_intervals(
     if plan.total == 0 and ordered.chunks is not None:
         # Dask's automatic gufunc rechunking divides by zero on empty core dimensions.
         ordered = ordered.chunk({dim: -1 for dim in plan.source_dims})
+    inputs = [ordered] if sign_input is None else [ordered, sign_input]
     result: xr.DataArray = xr.apply_ufunc(
         partial(execute, plan),
-        ordered,
-        input_core_dims=[list(plan.source_dims)],
+        *inputs,
+        input_core_dims=[list(plan.source_dims)] + [[]] * (len(inputs) - 1),
         output_core_dims=[[renamed[dim] for dim in plan.target_dims]],
         exclude_dims=set(plan.source_dims),
         dask="parallelized",

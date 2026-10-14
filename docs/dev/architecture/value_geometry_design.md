@@ -1,7 +1,7 @@
 # Value geometry: vectors, tensors, pseudovectors and densities
 
 **Status:** Implemented (stages 1 to 4; pending work tabled under Deferred Work)
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-14
 **Scope:** Core: a tensor type and transform law for basis-dependent values, a component
 index carrying it, passive basis change, resampling of component variables and persistence.
 Supersedes the quantity-rule and component-binding sections of
@@ -238,7 +238,7 @@ rationale):
 | Item | Waits for | Source |
 |---|---|---|
 | Non-affine bindings (`ArrayCoordinates` bases under field-backed transforms) | nonlinear plan stage 1 | stages 2 to 4 |
-| East/north pole halos (sign flips), 2-D east/north into 3-D, persisting user frame fields, fields over another chart | a consumer | [stage 4](value_geometry_stage4_plan.md) |
+| 2-D east/north into 3-D, persisting user frame fields, fields over another chart | a consumer | [stage 4](value_geometry_stage4_plan.md) |
 | A data-borne (duck-array) carrier giving the strict invariant | a consumer that needs it; its own design | stage 2 |
 | Patched-lane hooks: `check_roll`/`check_shift`, refusing bare-dimension adoption | the xarray hook proposal | stage 2 |
 | Undeclared scalar densities through `resample` (`tensor_type=`) | a consumer | stage 3 |

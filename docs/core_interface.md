@@ -397,7 +397,7 @@ lon_lat_h = to_ecef.inverse().transform_point(xyz)
 - Exact poles (±90, or ±`math.pi / 2` in radians) map exactly onto the axis. The forward
   Jacobian there is finite and singular; the inverse Jacobian does not exist on the axis and
   raises. Scalar resampling across a pole works; resampling declared tensor components through
-  a polar target raises the error that names the target sample.
+  this transition onto a polar target raises the error that names the target sample.
 - The geodetic inverse is Vermeille's closed form. Against PROJ 9.8 (`pyproj`), the forward map
   agrees exactly, and the inverse recovers PROJ's forward inputs to about 1e−9 m; PROJ's own
   geocentric inverse is an approximation that differs by up to 8 mm at 1000 km altitude.
@@ -1065,12 +1065,19 @@ literal; only where a target is found changes. Box methods do neither.
 - **Poles**: on a global grid whose longitudes come in antipodal pairs, latitude continues
   across a pole on the meridian half a turn away, for a pole sample (±90) or cell-centred rows
   (±89.5 on a 1° grid). Targets in the polar cap are interpolated rather than filled; beyond
-  ±90 they are outside. Declared tensor components cross a pole only in a constant Cartesian
-  basis (Earth-centred x, y, z), where they are continuous; in east/north or the chart basis
-  they reverse there, so their polar-cap targets stay outside. For a polar cap, change
-  east/north/up to the Earth-centred basis (`change_component_basis(ecef,
-  transform=GeodeticToCartesian(...))`), resample, and change back. A 2-D (surface) east/north
-  field has no square Earth-centred counterpart yet, so its polar caps stay outside.
+  ±90 they are outside. Declared tensor components cross a pole in a constant Cartesian basis
+  (Earth-centred x, y, z), where they are continuous, and in an `EastNorthUp` basis over the
+  source frame (2-D or 3-D): continuing a meridian over the pole, east and north reverse, so
+  rows taken from the antipodal meridian have them negated (`up` unchanged; each stored entry of
+  a higher-order tensor takes the product of its slots' signs, and the half-turn's determinant
+  is +1, so pseudotensors and densities take no extra factor). East/north components are
+  interpolated in the cap as everywhere else, mixing neighbouring meridians' frames; for flow
+  across the pole, whose east/north components vary like `sin λ` there, changing to the
+  Earth-centred basis (`change_component_basis(ecef, transform=GeodeticToCartesian(...))`),
+  resampling and changing back is more accurate. Components in the chart basis (its longitude
+  component diverges at a pole) or a user `FrameField` leave the cap outside. East/north
+  components stored as unsigned integers cannot be negated and are refused; a signed integer
+  holding its dtype's minimum in a mirrored row is refused by name.
 - **Cost**: such sources take the general per-point path rather than the separable lattice
   path, without cropping, and cubic interpolation reads 24 extra samples on each side of the
   seam.

@@ -52,6 +52,9 @@ reasons. The stable documents are [the design](../design.md),
 - [field_transform_design.md](architecture/field_transform_design.md): stage 1, displacement,
   position and B-spline transforms on `Grid`, declared inverse pairs, a Jacobian-determinant
   diagnostic, importers, and the deformation models to support after it.
+- [east_north_pole_halo_plan.md](architecture/east_north_pole_halo_plan.md): east/north
+  components across a pole: the antipodal rows with east and north negated, the bases with a
+  pole rule, and signs that travel with Dask chunks.
 - [resample_performance_plan.md](architecture/resample_performance_plan.md): closing the
   resampling gap with SimpleITK: output dtype, row layouts, the fused field path, threads, the
   SimpleITK field engine, the precision contract and the thread-scaling analysis.

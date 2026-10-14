@@ -20,8 +20,9 @@ import xarray as xr
 
 from ._affine import equilibrated_inverse
 from ._array_coordinates import ArrayCoordinates
+from ._coordinate_system import CARTESIAN
 from ._frame import ReferenceFrame
-from ._frame_field import FrameField
+from ._frame_field import EastNorthUp, FrameField
 from ._tensor_component_declaration import ComponentBasis, TensorComponentDeclaration
 from ._tensor_components import (
     TensorComponentIndex,
@@ -132,6 +133,40 @@ def component_request(
             "component maps; use NaN or 0 for declared components"
         )
     return ComponentRequest(index, output_component_basis, component_reorientation, units)
+
+
+def pole_signs(
+    declaration: TensorComponentDeclaration, source_frame: ReferenceFrame
+) -> npt.NDArray[np.float64] | None:
+    """Signs over the component dims that carry halo rows across a pole, or ``None``.
+
+    ``None`` when some slot's basis has no pole rule, and then no pole halo is built: the chart
+    basis diverges at a pole (its longitude component goes like 1 / cos φ), and a user frame
+    field's behaviour there is unknown. A constant Cartesian basis is continuous across a pole
+    (sign +1); an east/north/up field over the source frame reverses east and north. Each stored
+    entry takes the product of its slots' signs; every map is diagonal with determinant +1, so
+    pseudotensor and density factors are 1. The plan is east_north_pole_halo_plan.md.
+    """
+    slots: list[npt.NDArray[np.float64]] = []
+    for basis in declaration.bases:
+        if (
+            isinstance(basis, ReferenceFrame)
+            and basis.coordinate_system.representation == CARTESIAN
+        ):
+            slots.append(np.ones(len(basis.axes)))
+        elif isinstance(basis, EastNorthUp) and basis.base == source_frame:
+            slots.append(np.asarray(basis._pole_signs()))
+        else:
+            return None
+    packing = declaration.packing
+    if packing is not None:
+        # Symmetry requires one basis for both slots.
+        signs = slots[0]
+        return np.array([signs[i] * signs[j] for i, j in packing.index_pairs])
+    product = np.ones(())
+    for signs in slots:
+        product = np.multiply.outer(product, signs)
+    return product
 
 
 def resample_components(

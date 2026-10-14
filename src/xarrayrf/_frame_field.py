@@ -222,6 +222,15 @@ class EastNorthUp:
         """The length unit, for every basis vector."""
         return (self._length_unit,) * len(self._axes)
 
+    def _pole_signs(self) -> tuple[float, ...]:
+        """Per-component signs that carry a row across a pole onto the antipodal meridian.
+
+        Continuing a meridian over a pole, the frame that varies smoothly along the path is
+        (east, north, up) on the near side and (-east, -north, up) of the far side: a half-turn
+        about up, determinant +1 in 2-D and 3-D alike.
+        """
+        return (-1.0, -1.0, 1.0)[: len(self._axes)]
+
     @property
     def semi_major_axis(self) -> float:
         """The figure's equatorial radius (0 for a spherical chart)."""

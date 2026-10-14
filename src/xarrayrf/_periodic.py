@@ -164,9 +164,17 @@ class PeriodicAxes:
     """Longitude halo; latitude halos are capped by the rows available."""
 
     def extend(
-        self, volume: npt.NDArray[np.generic], longitude_dim: int, latitude_dim: int | None
+        self,
+        volume: npt.NDArray[np.generic],
+        longitude_dim: int,
+        latitude_dim: int | None,
+        sign: float = 1.0,
     ) -> npt.NDArray[np.generic]:
-        """Extend one source block (in storage order) by its halos."""
+        """Extend one source block (in storage order) by its halos.
+
+        ``sign`` multiplies the rows mirrored across a pole: -1 for a component that reverses
+        there (east or north), +1 otherwise.
+        """
         lon = self.longitude
         if lon.kind != "global":
             return volume
@@ -180,12 +188,11 @@ class PeriodicAxes:
         antipodal = np.take(
             volume, lon.offset + np.remainder(columns - lon.offset + n // 2, n), axis=longitude_dim
         )
-        parts = [
-            np.take(antipodal, lat.before, axis=latitude_dim),
-            extended,
-            np.take(antipodal, lat.after, axis=latitude_dim),
-        ]
-        return np.concatenate(parts, axis=latitude_dim)
+        before = np.take(antipodal, lat.before, axis=latitude_dim)
+        after = np.take(antipodal, lat.after, axis=latitude_dim)
+        if sign < 0:
+            before, after = _negated(before), _negated(after)
+        return np.concatenate([before, extended, after], axis=latitude_dim)
 
     def locate(
         self, axis: int, coordinates: npt.NDArray[np.float64], extent: tuple[float, float]
@@ -206,6 +213,21 @@ class PeriodicAxes:
         if self.latitude is not None and axis == self.latitude.axis:
             return int(self.latitude.labels.size)
         return size
+
+
+def _negated(rows: npt.NDArray[np.generic]) -> npt.NDArray[np.generic]:
+    """Negate halo rows exactly; a signed integer's minimum has no negation in its dtype.
+
+    Unsigned and boolean components are refused before planning.
+    """
+    if rows.dtype.kind == "i" and rows.size:
+        lowest = np.iinfo(rows.dtype.str).min
+        if rows.min() == lowest:
+            raise ValueError(
+                f"a component crossing a pole is negated there, and {rows.dtype} cannot "
+                f"represent -({lowest}); convert the components to a wider or floating dtype"
+            )
+    return np.negative(rows)
 
 
 def _single_source_axis(matrix: npt.NDArray[np.float64], row: int) -> int | None:

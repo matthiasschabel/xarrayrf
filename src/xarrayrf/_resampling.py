@@ -783,8 +783,11 @@ class _Plan:
     intervals: dict[str, npt.NDArray[np.float64]]
     frame_map: SupportsPoints | None
     target_frame_points: Callable[[int, int], npt.NDArray[np.float64]]
-    extend: Callable[[npt.NDArray[np.generic]], npt.NDArray[np.generic]] | None = None
-    """Halo extension of each source block for a wrapping or pole-crossing source."""
+    extend: Callable[[npt.NDArray[np.generic], float], npt.NDArray[np.generic]] | None = None
+    """Halo extension of each source block for a wrapping or pole-crossing source; the float
+    multiplies the rows mirrored across a pole."""
+    pole_halo: bool = False
+    """Whether source rows are mirrored across a pole, so component signs matter."""
     workers: int = 1
     """Threads over blocks or slabs; 1 runs inline."""
 
@@ -924,9 +927,9 @@ def plan(
     Coordinate reads are deferred until option and frame checks have passed.
     ``adoption_suffices`` is called only for the anonymous-frame diagnostic; without it,
     adoption is treated as insufficient. ``pole_halos`` allows interpolation across a pole of
-    a global longitude/latitude source; it is off for declared components, whose basis flips
-    there. ``workers`` is None for automatic threads, or a count; transforms not known to be
-    thread-safe always run inline.
+    a global longitude/latitude source; it is off for declared components in a basis with no
+    pole rule, and ``execute`` takes the signs of those that have one. ``workers`` is None for
+    automatic threads, or a count; transforms not known to be thread-safe always run inline.
 
     Raises:
         ValueError: If either storage order does not name exactly its sampling's dims.
@@ -1067,8 +1070,8 @@ def plan(
         lon_dim = storage[periodic.longitude.axis]
         lat_dim = None if periodic.latitude is None else storage[periodic.latitude.axis]
 
-        def extend(volume: npt.NDArray[np.generic]) -> npt.NDArray[np.generic]:
-            return periodic.extend(volume, lon_dim, lat_dim)
+        def extend(volume: npt.NDArray[np.generic], sign: float) -> npt.NDArray[np.generic]:
+            return periodic.extend(volume, lon_dim, lat_dim, sign)
 
     source_last = np.array([size - 1 for size in source_shape], dtype=np.float64).reshape(-1, 1)
 
@@ -1097,6 +1100,7 @@ def plan(
         frame_map=frame_map,
         target_frame_points=_target_frame_points(target, target_dims, target_shape),
         extend=extend,
+        pole_halo=periodic is not None and periodic.latitude is not None,
         workers=threads,
     )
 
@@ -1361,8 +1365,16 @@ def _general_block(
     return flat.reshape((*leading, *plan.target_shape))
 
 
-def execute(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.generic]:
-    """Split non-geometry axes into slices and dispatch the planned sampling path."""
+def execute(
+    plan: _Plan,
+    values: npt.NDArray[np.generic],
+    signs: npt.NDArray[np.float64] | None = None,
+) -> npt.NDArray[np.generic]:
+    """Split non-geometry axes into slices and dispatch the planned sampling path.
+
+    ``signs``, broadcastable to the non-geometry shape, multiplies the rows a pole halo mirrors
+    (declared components that reverse across a pole); ``None`` leaves them as they are.
+    """
     leading = values.shape[: values.ndim - len(plan.source_dims)]
     if plan.total == 0:
         return np.empty((*leading, *plan.target_shape), dtype=plan.output_dtype)
@@ -1381,9 +1393,17 @@ def execute(plan: _Plan, values: npt.NDArray[np.generic]) -> npt.NDArray[np.gene
     if values.dtype.kind == "f" and values.dtype.itemsize < 4:
         # SciPy does not interpolate float16; the float32 result dtype holds it exactly.
         values = values.astype(plan.output_dtype)
-    slices = [values[index] for index in np.ndindex(*leading)]
+    indices = list(np.ndindex(*leading))
+    slices = [values[index] for index in indices]
     if plan.extend is not None:
-        slices = [plan.extend(volume) for volume in slices]
+        if signs is None:
+            slices = [plan.extend(volume, 1.0) for volume in slices]
+        else:
+            per_slice = np.broadcast_to(np.asarray(signs), leading)
+            slices = [
+                plan.extend(volume, float(per_slice[index]))
+                for volume, index in zip(slices, indices, strict=True)
+            ]
     if plan.lattice_map is None:
         return _general_block(plan, slices, leading)
     return _lattice_block(plan, slices, leading)

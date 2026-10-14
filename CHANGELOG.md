@@ -56,7 +56,10 @@
   `change_component_basis` and component resampling evaluate such bases, and chart transitions
   passed as `transform=`, at each sample; east/north/up converts to Earth-centred components
   even on pole rows. Components in a constant Cartesian basis now cross the poles when
-  resampling.
+  resampling, and so do components in `EastNorthUp`: rows taken across a pole from the
+  antipodal meridian have east and north negated, so polar-cap targets are interpolated rather
+  than filled. Components in the chart basis or a user `FrameField` still leave the cap
+  outside; east/north components in an unsigned integer dtype are refused there.
 - `xarrayrf.cf`: frames a CF variable of an xarray Dataset on its longitude/latitude grid, with
   the earth figure from a `latitude_longitude` grid mapping and bounds as intervals
   (`frame_variable`, `from_dataset`). No extra dependency.

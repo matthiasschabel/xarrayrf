@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-10-14] — East/north components across a pole
+
+- **Problem**: Components declared in `EastNorthUp` got no pole halo, so resampling left every
+  polar-cap target of a global longitude/latitude source outside (NaN), although east and north
+  only reverse across a pole.
+- **Resolution**: Halo rows mirrored from the antipodal meridian are negated per stored
+  component (`EastNorthUp._pole_signs`, `pole_signs` in `_component_resampling.py`), with the
+  signs passed to `execute` as a second `apply_ufunc` input chunked like the source, so Dask
+  tasks see their own components; empty targets pass no signs. Chart-basis and user-field
+  components keep the cap outside; unsigned components and a signed minimum that would be
+  negated are refused. Plan review (Codex gpt-6-astra) found an empty-target Dask chunk
+  mismatch, a wrong claim that mixed bases are always refused, and a rank-2 fixture whose
+  negated entries were zero; all fixed before implementation.
+- **Files affected**: `src/xarrayrf/_frame_field.py`, `_component_resampling.py`,
+  `_periodic.py`, `_resampling.py`, `_resample.py`, `tests/test_frame_fields.py`,
+  `docs/core_interface.md`, `CHANGELOG.md`, the value geometry design and stage 4 plan,
+  `docs/dev/architecture/east_north_pole_halo_plan.md`.
+- **Reviewed by**: Codex (gpt-6-astra, reasoning effort high)
+
 ## [2026-10-13] — QA review of the resampling performance work (8d45132..d6301a3)
 
 - **Problem**: After seven commits changing resampling's dtype policy, execution paths,

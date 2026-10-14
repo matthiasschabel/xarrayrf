@@ -1,7 +1,7 @@
 # Value geometry stage 4: pointwise bases (`FrameField`)
 
 **Status:** Implemented (2026-10-12; plan reviewed by Codex gpt-6-sol)
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-14
 **Scope:** Core and binding: a `FrameField` protocol for component bases that vary by position,
 one built-in field (`EastNorthUp` on longitude/latitude charts), pointwise basis maps in
 `rf.change_component_basis` and in resampling of declared components, their persistence, and
@@ -152,7 +152,7 @@ Stage 3's `pole_halos=components is None` widens to: no components, or every slo
 stand. East/north (and chart-basis) components still get no pole halo: they reverse across the
 pole. The documented recipe for polar caps is to change to the Earth-centred basis, resample, and
 change back, which section 4 makes a two-line operation; an automatic sign flip in the halo for
-`EastNorthUp` is deferred.
+`EastNorthUp` was deferred and is now implemented ([plan](east_north_pole_halo_plan.md)).
 
 ### 7. Persistence
 
@@ -206,7 +206,8 @@ section 4 and Deferred Work, this plan's status, the dev changelog.
 
 ## Deferred Work
 
-- Pole halos with sign flips for `EastNorthUp` (a fiber twist, as in xarraybc).
+- Pole halos with sign flips for `EastNorthUp` (a fiber twist, as in xarraybc): implemented,
+  [plan](east_north_pole_halo_plan.md).
 - Non-square fields (2-D east/north into a 3-D embedding) and spherical charts without radius.
 - Persisting user `FrameField`s (a field-extension record).
 - Fields over another chart of the array's frame (composition with the coordinate change).

@@ -403,7 +403,7 @@ def test_east_north_components_resample_onto_earth_centred_points() -> None:
     assert_allclose(values, expected, rtol=0, atol=5e-4 * np.abs(expected).max())
 
 
-def test_earth_centred_components_cross_the_poles_and_east_north_ones_do_not() -> None:
+def test_earth_centred_components_cross_the_poles() -> None:
     lon, lat = np.arange(0.0, 360.0, 10.0), np.arange(-85.0, 86.0, 10.0)
     source_grid = grid(lon=lon, lat=lat, h=np.array([0.0, 1.0]))
     points = points_of(source_grid)
@@ -419,11 +419,222 @@ def test_earth_centred_components_cross_the_poles_and_east_north_ones_do_not() -
     )
     expected = np.cross([0.0, 0.0, OMEGA], TO_ECEF.transform_point(points_of(cap)))
     assert_allclose(ordered(result), expected, atol=0.05 * np.abs(expected).max(), rtol=0)
-    east_north = declared(solid_body_enu(points), source_grid, ENU)
-    outside = east_north.rf.resample_to(
-        cap, output_component_basis=ENU, component_reorientation="jacobian"
+
+
+# East/north across a pole: halo rows from the antipodal meridian, east and north negated.
+
+# A constant Earth-centred vector seen in east/north/up: smooth everywhere, its east and north
+# vary like sin λ and cos λ near a pole, and its up component is about 0.5 there, so a missing
+# flip on any component (or on an east-up or north-up tensor entry) shows.
+CONSTANT = np.array([1.0, 0.3, 0.5])
+CELL_CENTRED = np.arange(-85.0, 86.0, 10.0)  # each pole 5° beyond the outer rows
+POLE_ROWS = np.arange(-90.0, 91.0, 10.0)
+LONGITUDES = np.arange(0.0, 360.0, 10.0)
+# Linear interpolation of a function with second derivatives up to |V| per rad² over 10° steps
+# in both angles: |V| (Δλ² + Δφ²) / 8.
+CAP_TOLERANCE = float(np.linalg.norm(CONSTANT)) * 2 * np.radians(10.0) ** 2 / 8
+NEGATE = np.diag([-1.0, -1.0, 1.0])
+
+
+def constant_enu(points: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """D(x)ᵀ V at geodetic points: the components of CONSTANT along east, north and up."""
+    lam, phi = np.radians(points[..., 0]), np.radians(points[..., 1])
+    east = np.stack([-np.sin(lam), np.cos(lam), np.zeros_like(lam)], axis=-1)
+    north = np.stack([-np.sin(phi) * np.cos(lam), -np.sin(phi) * np.sin(lam), np.cos(phi)], -1)
+    up = np.stack([np.cos(phi) * np.cos(lam), np.cos(phi) * np.sin(lam), np.sin(phi)], axis=-1)
+    return np.stack([d @ CONSTANT for d in (east, north, up)], axis=-1)
+
+
+def east_north(lat: npt.NDArray[np.float64]) -> tuple[xr.DataArray, xrf.Grid]:
+    source_grid = grid(lon=LONGITUDES, lat=lat, h=np.array([0.0, 1.0]))
+    return declared(constant_enu(points_of(source_grid)), source_grid, ENU), source_grid
+
+
+def resample_enu(source: xr.DataArray, target: xrf.Grid, **options: Any) -> xr.DataArray:
+    result: xr.DataArray = source.rf.resample_to(
+        target, output_component_basis=ENU, component_reorientation="jacobian", **options
+    )
+    return result
+
+
+def test_east_north_components_cross_a_pole_with_east_and_north_reversed() -> None:
+    source, _ = east_north(CELL_CENTRED)
+    # Linear at the pole on meridian 20°: the mean of the outer row and its mirror, which is
+    # the row on meridian 200° with east and north negated.
+    at_pole = grid(lon=np.array([20.0]), lat=np.array([90.0, -90.0]), h=np.array([0.0]))
+    result = ordered(resample_enu(source, at_pole, method="linear"))[0, :, 0]
+    for k, row in enumerate((85.0, -85.0)):
+        near = constant_enu(np.array([20.0, row, 0.0]))
+        far = NEGATE @ constant_enu(np.array([200.0, row, 0.0]))
+        assert_allclose(result[k], (near + far) / 2, rtol=1e-12, atol=1e-12)
+        # Without the flip east and north would average to about zero; here they do not.
+        assert np.abs(result[k][:2]).max() > 0.25
+    assert_allclose(result, constant_enu(points_of(at_pole))[0, :, 0], atol=CAP_TOLERANCE, rtol=0)
+
+
+@pytest.mark.parametrize(
+    ("lat", "method"),
+    [(CELL_CENTRED, "linear"), (CELL_CENTRED, "cubic"), (POLE_ROWS, "cubic")],
+    ids=["cell-centred-linear", "cell-centred-cubic", "pole-rows-cubic"],
+)
+def test_east_north_components_are_accurate_in_both_polar_caps(
+    lat: npt.NDArray[np.float64], method: str
+) -> None:
+    source, _ = east_north(lat)
+    cap = grid(
+        lon=np.array([3.0, 127.0, 251.0]),
+        lat=np.array([-89.5, -86.0, 86.0, 88.0, 89.5]),
+        h=np.array([0.0]),
+    )
+    result = resample_enu(source, cap, method=method)
+    assert not np.isnan(result.values).any()
+    assert_allclose(ordered(result), constant_enu(points_of(cap)), atol=CAP_TOLERANCE, rtol=0)
+
+
+def test_a_field_smooth_in_east_north_is_as_accurate_in_the_cap_as_inside() -> None:
+    source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
+    wind = declared(solid_body_enu(points_of(source_grid)), source_grid, ENU)
+    cap = grid(lon=np.array([20.0, 200.0]), lat=np.array([88.0, -89.0]), h=np.array([0.0]))
+    expected = solid_body_enu(points_of(cap))
+    # East is Ω (N + h) cos φ, smooth through the pole once its sign flips with cos φ.
+    result = resample_enu(wind, cap, method="linear")
+    scale = OMEGA * A
+    assert_allclose(ordered(result), expected, atol=CAP_TOLERANCE * scale, rtol=0)
+
+
+def outer(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    return values[..., :, None] * values[..., None, :]
+
+
+def test_second_order_east_north_tensors_cross_a_pole_unpacked_and_packed() -> None:
+    source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
+    tensor = outer(constant_enu(points_of(source_grid)))
+    labels = list(ENU.axes)
+    plain = xr.DataArray(
+        tensor, dims=("lon", "lat", "h", "i", "j"), coords={"i": labels, "j": labels}
+    ).rf.frame(source_grid)
+    unpacked = plain.rf.declare_tensor_components(
+        xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR, component_dims=("i", "j"), bases=ENU
+    )
+    # Voigt order (east-east, north-north, up-up, north-up, east-up, east-north) with a
+    # non-unit off-diagonal scale: the entry order differs from the unpacked one.
+    packing = xrf.SymmetricPacking.voigt(3, off_diagonal_scale=2.0)
+    packed = xr.DataArray(
+        packing.pack(tensor),
+        dims=("lon", "lat", "h", "voigt"),
+        coords={"voigt": list(packing.labels(ENU.axes))},
+    ).rf.frame(source_grid)
+    packed = packed.rf.declare_tensor_components(
+        xrf.SYMMETRIC_SECOND_ORDER_CONTRAVARIANT_TENSOR,
+        component_dims=("voigt",),
+        bases=ENU,
+        packing=packing,
+    )
+    cap = grid(lon=np.array([20.0, 200.0]), lat=np.array([88.0, 90.0]), h=np.array([0.0]))
+    expected = outer(constant_enu(points_of(cap)))
+    # East-up and north-up are about ±0.5 · 0.3 and ±0.5 near the pole: their sign is visible.
+    bound = 3 * float(np.linalg.norm(CONSTANT)) * CAP_TOLERANCE
+    result = resample_enu(unpacked, cap, method="linear").transpose("lon", "lat", "h", "i", "j")
+    assert_allclose(result.values, expected, atol=bound, rtol=0)
+    result = resample_enu(packed, cap, method="linear").transpose("lon", "lat", "h", "voigt")
+    assert_allclose(packing.unpack(result.values), expected, atol=bound, rtol=0)
+
+
+def test_a_pseudovector_crosses_a_pole_with_no_determinant_factor() -> None:
+    source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
+    plain = xr.DataArray(
+        constant_enu(points_of(source_grid)),
+        dims=("lon", "lat", "h", "component"),
+        coords={"component": list(ENU.axes)},
+    ).rf.frame(source_grid)
+    axial = plain.rf.declare_tensor_components(
+        xrf.CROSS_PRODUCT_PSEUDOVECTOR, component_dims=("component",), bases=ENU
+    )
+    cap = grid(lon=np.array([20.0]), lat=np.array([88.0, -89.0]), h=np.array([0.0]))
+    result = resample_enu(axial, cap, method="linear")
+    assert_allclose(ordered(result), constant_enu(points_of(cap)), atol=CAP_TOLERANCE, rtol=0)
+
+
+def test_a_two_dimensional_east_north_field_crosses_a_pole() -> None:
+    surface = geodetic(("lon", "lat"), ("degrees_east", "degrees_north"), ("longitude", "latitude"))
+    field = xrf.EastNorthUp(surface, **FIGURE, length_unit="m")
+    transform = xrf.AffineTransform.from_matrix(
+        source=xrf.ArrayCoordinates(("lon", "lat"), surface.units),
+        target=surface,
+        matrix=np.eye(2),
+        translation=(0.0, 0.0),
+    )
+
+    def surface_grid(lon: npt.NDArray[np.float64], lat: npt.NDArray[np.float64]) -> xrf.Grid:
+        return xrf.Grid(transform, {"lon": ("lon", lon), "lat": ("lat", lat)})
+
+    def components(target: xrf.Grid) -> npt.NDArray[np.float64]:
+        lon, lat = (np.asarray(target.coordinates[n][1], float) for n in ("lon", "lat"))  # type: ignore[index]
+        mesh = np.stack(np.meshgrid(lon, lat, np.zeros(1), indexing="ij"), axis=-1)[:, :, 0]
+        return constant_enu(mesh)[..., :2]
+
+    source_grid = surface_grid(LONGITUDES, CELL_CENTRED)
+    wind = (
+        xr.DataArray(
+            components(source_grid),
+            dims=("lon", "lat", "component"),
+            coords={"component": list(field.axes)},
+        )
+        .rf.frame(source_grid)
+        .rf.declare_tensor_components(xrf.VECTOR, component_dims=("component",), bases=field)
+    )
+    at_pole = surface_grid(np.array([20.0]), np.array([90.0]))
+    result = wind.rf.resample_to(
+        at_pole, output_component_basis=field, component_reorientation="jacobian", method="linear"
+    )
+    near = components(surface_grid(np.array([20.0]), np.array([85.0])))[0, 0]
+    far = -components(surface_grid(np.array([200.0]), np.array([85.0])))[0, 0]
+    values = np.asarray(result.transpose("lon", "lat", "component").values)[0, 0]
+    assert_allclose(values, (near + far) / 2, rtol=1e-12, atol=1e-12)
+
+
+def test_east_north_pole_halos_follow_dask_chunks() -> None:
+    source, _ = east_north(CELL_CENTRED)
+    timed = xr.concat([source, 2.0 * source], dim="time")
+    cap = grid(lon=np.array([20.0, 200.0]), lat=np.array([88.0, -89.0]), h=np.array([0.0]))
+    eager = resample_enu(timed, cap, method="linear")
+    lazy = resample_enu(timed.chunk({"component": 1, "time": 1}), cap, method="linear")
+    assert lazy.chunks is not None
+    assert_allclose(lazy.compute().values, eager.values, rtol=0, atol=0)
+    assert_allclose(
+        ordered(eager.isel(time=1)), 2.0 * constant_enu(points_of(cap)), atol=2 * CAP_TOLERANCE
+    )
+    empty = grid(lon=np.array([]), lat=np.array([88.0]), h=np.array([0.0]))
+    nothing = resample_enu(source.chunk({"component": 1}), empty, method="linear")
+    assert nothing.compute().size == 0
+
+
+def test_bases_without_a_pole_rule_leave_the_cap_outside() -> None:
+    source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
+    # The chart basis: its longitude component diverges like 1 / cos φ at a pole.
+    chart = declared(np.ones((*points_of(source_grid).shape[:-1], 3)), source_grid, EARTH)
+    cap = grid(lon=np.array([20.0]), lat=np.array([88.0]), h=np.array([0.0]))
+    outside = chart.rf.resample_to(
+        cap, output_component_basis=EARTH, component_reorientation="jacobian", method="linear"
     )
     assert np.isnan(outside.values).all()
+
+
+def test_components_that_cannot_be_negated_are_refused() -> None:
+    source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
+    shape = (*points_of(source_grid).shape[:-1], 3)
+    cap = grid(lon=np.array([20.0]), lat=np.array([88.0]), h=np.array([0.0]))
+    unsigned = declared(np.ones(shape, dtype=np.uint16), source_grid, ENU)
+    with pytest.raises(ValueError, match="uint16 cannot be negated"):
+        resample_enu(unsigned, cap, method="nearest", fill_value=0)
+    lowest = np.ones(shape, dtype=np.int16)
+    lowest[:, -1, :, 0] = np.iinfo(np.int16).min
+    signed = declared(lowest, source_grid, ENU)
+    with pytest.raises(ValueError, match=r"int16 cannot represent -\(-32768\)"):
+        resample_enu(signed, cap, method="nearest", fill_value=0)
+    # A signed integer away from its minimum negates exactly.
+    small = declared(np.ones(shape, dtype=np.int16), source_grid, ENU)
+    assert resample_enu(small, cap, method="nearest", fill_value=0).dtype.kind in "if"
 
 
 class Rotation:
