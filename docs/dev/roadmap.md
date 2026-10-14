@@ -46,7 +46,8 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 
 - **Release preparation.** Extend the native-operation audit, add hosted validation of the
   immutable patched pin, prepare the schema-freeze decision and complete the TestPyPI rehearsal
-  when publishing is authorized. Dependency-floor hosted verification is complete.
+  when publishing is authorized. Dependency-floor hosted verification is complete. Steps and
+  order: [release plan](release_plan.md).
 - **xarray upstream.** Respond to review on the open bug-fix PRs, retire duplicate patches when
   a new series baseline includes their merged fixes, verify released-xarray support when fixes
   ship, and reduce the lifecycle hook patches to two `Index` methods before

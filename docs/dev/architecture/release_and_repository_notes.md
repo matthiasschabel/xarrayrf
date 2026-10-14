@@ -1,7 +1,7 @@
 # Release, packaging and repository notes
 
 **Status:** Active
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-13
 **Scope:** Package metadata, CI lanes, dependency floors, the manual TestPyPI workflow and the
 hosted steps still outstanding. The maintainer procedure is [releasing.md](../../releasing.md).
 
@@ -111,7 +111,5 @@ not establish a published project.
 
 ## Next Steps
 
-1. Add hosted validation of the immutable patched pin and retain all four stock/floor jobs.
-2. Prepare the TestPyPI rehearsal against an identified revision and version, following
-   [releasing.md](../../releasing.md). Dispatch and upload require the maintainer's explicit
-   go-ahead.
+The hosted patched-pin job and the TestPyPI rehearsal are R3 and R6 of the
+[release plan](../release_plan.md), which holds their acceptance checks and approvals.

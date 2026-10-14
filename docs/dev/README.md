@@ -7,6 +7,8 @@ reasons. The stable documents are [the design](../design.md),
 
 - [roadmap.md](roadmap.md): release criteria, planned and parked work, and the decisions most
   likely to be revisited. Start here.
+- [release_plan.md](release_plan.md): the open release gates (audit, xarray series and hooks,
+  patched-pin CI, upstream merges, schema freeze, TestPyPI rehearsal, approval) and their order.
 - [changelog.md](changelog.md): maintainer record of fixes found in review.
 - [codebase_audit_review.md](codebase_audit_review.md): completed audit decisions, validation
   provenance and the deferred A4/A6 convenience questions. No further audit stage is queued.
