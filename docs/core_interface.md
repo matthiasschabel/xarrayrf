@@ -475,7 +475,7 @@ world-to-index map, using local steps on nonuniform axes. `at` is required.
   between such frames into a float64 dense field. This is the explicit conversion of a B-spline
   or an affine.
 
-`encode` refuses field transforms until their persistence by reference lands.
+Field transforms persist by reference; see [Persistence](#persistence).
 
 #### Declared inverses
 
@@ -505,7 +505,8 @@ report = rf.round_trip_residual_report(chain, grid)  # .residual, .distance, .ma
   transform and back. It reports `inverse(transform(x)) - x` as `residual`, its length as
   `distance`, and `maximum`, `root_mean_square` and `unit`. The source must be Cartesian with
   one unit on every axis. To check the other direction, pass `pair.backward`.
-- `encode` refuses pairs and their directions until stage 1b.
+- A pair encodes as one record owning both directions. Encoding a direction records the whole
+  pair and the direction, so the decoded direction keeps its declared inverse.
 
 ### Tensor transformation
 
@@ -1309,6 +1310,34 @@ float64. Missing or unknown dtypes and unknown fields at either level are refuse
 checked strictly, and constructor errors become
 chained `MalformedDataError`.
 Intervals are not encoded in stages 1 or 2. Schema 1 is not frozen.
+
+**Arrays by reference.** `DisplacementFieldTransform`, `BSplineTransform`,
+`DeclaredInversePair` and its directions are encoded too, but a field's array is not inline.
+`encode(value, arrays=store)` puts it into the caller's mutable mapping under a reference that
+is its content digest: `"sha256:"` and the SHA-256 of `"<dtype>:<shape>\n"` followed by the
+C-order, little-endian bytes. The record holds `{"reference": ..., "dtype": ...}`. Equal arrays
+share one entry, so several values can share a store. Without `arrays`, encoding a field raises
+`TypeError`. `decode(data, arrays=store)` resolves each reference from any mapping (a dict, a
+Zarr group), refuses a masked entry, checks the dtype (either byte order) and the digest, and
+rebuilds through the constructor, which copies into immutable storage. An unresolved reference
+or missing `arrays` raises `MissingArrayError`; a mismatch is `MalformedDataError`. Decoded
+fields are new objects, unequal to the originals under identity equality.
+
+```python
+store = {}
+data = rf.encode(pair.backward, arrays=store)
+restored = rf.decode(data, arrays=store)  # restored.declared_inverse() is the forward half
+```
+
+`xarrayrf.native` keeps a value and its arrays in one Dataset. `array.rf.to_dataset(name=None)`
+holds the encoded array (`rf.encode`) and one reserved variable `xarrayrf_array_<16 hex digits
+of the digest>` per referenced array, with the full reference in its `xarrayrf_reference`
+attribute; `native.array_from_dataset(dataset, *, name=None, decoders=None)` reads it back.
+`native.value_to_dataset(value)` and `native.value_from_dataset(dataset, *, decoders=None)` do
+the same for a standalone value, as canonical JSON in `attrs["xarrayrf_value"]`. Write the
+Dataset with `to_netcdf` or `to_zarr`; reading loads only the referenced arrays and leaves
+pixels lazy. Variable names derive from content, so Datasets holding the same field merge;
+names already in use are refused. Affine bindings use the same path with no reserved variables.
 
 ## Units
 

@@ -383,13 +383,6 @@ def test_repr_names_the_pair_and_direction() -> None:
     assert repr(pair.backward) == f"{pair!r}.backward"
 
 
-def test_encoding_is_refused_until_stage_1b() -> None:
-    pair = constant_pair([0.25, 0.0, 0.0])
-    for value in (pair, pair.forward):
-        with pytest.raises(TypeError, match=r"declared inverse pair .* stage 1b"):
-            xrf.encode(cast(Any, value))
-
-
 # --- Resampling -------------------------------------------------------------------------------
 
 

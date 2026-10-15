@@ -251,3 +251,229 @@ def test_dask_zarr_round_trip_stays_lazy(tmp_path: Path, framed: xr.DataArray) -
         restored.compute()
         assert tasks
         check_restored(restored, lazy)
+
+
+# --- Datasets holding the arrays a binding or value references --------------------------------
+
+FIELD_SYSTEM = CoordinateSystem(("a", "b"), ("mm", "mm"))
+FIXED = ReferenceFrame.declared(("test", "fixed"), FIELD_SYSTEM)
+MOVING = ReferenceFrame.declared(("test", "moving"), FIELD_SYSTEM)
+FIELD_POINTS = np.random.default_rng(5).uniform(0.0, 4.0, size=(16, 2))
+
+
+def displacement(source: ReferenceFrame, target: ReferenceFrame, dtype: type, seed: int) -> Any:
+    from xarrayrf import DisplacementFieldTransform, Grid
+
+    to_frame = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("p", "q"), ("1", "1"), sample_offset=(0.5, 0.5)),
+        target=source,
+        matrix=np.diag([1.0, 1.5]),
+        translation=np.zeros(2),
+    )
+    grid = Grid(to_frame, {"p": ("p", np.arange(6)), "q": ("q", np.arange(5))})
+    values: Any = np.random.default_rng(seed).normal(scale=0.3, size=(6, 5, 2)).astype(dtype)
+    return DisplacementFieldTransform(
+        source=source, target=target, field=values, grid=grid, outside="identity"
+    )
+
+
+@pytest.fixture
+def warped() -> xr.DataArray:
+    """An image bound to the moving frame through a dense field."""
+    from xarrayrf import CompositeTransform
+
+    to_fixed = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("y", "x"), ("1", "1")),
+        target=FIXED,
+        matrix=np.array([[0.5, 0.0], [0.1, 0.75]]),
+        translation=np.array([0.2, 0.0]),
+    )
+    image = xr.DataArray(
+        np.arange(20.0).reshape(4, 5),
+        dims=("y", "x"),
+        coords={"y": np.arange(4.0), "x": np.arange(5.0)},
+        name="image",
+        attrs={"note": "retained"},
+    )
+    transform = CompositeTransform(to_fixed, displacement(FIXED, MOVING, np.float32, 1))
+    return cast(xr.DataArray, image.rf.frame(transform, dims=("y", "x")))
+
+
+def assert_same_mapping(restored: Any, original: Any) -> None:
+    assert_allclose(
+        restored.transform_point(FIELD_POINTS),
+        original.transform_point(FIELD_POINTS),
+        rtol=0,
+        atol=0,
+    )
+
+
+def write_and_open(dataset: xr.Dataset, path: Path, backend: str) -> xr.Dataset:
+    if backend == "netcdf":
+        pytest.importorskip("scipy")
+        dataset.to_netcdf(path, engine="scipy")
+        return xr.open_dataset(path, engine="scipy")
+    pytest.importorskip("zarr")
+    dataset.to_zarr(path, consolidated=False)
+    return cast(xr.Dataset, xr.open_zarr(path, consolidated=False))
+
+
+@pytest.mark.parametrize("backend", ["netcdf", "zarr"])
+def test_a_field_bound_array_round_trips_through_a_dataset(
+    tmp_path: Path, warped: xr.DataArray, backend: str
+) -> None:
+    from xarrayrf.native import array_from_dataset
+
+    dataset = warped.rf.to_dataset()
+    (reserved,) = (name for name in dataset.data_vars if name != "image")
+    assert str(reserved).startswith("xarrayrf_array_")
+    assert dataset[reserved].attrs["xarrayrf_reference"].startswith("sha256:")
+    with write_and_open(dataset, tmp_path / f"warped.{backend}", backend) as opened:
+        restored = array_from_dataset(opened)
+        assert restored.rf.is_framed and restored.name == "image"
+        assert restored.attrs == {"note": "retained"}
+        assert "xarrayrf_array_" not in "".join(map(str, restored.coords))
+        field = restored.rf.coordinate_transform.transforms[1]
+        assert field.field.dtype == np.float32
+        assert_same_mapping(restored.rf.coordinate_transform, warped.rf.coordinate_transform)
+        assert_allclose(restored.values, warped.values, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("backend", ["netcdf", "zarr"])
+def test_a_declared_pair_round_trips_through_a_dataset(tmp_path: Path, backend: str) -> None:
+    from xarrayrf import DeclaredInversePair
+    from xarrayrf.native import value_from_dataset, value_to_dataset
+
+    pair = DeclaredInversePair(
+        displacement(FIXED, MOVING, np.float32, 1), displacement(MOVING, FIXED, np.float64, 2)
+    )
+    dataset = value_to_dataset(pair.backward)
+    assert len(dataset.data_vars) == 2
+    with write_and_open(dataset, tmp_path / f"pair.{backend}", backend) as opened:
+        restored = value_from_dataset(opened)
+        assert restored.direction == "backward"
+        assert (restored.source, restored.target) == (MOVING, FIXED)
+        assert restored.transform.field.dtype == np.float64
+        assert restored.declared_inverse().transform.field.dtype == np.float32
+        assert_same_mapping(restored, pair.backward)
+        assert_same_mapping(restored.declared_inverse(), pair.forward)
+
+
+def test_affine_bindings_and_values_use_the_same_path(framed: xr.DataArray) -> None:
+    from xarrayrf.native import array_from_dataset, value_from_dataset, value_to_dataset
+
+    dataset = framed.rf.to_dataset(name="pixels")
+    assert list(dataset.data_vars) == ["pixels"]
+    check_restored(array_from_dataset(dataset), framed)
+    transform = framed.rf.coordinate_transform
+    assert not value_to_dataset(transform).data_vars
+    assert value_from_dataset(value_to_dataset(transform)) == transform
+
+
+def test_datasets_holding_one_field_merge(warped: xr.DataArray) -> None:
+    from xarrayrf.native import array_from_dataset, value_from_dataset, value_to_dataset
+
+    field = warped.rf.coordinate_transform.transforms[1]
+    merged = xr.merge(
+        [warped.rf.to_dataset(), value_to_dataset(field)],
+        compat="no_conflicts",
+        combine_attrs="drop_conflicts",
+    )
+    assert len(merged.data_vars) == 2
+    assert_same_mapping(value_from_dataset(merged), field)
+    assert_same_mapping(
+        array_from_dataset(merged).rf.coordinate_transform, warped.rf.coordinate_transform
+    )
+
+
+def poisoned(shape: tuple[int, ...]) -> Any:
+    """A lazy array that fails if any of its chunks is computed."""
+
+    def refuse(block: Any) -> Any:
+        raise AssertionError("an unreferenced array was computed")
+
+    return da.zeros(shape, chunks=1).map_blocks(refuse, dtype=np.float64)
+
+
+def test_reading_a_dataset_loads_only_the_referenced_arrays(warped: xr.DataArray) -> None:
+    from xarrayrf.native import array_from_dataset
+
+    dataset = warped.rf.to_dataset()
+    dataset["image"] = dataset["image"].copy(data=poisoned(warped.shape))
+    dataset = dataset.assign(companion=xr.DataArray(poisoned((3,)), dims="u")).chunk()
+    with pixel_tasks() as tasks:
+        restored = array_from_dataset(dataset, name="image")
+    assert tasks, "the referenced field is loaded"
+    assert isinstance(restored.data, da.Array)
+    assert_same_mapping(restored.rf.coordinate_transform, warped.rf.coordinate_transform)
+
+
+def test_any_hashable_array_name_round_trips(warped: xr.DataArray) -> None:
+    from xarrayrf.native import array_from_dataset
+
+    dataset = warped.rename(7).rf.to_dataset()
+    assert array_from_dataset(dataset).name == 7
+    assert array_from_dataset(dataset, name=7).rf.is_framed
+
+
+def test_a_field_binding_needs_a_store_or_a_dataset(warped: xr.DataArray) -> None:
+    with pytest.raises(TypeError, match=r"rf\.to_dataset\(\)"):
+        warped.rf.encode()
+    arrays: dict[str, Any] = {}
+    encoded = warped.rf.encode(arrays=arrays)
+    assert len(arrays) == 1
+    from xarrayrf import MissingArrayError
+
+    with pytest.raises(MissingArrayError):
+        encoded.rf.decode()
+    assert_same_mapping(
+        encoded.rf.decode(arrays=arrays).rf.coordinate_transform, warped.rf.coordinate_transform
+    )
+
+
+def test_to_dataset_needs_a_free_unreserved_name(warped: xr.DataArray) -> None:
+    with pytest.raises(ValueError, match="pass name="):
+        warped.rename(None).rf.to_dataset()
+    reference = warped.rf.to_dataset()
+    (reserved,) = (str(name) for name in reference.data_vars if name != "image")
+    with pytest.raises(ValueError, match="reserved"):
+        warped.rf.to_dataset(name=reserved)
+    clash = warped.assign_coords({reserved + "_dim0": ("x", np.arange(5))})
+    with pytest.raises(ValueError, match="reserved"):
+        clash.rf.to_dataset()
+
+
+def test_array_from_dataset_chooses_one_unreserved_variable(warped: xr.DataArray) -> None:
+    from xarrayrf.native import array_from_dataset
+
+    dataset = warped.rf.to_dataset()
+    (reserved,) = (str(name) for name in dataset.data_vars if name != "image")
+    two = dataset.assign(other=xr.DataArray([1.0], dims="o"))
+    with pytest.raises(ValueError, match="pass name="):
+        array_from_dataset(two)
+    assert array_from_dataset(two, name="image").rf.is_framed
+    for name in (reserved, "missing"):
+        with pytest.raises(ValueError, match="not an unreserved data variable"):
+            array_from_dataset(dataset, name=name)
+    with pytest.raises(TypeError, match="Dataset"):
+        array_from_dataset(warped)  # type: ignore[arg-type]
+
+
+def test_reserved_variables_must_declare_one_reference_each(warped: xr.DataArray) -> None:
+    from xarrayrf.native import array_from_dataset, value_from_dataset, value_to_dataset
+
+    dataset = warped.rf.to_dataset()
+    (reserved,) = (str(name) for name in dataset.data_vars if name != "image")
+    unlabelled = dataset.copy()
+    unlabelled[reserved].attrs = {}
+    with pytest.raises(MalformedDataError, match="string 'xarrayrf_reference'"):
+        array_from_dataset(unlabelled)
+    twice = dataset.assign({"xarrayrf_array_copy": dataset[reserved]})
+    with pytest.raises(MalformedDataError, match="two reserved variables"):
+        array_from_dataset(twice)
+    for attrs in ({}, {"xarrayrf_value": "{"}):
+        with pytest.raises(MalformedDataError):
+            value_from_dataset(xr.Dataset(attrs=attrs))
+    with pytest.raises(TypeError, match="Dataset"):
+        value_from_dataset({})  # type: ignore[arg-type]
+    assert value_to_dataset(FIXED).attrs["xarrayrf_value"]

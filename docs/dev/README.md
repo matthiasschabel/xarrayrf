@@ -8,7 +8,7 @@ reasons. The stable documents are [the design](../design.md),
 - [roadmap.md](roadmap.md): release criteria, planned and parked work, and the decisions most
   likely to be revisited. Start here.
 - [release_plan.md](release_plan.md): the open release gates (audit, xarray series and hooks,
-  patched-pin CI, upstream merges, schema freeze, TestPyPI rehearsal, approval) and their order.
+  patched-pin CI, upstream merges, TestPyPI rehearsal, approval) and their order.
 - [changelog.md](changelog.md): maintainer record of fixes found in review.
 - [codebase_audit_review.md](codebase_audit_review.md): completed audit decisions, validation
   provenance and the deferred A4/A6 convenience questions. No further audit stage is queued.
@@ -52,6 +52,9 @@ reasons. The stable documents are [the design](../design.md),
 - [field_transform_design.md](architecture/field_transform_design.md): stage 1, displacement,
   position and B-spline transforms on `Grid`, declared inverse pairs, a Jacobian-determinant
   diagnostic, importers, and the deformation models to support after it.
+- [field_transform_persistence_plan.md](architecture/field_transform_persistence_plan.md):
+  stage 1b, field transforms and declared pairs persisted with content-digest array references,
+  and the Dataset save path in `xarrayrf.native`.
 - [east_north_pole_halo_plan.md](architecture/east_north_pole_halo_plan.md): east/north
   components across a pole: the antipodal rows with east and north negated, the bases with a
   pole rule, and signs that travel with Dask chunks.

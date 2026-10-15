@@ -448,6 +448,12 @@ def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
         kind = encoded["kind"]
         assert set(encoded) - {"kind"} == _FIELDS[kind], kind
         seen.add(kind)
+    pair = xrf.DeclaredInversePair(dense_field(np.float32), backward_field())
+    for value in (dense_field(np.float64), bspline_field(), pair, pair.backward):
+        encoded = xrf.encode(value, arrays={})["value"]
+        kind = encoded["kind"]
+        assert set(encoded) - {"kind"} == _FIELDS[kind], kind
+        seen.add(kind)
     assert seen == set(_FIELDS)
 
 
@@ -505,3 +511,271 @@ def test_a_cartesian_record_with_roles_is_malformed() -> None:
     data["value"]["axis_roles"] = [None]
     with pytest.raises(xrf.MalformedDataError, match="a Cartesian coordinate system has none"):
         xrf.decode(data)
+
+
+# --- Field transforms and declared pairs: arrays by reference ---------------------------------
+
+FIELD_SYSTEM = xrf.CoordinateSystem(("x", "y", "z"), ("mm",) * 3)
+FIXED = xrf.ReferenceFrame.declared(("test", "fixed"), FIELD_SYSTEM)
+MOVING = xrf.ReferenceFrame.declared(("test", "moving"), FIELD_SYSTEM)
+FIELD_INDEX = xrf.ArrayCoordinates(("i", "j", "k"), ("1",) * 3, sample_offset=(0.5,) * 3)
+FIELD_POINTS = np.random.default_rng(3).uniform(0.0, 3.0, size=(20, 3))
+
+
+def field_grid(shape: tuple[int, ...], frame: xrf.ReferenceFrame = FIXED) -> xrf.Grid:
+    transform = xrf.AffineTransform.from_matrix(
+        source=FIELD_INDEX, target=frame, matrix=np.diag([1.0, 0.8, 1.2]), translation=[0.1, 0, 0]
+    )
+    return xrf.Grid(
+        transform, {axis: (axis, np.arange(n)) for axis, n in zip("ijk", shape, strict=True)}
+    )
+
+
+def dense_field(
+    dtype: type = np.float64, shape: tuple[int, ...] = (4, 5, 3), outside: Any = "identity"
+) -> xrf.DisplacementFieldTransform:
+    values: npt.NDArray[Any] = (
+        np.random.default_rng(1).normal(scale=0.2, size=(*shape, 3)).astype(dtype)
+    )
+    return xrf.DisplacementFieldTransform(
+        source=FIXED, target=MOVING, field=values, grid=field_grid(shape), outside=outside
+    )
+
+
+def backward_field() -> xrf.DisplacementFieldTransform:
+    values = np.random.default_rng(2).normal(scale=0.2, size=(4, 5, 3, 3))
+    return xrf.DisplacementFieldTransform(
+        source=MOVING, target=FIXED, field=values, grid=field_grid((4, 5, 3), MOVING)
+    )
+
+
+def bspline_field(support: Any = "half-open") -> xrf.BSplineTransform:
+    values = np.random.default_rng(4).normal(scale=0.2, size=(5, 6, 5, 3)).astype(np.float32)
+    return xrf.BSplineTransform(
+        source=FIXED,
+        target=MOVING,
+        coefficients=values,
+        grid=field_grid((5, 6, 5)),
+        outside="nearest",
+        support=support,
+    )
+
+
+def by_reference(value: object, **kwargs: Any) -> tuple[Any, dict[str, Any], dict[str, Any]]:
+    """Encode through JSON text with a fresh store; return the decoded value, data and store."""
+    arrays: dict[str, Any] = {}
+    data = json.loads(json.dumps(xrf.encode(value, arrays=arrays)))
+    return xrf.decode(data, arrays=arrays, **kwargs), data, arrays
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        dense_field(np.float32),
+        dense_field(np.float64, outside="raise"),
+        dense_field(outside="nearest"),
+        bspline_field(),
+        bspline_field("closed"),
+    ],
+    ids=["dense-float32", "dense-raise", "dense-nearest", "bspline-half-open", "bspline-closed"],
+)
+def test_field_transforms_round_trip_by_reference(value: Any) -> None:
+    decoded, data, arrays = by_reference(value)
+    assert type(decoded) is type(value)
+    # Equality is identity, so the decoded transform is new; its declaration and data are not.
+    assert decoded != value
+    assert xrf.encode(decoded, arrays={}) == data
+    stored, restored = (
+        (value.field, decoded.field)
+        if isinstance(value, xrf.DisplacementFieldTransform)
+        else (value.coefficients, decoded.coefficients)
+    )
+    assert restored.dtype == stored.dtype and np.array_equal(restored, stored)
+    assert not restored.flags.writeable
+    reference = data["value"]["field" if "field" in data["value"] else "coefficients"]
+    assert reference == {"reference": xrf_reference(stored), "dtype": stored.dtype.name}
+    assert list(arrays) == [reference["reference"]]
+    assert decoded.outside == value.outside and decoded.grid == value.grid
+    assert_points_equal(decoded, value)
+
+
+def xrf_reference(values: npt.NDArray[np.floating]) -> str:
+    """The documented digest, computed independently of the encoder's blocked hashing."""
+    import hashlib
+
+    header = f"{values.dtype.name}:{','.join(map(str, values.shape))}\n".encode("ascii")
+    body = values.astype(values.dtype.newbyteorder("<")).tobytes(order="C")
+    return "sha256:" + hashlib.sha256(header + body).hexdigest()
+
+
+def assert_points_equal(decoded: Any, original: Any) -> None:
+    np.testing.assert_array_equal(
+        decoded.transform_point(FIELD_POINTS), original.transform_point(FIELD_POINTS)
+    )
+
+
+def test_a_composite_with_a_field_round_trips() -> None:
+    chain = xrf.CompositeTransform(
+        affine(FIELD_INDEX, FIXED), dense_field(np.float32), affine(MOVING, FIXED)
+    )
+    decoded, _, arrays = by_reference(chain)
+    assert [type(member) for member in decoded.transforms] == [
+        type(member) for member in chain.transforms
+    ]
+    assert decoded.transforms[0] == chain.transforms[0] and len(arrays) == 1
+    assert_points_equal(decoded, chain)
+
+
+def test_a_declared_pair_and_each_direction_round_trip() -> None:
+    pair = xrf.DeclaredInversePair(dense_field(np.float32), backward_field())
+    decoded, _, arrays = by_reference(pair)
+    assert isinstance(decoded, xrf.DeclaredInversePair) and len(arrays) == 2
+    assert_points_equal(decoded.forward, pair.forward)
+    assert_points_equal(decoded.backward, pair.backward)
+    for direction in ("forward", "backward"):
+        half = getattr(pair, direction)
+        decoded, data, _ = by_reference(half)
+        assert data["value"]["direction"] == direction
+        assert decoded.direction == direction
+        assert (decoded.source, decoded.target) == (half.source, half.target)
+        assert_points_equal(decoded, half)
+        assert_points_equal(decoded.declared_inverse(), half.declared_inverse())
+
+
+def test_a_pair_of_user_transforms_needs_no_arrays() -> None:
+    pair = xrf.DeclaredInversePair(Shift(FIXED, MOVING, 0.25), Shift(MOVING, FIXED, -0.25))
+    data = json.loads(json.dumps(xrf.encode(pair.forward)))
+    decoded = xrf.decode(data, decoders={"example:shift": decode_shift})
+    assert decoded == pair.forward and decoded.declared_inverse() == pair.backward
+
+
+def test_a_shared_store_keeps_arrays_with_equal_bytes_apart() -> None:
+    """Zeros of another shape or dtype have the same bytes; the header keeps them apart."""
+    zeros = [
+        xrf.DisplacementFieldTransform(
+            source=FIXED, target=MOVING, field=np.zeros((*shape, 3), dtype), grid=field_grid(shape)
+        )
+        for shape, dtype in (
+            ((2, 6, 2), np.float32),
+            ((3, 4, 2), np.float32),
+            ((2, 3, 2), np.float64),
+        )
+    ]
+    arrays: dict[str, Any] = {}
+    records = [xrf.encode(value, arrays=arrays) for value in zeros]
+    assert len(arrays) == 3
+    for value, record in zip(zeros, records, strict=True):
+        decoded = xrf.decode(record, arrays=arrays)
+        assert decoded.field.shape == value.field.shape and decoded.field.dtype == value.field.dtype
+    twin = dense_field(np.float32)
+    xrf.encode(twin, arrays=arrays)
+    xrf.encode(dense_field(np.float32), arrays=arrays)
+    assert len(arrays) == 4
+
+
+def test_a_big_endian_array_decodes_and_keeps_its_dtype() -> None:
+    value = dense_field(np.float32)
+    arrays: dict[str, Any] = {}
+    data = xrf.encode(value, arrays=arrays)
+    ((reference, stored),) = arrays.items()
+    arrays[reference] = stored.astype(">f4")
+    decoded = xrf.decode(data, arrays=arrays)
+    assert decoded.field.dtype == np.float32 and np.array_equal(decoded.field, value.field)
+
+
+def test_encoding_a_field_needs_a_store() -> None:
+    for value in (
+        dense_field(),
+        bspline_field(),
+        xrf.CompositeTransform(dense_field(), affine(MOVING, FIXED)),
+        xrf.DeclaredInversePair(dense_field(), backward_field()).backward,
+    ):
+        with pytest.raises(TypeError, match="pass arrays="):
+            xrf.encode(value)
+
+
+def field_record() -> tuple[dict[str, Any], dict[str, Any], str]:
+    arrays: dict[str, Any] = {}
+    data = xrf.encode(dense_field(np.float32), arrays=arrays)
+    return data, arrays, data["value"]["field"]["reference"]
+
+
+def test_decoding_a_reference_needs_its_array() -> None:
+    data, _, reference = field_record()
+    with pytest.raises(xrf.MissingArrayError, match="pass arrays="):
+        xrf.decode(data)
+    with pytest.raises(xrf.MissingArrayError, match=reference):
+        xrf.decode(data, arrays={})
+
+
+def test_a_resolved_array_must_match_its_record() -> None:
+    data, arrays, reference = field_record()
+    stored = arrays[reference]
+    altered = np.array(stored)
+    altered[0, 0, 0, 0] += 1
+    masked = np.ma.masked_array(stored, mask=np.zeros(stored.shape, bool))
+    masked[1, 1, 1, 1] = np.ma.masked
+    for entry, message in (
+        (stored.astype(np.float64), "recorded as float32"),
+        (stored.astype(np.int32), "recorded as float32"),
+        (altered, "does not match its digest"),
+        (stored.reshape(5, 4, 3, 3), "does not match its digest"),
+        (masked, "masked array"),
+    ):
+        with pytest.raises(xrf.MalformedDataError, match=message):
+            xrf.decode(data, arrays={reference: entry})
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda v: v["field"].update(reference="md5:00"), "64 lowercase hex"),
+        (lambda v: v["field"].update(reference="sha256:" + "A" * 64), "64 lowercase hex"),
+        (lambda v: v["field"].update(dtype="float16"), "float32 or float64"),
+        (lambda v: v["field"].update(shape=[4, 5, 3, 3]), "extra"),
+        (lambda v: v.update(outside="clamp"), "outside must be one of"),
+        (lambda v: v.update(grid=v["source"]), "grid must be a grid"),
+        (lambda v: v.update(source=v["grid"]), "endpoints must be reference frames"),
+        (lambda v: v.pop("outside"), "missing"),
+    ],
+)
+def test_malformed_field_records_are_refused(edit: Any, message: str) -> None:
+    data, arrays, _ = field_record()
+    edit(data["value"])
+    with pytest.raises(xrf.MalformedDataError, match=message):
+        xrf.decode(data, arrays=arrays)
+
+
+def test_a_wrongly_shaped_record_is_a_chained_constructor_refusal() -> None:
+    data, arrays, _ = field_record()
+    data["value"]["grid"] = xrf.encode(field_grid((4, 5, 4)))["value"]
+    with pytest.raises(xrf.MalformedDataError, match="must have shape") as caught:
+        xrf.decode(data, arrays=arrays)
+    assert isinstance(caught.value.__cause__, ValueError)
+
+
+def test_malformed_pair_records_are_refused() -> None:
+    arrays: dict[str, Any] = {}
+    pair = xrf.DeclaredInversePair(dense_field(), backward_field())
+    data = xrf.encode(pair.forward, arrays=arrays)
+    data["value"]["direction"] = "inverse"
+    with pytest.raises(xrf.MalformedDataError, match="'forward' or 'backward'"):
+        xrf.decode(data, arrays=arrays)
+    data["value"]["direction"] = "forward"
+    data["value"]["pair"] = data["value"]["pair"]["forward"]
+    with pytest.raises(xrf.MalformedDataError, match="must be a declared inverse pair"):
+        xrf.decode(data, arrays=arrays)
+    swapped = xrf.encode(pair, arrays=arrays)
+    swapped["value"]["backward"] = swapped["value"]["forward"]
+    with pytest.raises(xrf.MalformedDataError, match="backward must map"):
+        xrf.decode(swapped, arrays=arrays)
+
+
+def test_large_arrays_digest_in_bounded_blocks() -> None:
+    """A slab whose single leading row exceeds the block is split, with the same digest."""
+    from xarrayrf._encoding import _DIGEST_BLOCK_BYTES, array_reference
+
+    rows = _DIGEST_BLOCK_BYTES // (8 * 3) + 7
+    values = np.moveaxis(np.arange(3.0 * 2 * rows).reshape(3, 1, 2, rows), 0, -1)
+    assert values[:1].nbytes > _DIGEST_BLOCK_BYTES and not values.flags.c_contiguous
+    assert array_reference(values) == xrf_reference(values)

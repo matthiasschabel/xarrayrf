@@ -69,9 +69,12 @@ def test_import_registers_accessor_only_in_native_module() -> None:
         "CoordinateSpec",
         "DuckArray",
         "Report",
+        "array_from_dataset",
         "frame_array",
         "grid_coordinates",
         "index_coordinate",
+        "value_from_dataset",
+        "value_to_dataset",
     }
     assert not hasattr(xarrayrf.native, "bind")
     assert not hasattr(xarrayrf.native, "decode")

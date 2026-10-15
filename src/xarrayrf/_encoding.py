@@ -12,11 +12,13 @@ The schema is provisional until the NGFF round-trip fixtures pass; see
 
 from __future__ import annotations
 
+import hashlib
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from typing import Any, Final, Protocol, runtime_checkable
 
 import numpy as np
+import numpy.typing as npt
 
 from ._affine import AffineTransform
 from ._array_coordinates import ArrayCoordinates
@@ -69,6 +71,10 @@ class DecoderResultError(EncodingError):
     """A caller's decoder returned something that is not the encoded transform."""
 
 
+class MissingArrayError(EncodingError):
+    """An array reference that the caller's ``arrays`` does not resolve."""
+
+
 @runtime_checkable
 class SupportsEncoding(Protocol):
     """A user-defined transform that can be encoded.
@@ -108,39 +114,71 @@ _BUILT_IN: Final = frozenset(
         "tensor_component_declaration",
         "symmetric_packing",
         "packed_tensor_component_declaration",
+        "displacement_field_transform",
+        "bspline_transform",
+        "declared_inverse_pair",
+        "paired_transform",
     }
 )
 
+_REFERENCE_PREFIX: Final = "sha256:"
+"""Array references are content digests: SHA-256 of a dtype and shape header, then the C-order,
+little-endian bytes."""
 
-def encode(value: object) -> dict[str, Any]:
+_DIGEST_BLOCK_BYTES: Final = 2**24
+"""Bytes copied at once to hash a non-contiguous array."""
+
+type ArrayStore = MutableMapping[str, npt.NDArray[np.floating]]
+"""Where :func:`encode` puts the arrays a record references, keyed by reference."""
+
+
+def encode(value: object, *, arrays: ArrayStore | None = None) -> dict[str, Any]:
     """Encode a core value object as versioned JSON data.
+
+    Field transforms hold arrays that an inline record cannot carry. Their records reference
+    each array by its content digest (``"sha256:<hex>"``), and the array itself goes into
+    ``arrays`` under that reference, as the transform's read-only view.
 
     Args:
         value: A :class:`DirectionVocabulary`, :class:`CoordinateSystem`,
             :class:`ReferenceFrame`, :class:`ArrayCoordinates`, :class:`AffineTransform`,
             :class:`CompositeTransform`, :class:`Grid`, :class:`TensorType`,
-            :class:`SymmetricPacking`, :class:`TensorComponentDeclaration`, or a user-defined
-            transform implementing
-            :class:`SupportsEncoding`.
+            :class:`SymmetricPacking`, :class:`TensorComponentDeclaration`,
+            :class:`DisplacementFieldTransform`, :class:`BSplineTransform`,
+            :class:`DeclaredInversePair` or one of its directions, or a user-defined transform
+            implementing :class:`SupportsEncoding`.
+        arrays: A mutable mapping that receives the referenced arrays; required when the value
+            holds a field transform. Several values may share one mapping: equal arrays have
+            equal references.
 
     Returns:
         ``{"xarrayrf": SCHEMA_VERSION, "value": {...}}``.
 
     Raises:
-        TypeError: If the value, or a transform inside it, cannot be encoded.
+        TypeError: If the value, or a transform inside it, cannot be encoded, or it holds a
+            field transform and ``arrays`` is None.
         EncodingError: If an extension's kind is not namespaced, its version is not a
             non-negative integer, or its ``to_data`` does not return JSON data.
     """
-    return {_ENVELOPE: SCHEMA_VERSION, "value": _encode(value)}
+    return {_ENVELOPE: SCHEMA_VERSION, "value": _encode(value, arrays)}
 
 
-def decode(data: object, *, decoders: Mapping[str, Decoder] | None = None) -> Any:
+def decode(
+    data: object,
+    *,
+    decoders: Mapping[str, Decoder] | None = None,
+    arrays: Mapping[str, Any] | None = None,
+) -> Any:
     """Rebuild a value from :func:`encode` data, validating it completely.
 
     Args:
         data: The encoded data, typically from ``json.loads``.
         decoders: Decoders for namespaced extension kinds, by kind. They are the caller's
             code; nothing in the data selects code to run.
+        arrays: Resolves the array references of field transform records: a mapping from
+            reference to an array-like (a dict, a Zarr group, the arrays a Dataset holds). Each
+            array is loaded, checked against its recorded dtype and digest, and copied into the
+            transform's immutable storage.
 
     Returns:
         The decoded value, equal to the one encoded.
@@ -149,8 +187,10 @@ def decode(data: object, *, decoders: Mapping[str, Decoder] | None = None) -> An
         UnsupportedVersionError: If the schema version is not :data:`SCHEMA_VERSION`.
         UnknownKindError: If a kind is neither built in nor namespaced.
         MissingDecoderError: If a namespaced kind has no decoder in ``decoders``.
-        MalformedDataError: If fields are missing, extra or of the wrong type, or a
-            constructor refuses the declaration (the constructor's error is chained).
+        MissingArrayError: If a referenced array is not in ``arrays``, or ``arrays`` is None.
+        MalformedDataError: If fields are missing, extra or of the wrong type, a referenced
+            array has another dtype or digest, or a constructor refuses the declaration (the
+            constructor's error is chained).
         DecoderResultError: If a decoder returns something other than a point transform
             between the encoded endpoints.
     """
@@ -172,15 +212,16 @@ def decode(data: object, *, decoders: Mapping[str, Decoder] | None = None) -> An
             f"schema version {version} is not supported; this release reads version "
             f"{SCHEMA_VERSION}",
         )
-    return _Decoder(dict(decoders or {})).value(envelope["value"])
+    return _Decoder(dict(decoders or {}), arrays).value(envelope["value"])
 
 
-def _encode(value: object) -> dict[str, Any]:
+def _encode(value: object, arrays: ArrayStore | None = None) -> dict[str, Any]:
+    """Encode a value; ``arrays`` reaches every transform that may hold a field."""
     if isinstance(value, Grid):
         return {
             "kind": "grid",
             "intervals": {name: rows.tolist() for name, rows in value.intervals.items()},
-            "transform": _encode(value.transform),
+            "transform": _encode(value.transform, arrays),
             "dims": list(value.dims),
             "coordinates": {
                 name: {
@@ -257,7 +298,7 @@ def _encode(value: object) -> dict[str, Any]:
     if isinstance(value, CompositeTransform):
         return {
             "kind": "composite_transform",
-            "transforms": [_encode(member) for member in value.transforms],
+            "transforms": [_encode(member, arrays) for member in value.transforms],
         }
     if isinstance(value, TensorType):
         return {
@@ -307,18 +348,39 @@ def _encode(value: object) -> dict[str, Any]:
             "component_dims": list(value.component_dims),
             "bases": [_encode(basis) for basis in value.bases],
         }
-    if isinstance(value, DisplacementFieldTransform | BSplineTransform):
-        raise TypeError(
-            f"{type(value).__name__} cannot be encoded yet: field transforms hold arrays that "
-            "an inline record cannot carry, and their persistence by reference is not "
-            "implemented (field transform design, stage 1b)",
-        )
-    if isinstance(value, DeclaredInversePair | PairedTransform):
-        raise TypeError(
-            f"{type(value).__name__} cannot be encoded yet: a declared inverse pair is encoded "
-            "as one record owning both directions, which is not implemented (field transform "
-            "design, stage 1b)",
-        )
+    if isinstance(value, DisplacementFieldTransform):
+        return {
+            "kind": "displacement_field_transform",
+            "source": _encode(value.source),
+            "target": _encode(value.target),
+            "grid": _encode(value.grid, arrays),
+            "outside": value.outside,
+            "field": _store(value.field, arrays, value),
+        }
+    if isinstance(value, BSplineTransform):
+        return {
+            "kind": "bspline_transform",
+            "source": _encode(value.source),
+            "target": _encode(value.target),
+            "grid": _encode(value.grid, arrays),
+            "order": value.order,
+            "outside": value.outside,
+            "support": value.support,
+            "coefficients": _store(value.coefficients, arrays, value),
+        }
+    if isinstance(value, DeclaredInversePair):
+        return {
+            "kind": "declared_inverse_pair",
+            "forward": _encode(value.forward.transform, arrays),
+            "backward": _encode(value.backward.transform, arrays),
+        }
+    if isinstance(value, PairedTransform):
+        # The whole pair, so the decoded direction keeps its declared inverse.
+        return {
+            "kind": "paired_transform",
+            "pair": _encode(value.pair, arrays),
+            "direction": value.direction,
+        }
     if isinstance(value, SupportsEncoding) and isinstance(value, SupportsPoints):
         return _encode_extension(value)
     raise TypeError(
@@ -348,6 +410,52 @@ def _encode_extension(value: SupportsEncoding) -> dict[str, Any]:
         "target": _encode(transform.target),
         "data": _plain(data),
     }
+
+
+def _store(
+    values: npt.NDArray[np.floating], arrays: ArrayStore | None, owner: object
+) -> dict[str, Any]:
+    if arrays is None:
+        raise TypeError(
+            f"{type(owner).__name__} holds an array, which an inline record cannot carry; pass "
+            "arrays= (a mutable mapping that receives it), or use DataArray.rf.to_dataset() or "
+            "xarrayrf.native.value_to_dataset() to write a Dataset"
+        )
+    reference = array_reference(values)
+    if reference not in arrays:
+        arrays[reference] = values
+    return {"reference": reference, "dtype": str(values.dtype)}
+
+
+def array_reference(values: npt.NDArray[np.floating]) -> str:
+    """Return ``"sha256:<hex>"`` of ``values``' dtype, shape and C-order, little-endian bytes.
+
+    The header ``"float32:2,6,2\n"`` keeps arrays with equal bytes but another shape or dtype
+    (zeros, say) from sharing a reference. The bytes are hashed in C-order blocks of at most
+    ``_DIGEST_BLOCK_BYTES``, so a non-contiguous view (the transforms' storage is
+    component-major) is never copied whole, even when one leading-axis row is larger.
+    """
+    header = f"{values.dtype.name}:{','.join(map(str, values.shape))}\n"
+    digest = hashlib.sha256(header.encode("ascii"))
+    _hash_blocks(digest, values, values.dtype.newbyteorder("<"))
+    return _REFERENCE_PREFIX + digest.hexdigest()
+
+
+def _hash_blocks(digest: Any, values: npt.NDArray[np.floating], little: np.dtype[Any]) -> None:
+    """Feed ``values`` in C order, splitting leading axes until each block fits the bound.
+
+    The last axis holds the components (two or three), so a 1-D block is always small.
+    """
+    if values.nbytes <= _DIGEST_BLOCK_BYTES or values.ndim == 1:
+        digest.update(np.ascontiguousarray(values, dtype=little).data)
+        return
+    step = _DIGEST_BLOCK_BYTES // values[:1].nbytes
+    if step == 0:
+        for row in values:
+            _hash_blocks(digest, row, little)
+        return
+    for start in range(0, len(values), step):
+        digest.update(np.ascontiguousarray(values[start : start + step], dtype=little).data)
 
 
 def _is_namespaced(kind: str) -> bool:
@@ -460,6 +568,18 @@ _FIELDS: Final = {
     "tensor_component_declaration": {"tensor_type", "component_dims", "bases"},
     "symmetric_packing": {"index_pairs", "off_diagonal_scale"},
     "packed_tensor_component_declaration": {"tensor_type", "component_dim", "basis", "packing"},
+    "displacement_field_transform": {"source", "target", "grid", "outside", "field"},
+    "bspline_transform": {
+        "source",
+        "target",
+        "grid",
+        "order",
+        "outside",
+        "support",
+        "coefficients",
+    },
+    "declared_inverse_pair": {"forward", "backward"},
+    "paired_transform": {"pair", "direction"},
 }
 
 _TRANSITION_KINDS: Final[dict[type, str]] = {
@@ -476,8 +596,9 @@ _EXTENSION_FIELDS: Final = {"version", "source", "target", "data"}
 
 
 class _Decoder:
-    def __init__(self, decoders: dict[str, Decoder]) -> None:
+    def __init__(self, decoders: dict[str, Decoder], arrays: Mapping[str, Any] | None) -> None:
         self._decoders = decoders
+        self._arrays = arrays
 
     def value(self, data: object) -> Any:
         record = _mapping(data, "an encoded value")
@@ -705,6 +826,95 @@ class _Decoder:
             )
         return basis
 
+    def displacement_field_transform(self, fields: Mapping[str, Any]) -> DisplacementFieldTransform:
+        source, target = self._frames(fields, "a field transform")
+        return DisplacementFieldTransform(
+            source=source,
+            target=target,
+            field=self._array(fields["field"], "field"),
+            grid=self._grid(fields["grid"]),
+            outside=fields["outside"],
+        )
+
+    def bspline_transform(self, fields: Mapping[str, Any]) -> BSplineTransform:
+        source, target = self._frames(fields, "a field transform")
+        return BSplineTransform(
+            source=source,
+            target=target,
+            coefficients=self._array(fields["coefficients"], "coefficients"),
+            grid=self._grid(fields["grid"]),
+            order=fields["order"],
+            outside=fields["outside"],
+            support=fields["support"],
+        )
+
+    def declared_inverse_pair(self, fields: Mapping[str, Any]) -> DeclaredInversePair:
+        return DeclaredInversePair(self.value(fields["forward"]), self.value(fields["backward"]))
+
+    def paired_transform(self, fields: Mapping[str, Any]) -> PairedTransform:
+        pair = self.value(fields["pair"])
+        if not isinstance(pair, DeclaredInversePair):
+            raise MalformedDataError("a paired transform's pair must be a declared inverse pair")
+        direction = fields["direction"]
+        if direction not in ("forward", "backward"):
+            raise MalformedDataError(
+                f"a paired transform's direction must be 'forward' or 'backward', got {direction!r}"
+            )
+        return pair.forward if direction == "forward" else pair.backward
+
+    def _grid(self, data: object) -> Grid:
+        grid = self.value(data)
+        if not isinstance(grid, Grid):
+            raise MalformedDataError(
+                f"a field transform's grid must be a grid, got {type(grid).__name__}"
+            )
+        return grid
+
+    def _array(self, data: object, field: str) -> npt.NDArray[np.floating]:
+        """Resolve a reference, check its dtype and digest; the constructor checks the shape."""
+        record = _mapping(data, f"{field} array reference")
+        self._expect(f"{field} array reference", record, {"reference", "dtype"})
+        reference, dtype = record["reference"], record["dtype"]
+        digest = reference.removeprefix(_REFERENCE_PREFIX) if isinstance(reference, str) else ""
+        if (
+            not isinstance(reference, str)
+            or not reference.startswith(_REFERENCE_PREFIX)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            raise MalformedDataError(
+                f"{field} reference must be 'sha256:' and 64 lowercase hex digits, got {reference!r}"
+            )
+        if dtype not in ("float32", "float64"):
+            raise MalformedDataError(f"{field} dtype must be float32 or float64, got {dtype!r}")
+        if self._arrays is None:
+            raise MissingArrayError(
+                f"the {field} array {reference} is stored by reference; pass arrays= to resolve it"
+            )
+        try:
+            entry = self._arrays[reference]
+        except KeyError:
+            raise MissingArrayError(
+                f"arrays has no entry for the {field} array {reference}"
+            ) from None
+        if isinstance(entry, np.ma.MaskedArray):
+            # np.asarray would drop the mask the constructor refuses.
+            raise MalformedDataError(f"the {field} array {reference} is a masked array")
+        loaded = np.asarray(entry)
+        expected = np.dtype(dtype)
+        # Either byte order: netCDF readers can return big-endian data. The constructor keeps
+        # only native float32/float64, so convert rather than let it widen.
+        if loaded.dtype.kind != "f" or loaded.dtype.itemsize != expected.itemsize:
+            raise MalformedDataError(
+                f"the {field} array {reference} has dtype {loaded.dtype}, recorded as {dtype}"
+            )
+        loaded = loaded.astype(expected, copy=False)
+        if array_reference(loaded) != reference:
+            raise MalformedDataError(
+                f"the {field} array resolved for {reference} does not match its digest"
+            )
+        return loaded
+
     def composite_transform(self, fields: Mapping[str, Any]) -> CompositeTransform:
         members = [self.value(item) for item in self._list(fields["transforms"], "transforms")]
         return CompositeTransform(*members)
@@ -713,24 +923,30 @@ class _Decoder:
     # MalformedDataError through the dispatcher.
     def spherical_to_cartesian(self, fields: Mapping[str, Any]) -> SphericalToCartesian:
         return SphericalToCartesian(
-            *self._frames(fields), longitude_start=fields["longitude_start"]
+            *self._frames(fields, "a chart transition"), longitude_start=fields["longitude_start"]
         )
 
     def cartesian_to_spherical(self, fields: Mapping[str, Any]) -> CartesianToSpherical:
         return CartesianToSpherical(
-            *self._frames(fields), longitude_start=fields["longitude_start"]
+            *self._frames(fields, "a chart transition"), longitude_start=fields["longitude_start"]
         )
 
     def geodetic_to_cartesian(self, fields: Mapping[str, Any]) -> GeodeticToCartesian:
-        return GeodeticToCartesian(*self._frames(fields), **self._figure(fields))
+        return GeodeticToCartesian(
+            *self._frames(fields, "a chart transition"), **self._figure(fields)
+        )
 
     def cartesian_to_geodetic(self, fields: Mapping[str, Any]) -> CartesianToGeodetic:
-        return CartesianToGeodetic(*self._frames(fields), **self._figure(fields))
+        return CartesianToGeodetic(
+            *self._frames(fields, "a chart transition"), **self._figure(fields)
+        )
 
-    def _frames(self, fields: Mapping[str, Any]) -> tuple[ReferenceFrame, ReferenceFrame]:
+    def _frames(
+        self, fields: Mapping[str, Any], what: str
+    ) -> tuple[ReferenceFrame, ReferenceFrame]:
         source, target = self.value(fields["source"]), self.value(fields["target"])
         if not isinstance(source, ReferenceFrame) or not isinstance(target, ReferenceFrame):
-            raise MalformedDataError("a chart transition's endpoints must be reference frames")
+            raise MalformedDataError(f"{what}'s endpoints must be reference frames")
         return source, target
 
     @staticmethod

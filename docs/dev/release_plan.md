@@ -1,7 +1,7 @@
 # Release plan
 
 **Status:** Active
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-15
 **Scope:** The remaining release gates in the [roadmap](roadmap.md#release-criteria), their
 upstream xarray dependencies and the packaging rehearsal. Packaging, CI lanes and the publishing
 workflow themselves are in [release and repository notes](architecture/release_and_repository_notes.md);
@@ -19,7 +19,8 @@ APIs are separate workstreams, not release gates.
 
 ### Status on 2026-10-13
 
-No release work has started since 2026-10-08; R1–R7 below are all open. Criterion 4
+No release work has started since 2026-10-08; R1–R3 and R5–R7 below are open and R4 is
+dropped for the pre-alpha release. Criterion 4
 (dependency-floor CI) is met. Upstream: #11613, #11615 and #11616 are merged (`b335cea`,
 `dfd25c7`, `23c9dd1`); #11613 and #11615 are in v2026.09.0, #11616 is on xarray `main` only.
 The audit stages 1–5 are complete ([audit record](codebase_audit_review.md)).
@@ -27,15 +28,8 @@ The audit stages 1–5 are complete ([audit record](codebase_audit_review.md)).
 ### Relation to the nonlinear geometry work
 
 The release gates are independent of field transforms stages 1b and 1c and of the twist halo,
-with two exceptions:
+with one exception:
 
-- **R4 and stage 1b are coupled.** The [field transform design](architecture/field_transform_design.md)
-  plans a schema bump for 1b (array references, container-level API). The
-  [schema evolution rule](architecture/persistence_design.md) decided on 2026-10-11 admits new
-  record kinds within schema 1 and bumps only for changes to existing kinds, so whether 1b
-  really needs a bump should be settled in the 1b plan. Either way, decide the order: freeze
-  schema 1 before 1b lands (1b then adds kinds or introduces schema 2 with schema 1 still
-  readable), or land 1b first and freeze what results.
 - **R1 may add field-transform cases.** A binding can hold a field transform, so the audit
   matrix should include at least one field-backed binding where the operation paths differ
   from the affine case.
@@ -107,14 +101,16 @@ weaken the contract.
 
 ### Waiting on the maintainer
 
-**R4: freeze persistence schema 1** [criterion 3]. Prepare first: compare `encode`/`decode`
-and the native binding metadata against the [persistence design](architecture/persistence_design.md).
-Check numeric/dtype handling, integers above `2**53`, empty/scalar Grid coordinates, intervals,
-anonymous identity, named-basis encoding, and the kinds added since schema 1 was written (value
-geometry, angular charts). Re-run the encoding and NGFF tests with real NetCDF/Zarr round trips,
-and add representative-record compatibility tests where coverage is missing. Then the maintainer
-decides: freeze, or a named pre-freeze correction, and its order relative to field transforms
-stage 1b (see Context). Record the date, fields and versioning policy.
+**R4: dropped for the pre-alpha release** [criterion 3]. The maintainer decided on
+2026-10-14 not to freeze persistence schema 1 now: xarrayrf is pre-alpha with no released
+versions, so no files need protecting. Schema 1 stays provisional; new record kinds (field
+transforms stage 1b among them) are added within it. The freeze returns before the first release
+users are expected to keep files from, with this preparation: compare `encode`/`decode` and the
+native binding metadata against the [persistence design](architecture/persistence_design.md);
+check numeric/dtype handling, integers above `2**53`, empty/scalar Grid coordinates, intervals,
+anonymous identity, named-basis encoding and every kind added since schema 1 was written; re-run
+the encoding and NGFF tests with real NetCDF/Zarr round trips and add representative-record
+compatibility tests; record the date, fields and versioning policy.
 
 **R6: TestPyPI rehearsal** [criterion 5]. The maintainer verifies the pending-publisher fields
 against [releasing.md, One-time hosted setup](../releasing.md). Run its local checks in an
@@ -124,7 +120,7 @@ the checkout, then run `pip check` and the smoke test and inspect the metadata. 
 filenames cannot be reused, so inventory the published files before any retry. This rehearsal
 can happen before R5 closes.
 
-**R7: production approval**, once R1–R6 close. Compile one readiness record, rebuild and
+**R7: production approval**, once R1–R3, R5 and R6 close. Compile one readiness record, rebuild and
 install the final artifacts, and recheck floors, changelog and classifier. Production Trusted
 Publishing does not exist yet; the workflow only uploads to TestPyPI. A patched-xarray
 distribution is a separate product decision.
@@ -171,6 +167,5 @@ non-release work.
 
 1. Confirm the review workflow, then start R1's matrix proposal and R2's merge-path analysis in
    parallel.
-2. Prepare R4's comparison; settle its order against field transforms stage 1b.
-3. Keep status in the roadmap and evidence in the area notes; update this note when a thread
+2. Keep status in the roadmap and evidence in the area notes; update this note when a thread
    closes and mark it `Implemented` after R7.

@@ -1,6 +1,6 @@
 # Field-backed transforms
 
-**Status:** Active (stage 1a implemented; 1b and 1c to come)
+**Status:** Active (stages 1a and 1b implemented; 1c to come)
 **Last updated:** 2026-10-13
 **Scope:** Stage 1 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): transforms
 between Cartesian frames whose values come from a sampled field or a B-spline control grid
@@ -110,8 +110,10 @@ them but must not preclude them:
   readers. This preserves Pirana's capabilities and adds inversion. A field declared `"raise"`
   makes `resample` fail when any queried point is outside it, until 1c; ITK-family warps are
   identity outside and unaffected.
-- **1b, persistence:** array references in `encode`/`decode`, the container-level API and the
-  schema bump. Separate because a schema bump is the hardest decision here to undo.
+- **1b, persistence:** array references in `encode`/`decode` and the container-level API,
+  as new kinds within schema 1. Implemented per the
+  [persistence plan](field_transform_persistence_plan.md); the schema bump first planned here
+  was dropped (no existing kind changes; schema 1 stays provisional while pre-alpha).
 - **1c, partial domains:** `PositionFieldTransform`, per-point validity in `resample` and
   `CompositeTransform`, and NGFF import. Their producers (NGFF `coordinates`, SPM `y_`) have no
   consumer yet.
@@ -291,8 +293,10 @@ returns a single DataArray, which cannot carry a companion array.
   (netCDF) or a Zarr group, and also handles the affine-only case, so users have one save path
   whatever the transform. Array variables use reserved, collision-checked names; a name already
   present is refused. Loading copies data into immutable storage and verifies the digest.
-- Records with references are incompatible with schema-1 readers, so the schema version is
-  bumped; the new reader continues to accept schema 1.
+- Revised in 1b: no schema bump. The records are new kinds within schema 1, which an older
+  reader refuses as unknown; references are content digests over dtype, shape and bytes, so
+  one string locates and verifies an array; the container API lives in `xarrayrf.native`
+  ([persistence plan](field_transform_persistence_plan.md)).
 
 NGFF 0.6 stores field transforms as references to multiscale groups and is handled by the NGFF
 adapter, not by this schema.
@@ -392,7 +396,7 @@ Decisions 1 to 3 were settled with the maintainer on 2026-10-12:
 - ITK B-spline files are deferred.
 - Importers go in one subpackage per engine: `xarrayrf.elastix`, `xarrayrf.itk` and
   `xarrayrf.ants`.
-- Where the container-level API lives is decided in 1b.
+- The container-level API lives in `xarrayrf.native` (decided in 1b).
 
 The steps of 1a are in [the step 1 plan](field_transform_step1_plan.md).
 
@@ -437,5 +441,6 @@ No disagreements remain open; the 1a scope and open decision 2 are maintainer de
    Field evaluation needs SciPy (`xarrayrf[resample]`), confirmed by the maintainer.
 2. Done: resampling through fields made fast (`resample_performance_plan.md`): fused lattice
    path, threads, and the optional SimpleITK field engine.
-3. 1b next; 1c when a consumer of partial-domain fields appears. Pirana adopts the
+3. Done: 1b, persistence by reference (`field_transform_persistence_plan.md`). 1c when a
+   consumer of partial-domain fields appears. Pirana adopts the
    classes only after xarrayrf's release gate (see the [roadmap](../roadmap.md)).

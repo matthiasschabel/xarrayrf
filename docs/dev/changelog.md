@@ -1,5 +1,29 @@
 # Changelog
 
+## [2026-10-15] — Field transforms persisted by reference (stage 1b)
+
+- **Problem**: `encode` refused `DisplacementFieldTransform`, `BSplineTransform` and declared
+  pairs, so a registration result or a field-bound array could not be saved; `rf.encode()`
+  returns one DataArray and cannot carry a companion array.
+- **Resolution**: Four new kinds within schema 1 (no bump, no freeze: maintainer decision of
+  2026-10-14, pre-alpha). Arrays are referenced by a SHA-256 content digest that also verifies
+  them on decode; `encode(arrays=)` fills a caller mapping, `decode(arrays=)` resolves from any
+  mapping and raises `MissingArrayError` when it cannot. `native` gains `rf.to_dataset`,
+  `array_from_dataset`, `value_to_dataset` and `value_from_dataset` for netCDF and Zarr. Plan
+  review (Codex gpt-6-astra) found that byte-only digests collide for equal-byte arrays of
+  another shape or dtype (zero fields), that `np.asarray` would strip a resolver's mask, and that
+  row-blocked hashing did not bound memory for a single oversized row; all fixed before
+  implementation (header in the digest, masked entries refused, recursive blocks: 400 MB in
+  0.19 s at 16 MB peak). The implementation review found that automatic variable selection
+  turned an integer array name into a string, and that the laziness test could not detect an
+  eager load; both fixed.
+- **Files affected**: `src/xarrayrf/_encoding.py`, `native.py`, `__init__.py`,
+  `tests/test_encoding.py`, `test_native_encoding.py`, `test_native.py`,
+  `test_field_transforms.py`, `test_declared_inverse.py`, `docs/core_interface.md`,
+  `CHANGELOG.md`, the field transform and persistence designs, the roadmap and release plan,
+  `docs/dev/architecture/field_transform_persistence_plan.md`.
+- **Reviewed by**: Codex (gpt-6-astra, reasoning effort high)
+
 ## [2026-10-14] — East/north components across a pole
 
 - **Problem**: Components declared in `EastNorthUp` got no pole halo, so resampling left every

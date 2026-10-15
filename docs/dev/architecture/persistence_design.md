@@ -1,10 +1,11 @@
 # Data-only persistence of the core value objects
 
 **Status:** Active
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-15
 **Scope:** `xarrayrf.encode` and `xarrayrf.decode` for vocabularies, coordinate systems, frames,
 array coordinates, grids, affine and composite transforms, tensor types and component
-declarations, and user-defined transforms. Native binding
+declarations, field transforms and declared pairs (arrays by reference), and user-defined
+transforms. Native binding
 persistence wraps this encoding; NGFF, CF and NIfTI formats are adapters.
 
 ## Context
@@ -72,11 +73,24 @@ display, vocabulary, orientation, non-centred sample offsets, and array-coordina
 than `"1"`, including `None`) and axis types. Composite endpoints and non-affine transforms
 refuse export.
 
-Schema 1 remains provisional and is not frozen. Freezing it is an explicit maintainer decision.
+Schema 1 remains provisional and is not frozen. The maintainer decided on 2026-10-14 not to
+freeze it for the pre-alpha release, which has no files to protect; the freeze is a gate for the
+first release users are expected to keep files from.
+
+### Arrays by reference
+
+Field transforms (stage 1b, [plan](field_transform_persistence_plan.md)) hold arrays no inline
+record can carry. Their records reference each array as `{"reference": "sha256:<hex>", "dtype":
+...}`, the digest of a `"<dtype>:<shape>\n"` header and the C-order little-endian bytes.
+`encode(value, arrays=store)` fills a caller mapping; `decode(data, arrays=resolver)` takes any
+mapping, verifies dtype and digest, and raises `MissingArrayError` for an unresolved reference.
+Nothing in the data selects code or a location: the resolver is the caller's. Dataset assembly
+lives in `xarrayrf.native`.
 
 ### Schema evolution
 
-Decided by the maintainer on 2026-10-11, and applying before and after any freeze:
+Decided by the maintainer on 2026-10-11. While schema 1 is provisional the rule is followed
+as practice; it binds from the freeze:
 
 1. **New kinds are added within schema 1.** An older release refuses a record of a kind it does
    not know with `UnknownKindError` ("not a kind this release knows"), so nothing is half-read,
@@ -97,6 +111,7 @@ value geometry component declaration sits beside the binding record, whose field
 | `direction_vocabulary`, `coordinate_system`, `reference_frame`, `array_coordinates`, `affine_transform`, `composite_transform`, `grid` | schema 1 (unreleased) |
 | `tensor_type`, `tensor_component_declaration` | schema 1, value geometry stage 2 (unreleased) |
 | `symmetric_packing`, `packed_tensor_component_declaration` | schema 1, value geometry stage 2b (unreleased) |
+| `displacement_field_transform`, `bspline_transform`, `declared_inverse_pair`, `paired_transform` | schema 1, field transforms stage 1b (unreleased) |
 
 ## Alternatives Considered
 

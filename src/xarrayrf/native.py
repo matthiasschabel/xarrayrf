@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, Literal, Protocol, cast, overload
 
@@ -15,7 +15,7 @@ import xarray as xr
 from ._array_coordinates import ArrayCoordinates
 from ._binding import BindingIndex, binding_coordinates, grid_from_binding, grid_variables
 from ._component_resampling import ComponentReorientation, component_request
-from ._encoding import Decoder, MalformedDataError, decode_intervals, encode
+from ._encoding import ArrayStore, Decoder, MalformedDataError, decode_intervals, encode
 from ._encoding import decode as decode_value
 from ._frame import ReferenceFrame
 from ._geometry import Geometry, adopt_frame, check_coordinate_unit
@@ -44,14 +44,22 @@ from ._transform import SupportsPoints
 from ._validation import check_names
 
 _BINDING_ATTR = "xarrayrf_binding"
+_VALUE_ATTR = "xarrayrf_value"
+_REFERENCE_ATTR = "xarrayrf_reference"
+_ARRAY_PREFIX = "xarrayrf_array_"
+"""Reserved Dataset variables holding referenced arrays, named by their digest's first 16 hex
+digits so Datasets holding the same field merge."""
 _DIMS_UNSET = object()
 __all__ = [
     "CoordinateSpec",
     "DuckArray",
     "Report",
+    "array_from_dataset",
     "frame_array",
     "grid_coordinates",
     "index_coordinate",
+    "value_from_dataset",
+    "value_to_dataset",
 ]
 
 
@@ -283,6 +291,118 @@ def _decode_declaration(array: xr.DataArray) -> xr.DataArray:
         ) from error
 
 
+def _array_variables(arrays: ArrayStore, taken: set[str]) -> dict[str, xr.Variable]:
+    """One reserved variable per referenced array, refusing names already in use."""
+    variables: dict[str, xr.Variable] = {}
+    for reference, values in arrays.items():
+        name = _ARRAY_PREFIX + reference.partition(":")[2][:16]
+        if name in variables:
+            raise ValueError(f"references {reference} and another share the variable name {name!r}")
+        dims = tuple(f"{name}_dim{axis}" for axis in range(values.ndim))
+        clash = sorted({name, *dims} & taken)
+        if clash:
+            raise ValueError(f"the Dataset already uses the reserved name(s) {clash}")
+        variables[name] = xr.Variable(dims, values, attrs={_REFERENCE_ATTR: reference})
+    return variables
+
+
+def _reserved(dataset: xr.Dataset) -> list[str]:
+    return [str(name) for name in dataset.data_vars if str(name).startswith(_ARRAY_PREFIX)]
+
+
+def _resolver(dataset: xr.Dataset) -> dict[str, xr.Variable]:
+    """Map each reference to its reserved variable, by attribute; data is loaded on lookup."""
+    resolved: dict[str, xr.Variable] = {}
+    for name in _reserved(dataset):
+        variable = dataset[name].variable
+        reference = variable.attrs.get(_REFERENCE_ATTR)
+        if not isinstance(reference, str):
+            raise MalformedDataError(
+                f"reserved variable {name!r} needs a string {_REFERENCE_ATTR!r} attribute"
+            )
+        if reference in resolved:
+            raise MalformedDataError(f"two reserved variables claim the reference {reference}")
+        resolved[reference] = variable
+    return resolved
+
+
+def value_to_dataset(value: object) -> xr.Dataset:
+    """Encode a value, such as a registration's transform, as a Dataset with its arrays.
+
+    The encoded record is canonical JSON text in ``attrs["xarrayrf_value"]``; each array a field
+    transform references is a reserved ``xarrayrf_array_<digest prefix>`` variable. Write the
+    result with ``to_netcdf`` or ``to_zarr``; :func:`value_from_dataset` reads it back.
+
+    Raises:
+        TypeError: If the value cannot be encoded.
+    """
+    arrays: dict[str, Any] = {}
+    data = encode(value, arrays=arrays)
+    return xr.Dataset(_array_variables(arrays, set()), attrs={_VALUE_ATTR: _canonical_json(data)})
+
+
+def value_from_dataset(
+    dataset: xr.Dataset, *, decoders: Mapping[str, Decoder] | None = None
+) -> Any:
+    """Decode the value :func:`value_to_dataset` wrote, loading only the arrays it references.
+
+    Raises:
+        TypeError: If ``dataset`` is not a Dataset.
+        MalformedDataError: If the value attribute is missing or not JSON, or a reserved
+            variable has no reference attribute.
+        EncodingError: If decoding fails (see :func:`xarrayrf.decode`).
+    """
+    if not isinstance(dataset, xr.Dataset):
+        raise TypeError(f"dataset must be an xarray Dataset, got {type(dataset).__name__}")
+    encoded = dataset.attrs.get(_VALUE_ATTR)
+    if not isinstance(encoded, str):
+        raise MalformedDataError(f"the Dataset needs JSON text in attrs[{_VALUE_ATTR!r}]")
+    try:
+        payload = json.loads(encoded)
+    except ValueError as error:
+        raise MalformedDataError(f"{_VALUE_ATTR!r} is not valid JSON: {error}") from error
+    return decode_value(payload, decoders=decoders, arrays=_resolver(dataset))
+
+
+def array_from_dataset(
+    dataset: xr.Dataset,
+    *,
+    name: Hashable | None = None,
+    decoders: Mapping[str, Decoder] | None = None,
+) -> xr.DataArray:
+    """Decode the array ``DataArray.rf.to_dataset()`` wrote, with the arrays it references.
+
+    Args:
+        dataset: The Dataset, typically from ``open_dataset`` or ``open_zarr``.
+        name: The data variable to decode; by default the only one that is not reserved.
+        decoders: Decoders for user-defined transform kinds.
+
+    Raises:
+        TypeError: If ``dataset`` is not a Dataset.
+        ValueError: If ``name`` is reserved or absent, or it is None and the Dataset does not
+            hold exactly one unreserved data variable.
+        MalformedDataError: If a reserved variable has no reference attribute.
+        EncodingError: If decoding fails (see ``DataArray.rf.decode``).
+    """
+    if not isinstance(dataset, xr.Dataset):
+        raise TypeError(f"dataset must be an xarray Dataset, got {type(dataset).__name__}")
+    reserved = set(_reserved(dataset))
+    if name is None:
+        # Keep the keys as they are: xarray names may be any hashable, such as an integer.
+        candidates = [key for key in dataset.data_vars if str(key) not in reserved]
+        if len(candidates) != 1:
+            raise ValueError(
+                f"the Dataset holds data variables {candidates}; pass name= to choose one"
+            )
+        name = candidates[0]
+    elif str(name) in reserved or name not in dataset.data_vars:
+        raise ValueError(f"{name!r} is not an unreserved data variable of the Dataset")
+    return cast(
+        xr.DataArray,
+        dataset[name].rf.decode(decoders=decoders, arrays=_resolver(dataset)),
+    )
+
+
 def _require_duck_array(data: object) -> DuckArray:
     """Require pixel input that xarray treats as a duck array (xarray's own rule, restated)."""
     array_like = isinstance(data, np.ndarray) or (
@@ -463,7 +583,12 @@ class _ReferenceFrameAccessor:
         stripped = array.drop_indexes([name for name in names if name in array.xindexes])
         return _assign_binding(stripped, coords)
 
-    def decode(self, *, decoders: Mapping[str, Decoder] | None = None) -> xr.DataArray:
+    def decode(
+        self,
+        *,
+        decoders: Mapping[str, Decoder] | None = None,
+        arrays: Mapping[str, Any] | None = None,
+    ) -> xr.DataArray:
         """Restore a binding and a tensor component declaration from reserved JSON attributes.
 
         The decoded coordinate transform maps the array's coordinates (an
@@ -472,6 +597,8 @@ class _ReferenceFrameAccessor:
 
         Args:
             decoders: Decoders for user-defined transform kinds, passed to the value decoder.
+            arrays: Resolves the arrays a field transform in the binding references, as for
+                :func:`xarrayrf.decode`. :func:`array_from_dataset` supplies it from a Dataset.
 
         Returns:
             A DataArray with the attributes removed and both declarations validated against
@@ -491,13 +618,16 @@ class _ReferenceFrameAccessor:
         if declaration_of(array) is not None:
             raise ValueError("array already declares tensor components")
         if _BINDING_ATTR in array.attrs:
-            array = self._decode_binding(array, decoders)
+            array = self._decode_binding(array, decoders, arrays)
         if DECLARATION_ATTR in array.attrs:
             array = _decode_declaration(array)
         return array
 
     def _decode_binding(
-        self, array: xr.DataArray, decoders: Mapping[str, Decoder] | None
+        self,
+        array: xr.DataArray,
+        decoders: Mapping[str, Decoder] | None,
+        arrays: Mapping[str, Any] | None,
     ) -> xr.DataArray:
         if _binding(array) is not None:
             raise ValueError("array is already framed")
@@ -515,7 +645,7 @@ class _ReferenceFrameAccessor:
         dims = payload["dims"]
         if not isinstance(dims, list) or any(not isinstance(dim, str) for dim in dims):
             raise MalformedDataError("encoded binding 'dims' must be a JSON array of strings")
-        coordinate_transform = decode_value(payload["transform"], decoders=decoders)
+        coordinate_transform = decode_value(payload["transform"], decoders=decoders, arrays=arrays)
         if not isinstance(coordinate_transform, SupportsPoints):
             raise MalformedDataError("encoded binding 'transform' must be a point transform")
         plain = array.copy(deep=False)
@@ -791,14 +921,19 @@ class _ReferenceFrameAccessor:
             )
         return _unframe(self._array, index)
 
-    def encode(self) -> xr.DataArray:
+    def encode(self, *, arrays: ArrayStore | None = None) -> xr.DataArray:
         """Return an undeclared, pixel-sharing copy with JSON declaration attributes.
 
         The frame binding goes to the reserved ``xarrayrf_binding`` attribute and a tensor
         component declaration to ``xarrayrf_tensor_components``, each replacing any existing
         value. Call ``rf.decode()`` after reading the array to restore and validate both.
 
+        Args:
+            arrays: Receives the arrays of a field transform in the binding, as for
+                :func:`xarrayrf.encode`. ``rf.to_dataset()`` stores them in one Dataset.
+
         Raises:
+            TypeError: If the binding holds a field transform and ``arrays`` is None.
             ValueError: If the array has neither a binding nor a tensor component declaration.
         """
         index = _binding(self._array)
@@ -824,7 +959,7 @@ class _ReferenceFrameAccessor:
         if index is not None:
             attrs[_BINDING_ATTR] = _canonical_json(
                 {
-                    "transform": encode(index.transform),
+                    "transform": encode(index.transform, arrays=arrays),
                     "dims": list(index.dims),
                     "intervals": {name: rows.tolist() for name, rows in index.intervals.items()},
                 }
@@ -833,6 +968,34 @@ class _ReferenceFrameAccessor:
             attrs[DECLARATION_ATTR] = _canonical_json(encode(components.declaration))
         result.attrs = attrs
         return result
+
+    def to_dataset(self, *, name: Hashable | None = None) -> xr.Dataset:
+        """Encode this array as a Dataset together with the arrays its binding references.
+
+        The encoded array (``rf.encode()``) is the data variable ``name``; each array a field
+        transform in the binding references is a reserved ``xarrayrf_array_<digest prefix>``
+        variable. Affine bindings have none, so every framed array has this one save path.
+        Write the result with ``to_netcdf`` or ``to_zarr``; ``native.array_from_dataset``
+        reads it back.
+
+        Args:
+            name: The data variable's name; by default the array's own name.
+
+        Raises:
+            ValueError: If neither ``name`` nor the array's name is set, a name is reserved
+                (``xarrayrf_array_...``) or already used, or as ``rf.encode()``.
+        """
+        variable = self._array.name if name is None else name
+        if variable is None:
+            raise ValueError("the array has no name; pass name= to name its data variable")
+        arrays: dict[str, Any] = {}
+        encoded = self.encode(arrays=arrays)
+        dataset = encoded.to_dataset(name=variable)
+        taken = {str(key) for key in dataset.variables} | {str(dim) for dim in dataset.dims}
+        reserved = sorted(key for key in taken if key.startswith(_ARRAY_PREFIX))
+        if reserved:
+            raise ValueError(f"the names {reserved} are reserved for referenced arrays")
+        return dataset.assign(_array_variables(arrays, taken))
 
     @property
     def has_tensor_components(self) -> bool:

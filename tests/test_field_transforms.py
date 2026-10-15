@@ -625,17 +625,6 @@ def test_repr_names_the_declaration_without_the_values() -> None:
     assert "float32" in text and "'raise'" in text and "0." not in text
 
 
-def test_field_transforms_are_not_encoded_yet() -> None:
-    transform = dense(np.zeros((4, 5, 3, 3)), grid())
-    with pytest.raises(TypeError, match="stage 1b"):
-        xrf.encode(transform)
-    affine = xrf.AffineTransform.from_matrix(
-        source=MOVING, target=FIXED, matrix=np.eye(3), translation=np.zeros(3)
-    )
-    with pytest.raises(TypeError, match="stage 1b"):
-        xrf.encode(xrf.CompositeTransform(transform, affine))
-
-
 # --- Composition and the determinant report ---------------------------------------------------
 
 

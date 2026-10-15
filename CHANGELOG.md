@@ -14,7 +14,6 @@
   - `jacobian_determinant_report` reports determinants and the folding fraction of any square
     Jacobian.
   - `sample_displacement_field` rasterizes any such transform onto a grid.
-  - Field transforms are not yet persisted.
   - Evaluating them needs SciPy (`xarrayrf[resample]`); constructing them does not.
 - Declared inverse pairs, for registration tools that write a warp and its inverse:
   - `DeclaredInversePair(forward, backward)` owns both directions, unverified. `pair.forward`
@@ -22,6 +21,16 @@
   - `CompositeTransform.declared_inverse()` reverses a chain using exact inverses where members
     have them and declared inverses otherwise; `SupportsDeclaredInverse` is the protocol.
   - `round_trip_residual_report` measures `inverse(transform(x)) - x` on points or a grid.
+- Persistence of field transforms and declared pairs by reference:
+  - `encode(value, arrays=store)` writes each field's array into `store` under its content
+    digest (`"sha256:..."`, over dtype, shape and bytes); `decode(data, arrays=store)` resolves
+    it, checks dtype and digest and keeps float32 or float64. A pair is one record; a direction
+    decodes with its declared inverse. `MissingArrayError` reports an unresolved reference.
+  - `DataArray.rf.to_dataset()` and `xarrayrf.native.array_from_dataset` save and load a framed
+    array with the arrays its binding references; `native.value_to_dataset` and
+    `value_from_dataset` do the same for a standalone transform. Write the Dataset with
+    `to_netcdf` or `to_zarr`; reading loads only the referenced arrays.
+  - `rf.encode(arrays=)` and `rf.decode(arrays=)` take the same store.
 - `xarrayrf.elastix` imports elastix registration results without ITK: parameter files and
   their initial-transform chains, translation, Euler, affine and cubic B-spline stages, between
   caller-named frames, with LPS-to-frame coordinate changes and a report.

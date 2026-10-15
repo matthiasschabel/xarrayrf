@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-15
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -31,10 +31,10 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
    merge and ship ([xarray_patches.md](xarray-upstream/xarray_patches.md)).
 2. A native-operation audit beyond the 93-case probe, concentrating on paths that could return
    a valid-looking incorrect binding.
-3. Persistence schema 1 frozen ([persistence design](architecture/persistence_design.md)).
-   Freezing is an explicit maintainer decision, not scheduled. Additive record kinds may land
-   within schema 1 before or after a freeze (decided 2026-10-11; see the persistence design's
-   schema evolution rule).
+3. Not a gate for the pre-alpha release (maintainer, 2026-10-14): persistence schema 1 stays
+   provisional and gains new record kinds within it
+   ([persistence design](architecture/persistence_design.md)). Freezing it is a gate for the
+   first release users are expected to keep files from.
 4. All supported dependency-floor CI lanes pass. This criterion is met on `da5f627`:
    [hosted run 37668735524](https://github.com/matthiasschabel/xarrayrf/actions/runs/37668735524)
    passes locked, minimum-core, minimum-resample and current. Hosted validation of the patched
@@ -45,7 +45,7 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 ### Planned work, in rough priority order
 
 - **Release preparation.** Extend the native-operation audit, add hosted validation of the
-  immutable patched pin, prepare the schema-freeze decision and complete the TestPyPI rehearsal
+  immutable patched pin and complete the TestPyPI rehearsal
   when publishing is authorized. Dependency-floor hosted verification is complete. Steps and
   order: [release plan](release_plan.md).
 - **xarray upstream.** Respond to review on the open bug-fix PRs, retire duplicate patches when
