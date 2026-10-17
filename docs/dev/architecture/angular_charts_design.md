@@ -1,7 +1,7 @@
 # Angular charts and chart transitions
 
 **Status:** Implemented (2026-10-12; stages 1 to 4 per their plans; section 4 amended by stage 3)
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-17
 **Scope:** Stage 2 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): angular coordinate
 systems (longitude/latitude, the celestial sphere), transitions between charts of one frame,
 seam-aware resampling, and a minimal CF reader. Settles that plan's open decisions 1 to 3. It
@@ -230,8 +230,9 @@ optionally `datum_name`. One canonical form per figure keeps identity comparison
 values do not make frames equivalent: identity remains the identifier, so two files from one
 model share a frame only when the caller supplies it.
 
-**CF reader** (`xarrayrf.cf`, optional extra, no pyproj): `rf.cf.frame_from_dataset(ds,
-variable, *, frame=None)` reads rectilinear 1-D `lat`/`lon` (CF `units` or `standard_name`),
+**CF reader** (`xarrayrf.cf`, optional extra, no pyproj): `cf.from_dataset(ds, variable, *,
+frame=None)` (a `CfGeometry`: grid, frame and report) and `cf.frame_variable` (the variable
+framed, data untouched) read rectilinear 1-D `lat`/`lon` (CF `units` or `standard_name`),
 the earth figure from `grid_mapping` `latitude_longitude` (`earth_radius`, or
 `semi_major_axis` plus `inverse_flattening`/`semi_minor_axis`), and `bounds` as intervals. It
 returns the variable bound to a frame in a `geodetic` chart (a sphere when no flattening is
@@ -302,12 +303,9 @@ Each gets a short plan reviewed before implementation, as for value geometry.
   stage 4 of the plan.
 - Block-diagonal composition of a transition with pass-through axes (time, level).
 - Arcminute and arcsecond units on angular axes.
-- Nonuniform global longitude axes (periodic location against wrapped copies of the outer
-  centres).
 - A periodic lattice fast path with seam-aware cropping.
 - Masked (per-point validity) evaluation of transitions, with field-transform stage 1c.
 - Metric declaration and preservation query (plan deferred work).
-- `FrameField` for east/north components: value geometry stage 4, which this unblocks.
 
 ## Next Steps
 

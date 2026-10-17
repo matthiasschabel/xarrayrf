@@ -390,8 +390,9 @@ lon_lat_h = to_ecef.inverse().transform_point(xyz)
   same point: the same latitude and radial coordinate, and the same longitude modulo the period
   (it comes back in the inverse's interval), except on the polar axis, where it comes back as
   `longitude_start`.
-  Latitude must lie within ±90°; the radius must be positive; a geodetic height may be negative
-  down to where the normal reaches the equatorial plane or the axis. Points at or within the
+  Latitude must lie within ±90°; one past a pole by at most 1e-12 of it (9e-11°) is roundoff,
+  is taken as the pole and comes back as it. The radius must be positive; a geodetic height may
+  be negative down to where the normal reaches the equatorial plane or the axis. Points at or within the
   evolute bound `e² a² / b` of the centre (about 42.8 km for WGS 84; the centre itself for a
   sphere) raise in both directions. Errors name the first offending point index.
 - Exact poles (±90, or ±`math.pi / 2` in radians) map exactly onto the axis. The forward
@@ -1066,7 +1067,8 @@ literal; only where a target is found changes. Box methods do neither.
 - **Poles**: on a global grid whose longitudes come in antipodal pairs, latitude continues
   across a pole on the meridian half a turn away, for a pole sample (±90) or cell-centred rows
   (±89.5 on a 1° grid). Targets in the polar cap are interpolated rather than filled; beyond
-  ±90 they are outside. Declared tensor components cross a pole in a constant Cartesian basis
+  ±90 they are outside. A target past a pole by at most 1e-9 of the latitude step is roundoff
+  and is located on the pole, as at every domain edge. Declared tensor components cross a pole in a constant Cartesian basis
   (Earth-centred x, y, z), where they are continuous, and in an `EastNorthUp` basis over the
   source frame (2-D or 3-D): continuing a meridian over the pole, east and north reverse, so
   rows taken from the antipodal meridian have them negated (`up` unchanged; each stored entry of

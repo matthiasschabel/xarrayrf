@@ -23,6 +23,7 @@ import numpy.typing as npt
 
 from ._sampling import (
     LATTICE_TOLERANCE,
+    POSITION_SLACK,
     AxisSampling,
     Domain,
     Sampling,
@@ -115,6 +116,9 @@ class Pole:
     center: float
     """The pole in latitude source coordinates."""
 
+    step: float
+    """Absolute latitude step at this end; sets the roundoff band beyond the pole."""
+
 
 @dataclass(frozen=True)
 class Latitude:
@@ -138,6 +142,17 @@ class Latitude:
         """Positions among the extended labels; beyond a pole is outside."""
         start_halo = any(pole.at_start for pole in self.poles)
         end_halo = any(not pole.at_start for pole in self.poles)
+        ascending = self.labels[-1] > self.labels[0]
+        beyond = np.zeros(coordinates.shape, dtype=bool)
+        for pole in self.poles:
+            # A pole bounds latitude: the halo serves interpolation, not targets past the pole.
+            # Within POSITION_SLACK of a step past it, as at every domain edge, a target is
+            # roundoff and is located on the pole.
+            high_side = pole.at_start != ascending
+            past = coordinates - pole.center if high_side else pole.center - coordinates
+            band = POSITION_SLACK * pole.step
+            coordinates = np.where((past > 0.0) & (past <= band), pole.center, coordinates)
+            beyond |= past > band
         before, after = extent
         positions = coordinate_to_position(
             self.labels,
@@ -145,13 +160,7 @@ class Latitude:
             None,
             (0.0 if start_halo else before, 0.0 if end_halo else after),
         )
-        ascending = self.labels[-1] > self.labels[0]
-        for pole in self.poles:
-            # A pole bounds latitude: the halo serves interpolation, not targets past the pole.
-            high_side = pole.at_start != ascending
-            beyond = coordinates > pole.center if high_side else coordinates < pole.center
-            positions = np.where(beyond, np.nan, positions)
-        return positions
+        return np.where(beyond, np.nan, positions)
 
 
 @dataclass(frozen=True)
@@ -345,7 +354,7 @@ def _latitude(
                 before = source_rows[::-1].astype(np.intp)
             else:
                 after = source_rows.astype(np.intp)
-            found.append(Pole(at_start, odd, center))
+            found.append(Pole(at_start, odd, center, abs(inward)))
             break
     if not found:
         return None

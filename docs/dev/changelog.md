@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-10-17] — Pole roundoff band; angular-chart review follow-ups
+
+- **Problem**: The 2026-10-17 review of angular charts found the pole boundary decided by bare
+  comparisons (`_periodic.py` `Latitude.locate`, `_chart_transitions.py` `latitude_trig`):
+  a target at `nextafter(90, 100)` was filled by resampling and refused by transitions, against
+  the precision contract's roundoff band. Several dev notes were also stale.
+- **Resolution**: Resampling snaps a coordinate past a pole by at most `POSITION_SLACK` of that
+  end's latitude step onto the pole (the band of every domain edge); transitions, which have no
+  step, use `POLE_ROUNDOFF = 1e-12` relative to the pole. Not changed: a nonuniform label grid
+  such as `[0, 10, 20, 200, 350]` classifies global (seam no wider than the widest step), which
+  is the documented rule and interpolates correctly. Box methods refusing 2-D lon/lat sources
+  and CF seam-wrapping bounds were left out. Plan review (Codex gpt-6-astra) corrected the band's
+  stated size (9e-11°, not 1e-12°) and asked for tests that pin the step scaling and the
+  descending case; implementation review asked that those tests also require finite results.
+- **Files affected**: `src/xarrayrf/_periodic.py`, `src/xarrayrf/_chart_transitions.py`,
+  `tests/test_seam_resampling.py`, `tests/test_chart_transitions.py`, `docs/core_interface.md`,
+  `docs/dev/architecture/angular_charts_design.md`, `angular_charts_stage3_plan.md`,
+  `angular_charts_stage4_plan.md`, `nonlinear_geometry_plan.md`.
+
 ## [2026-10-17] — NGFF field import split out of stage 1c
 
 - **Problem**: Stage 1c bundled per-point validity and `PositionFieldTransform` with NGFF

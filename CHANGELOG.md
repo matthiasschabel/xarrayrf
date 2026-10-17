@@ -121,6 +121,10 @@
 
 ### Fixed
 
+- Roundoff just past a pole no longer changes the result. Resampling locates a target past a
+  pole by at most 1e-9 of the latitude step on the pole (it was filled); chart transitions and
+  `FrameField` take a latitude past a pole by at most 1e-12 of it as the pole (it raised).
+
 - `AffineTransform.inverse` and resampling no longer refuse well-conditioned matrices at
   extreme scales such as `1e-200 * I` or `1e200 * I` as having a zero row or column: the
   equilibration norms are computed without squaring entries that under- or overflow.

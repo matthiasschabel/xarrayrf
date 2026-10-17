@@ -1,7 +1,7 @@
 # Angular charts stage 3: seam- and pole-aware resampling
 
-**Status:** Implemented (2026-10-12; plan reviewed by Codex gpt-6-sol)
-**Last updated:** 2026-10-12
+**Status:** Implemented (2026-10-12; plan and implementation reviewed by Codex gpt-6-sol)
+**Last updated:** 2026-10-17
 **Scope:** `resample` (and `rf.resample_to`) on an angular source: global longitude wraps,
 regional longitude is found from targets on another branch, and global grids interpolate across
 the poles. Implements section 4 of the [angular charts design](angular_charts_design.md),
@@ -211,12 +211,14 @@ with xarraybc credited as prior art.
 ## Deferred Work
 
 - Box methods across the seam and poles.
-- Pole crossing for declared components (after `FrameField`), and for odd longitude counts.
+- Pole crossing for odd longitude counts. (Declared components now cross in a constant
+  Cartesian basis, `c8d704b`, and, negating east and north, in an `EastNorthUp` basis,
+  `0a2fc1c`.)
 - A periodic lattice fast path, after measurement.
 - An optional adapter producing xarraybc topologies from angular charts.
 
 ## Next Steps
 
 1. Plan review (Codex), implement with the tests above, implementation review, QA, commit and
-   push.
-2. Stage 4: the minimal CF reader.
+   push. Done (`23b228f`).
+2. Stage 4: the minimal CF reader. Done (`66488c2`).

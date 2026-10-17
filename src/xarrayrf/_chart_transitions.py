@@ -25,6 +25,13 @@ from ._coordinate_system import CARTESIAN, GEODETIC, SPHERICAL
 from ._frame import ReferenceFrame
 from ._validation import angular_period, real_float_array
 
+POLE_ROUNDOFF: Final = 1e-12
+"""Relative band beyond a pole that counts as on it: 9e-11° (about 6000 ulp of 90°, 10 µm on Earth).
+
+Unit conversion and affine round trips put an exact pole some ulp past it; there is no sample
+step here to scale the band by, as resampling does.
+"""
+
 FIGURE_KEYS: Final = ("figure", "semi_major_axis", "inverse_flattening", "length_unit")
 """Reserved frame-definition keys that declare an Earth figure, checked against a transition."""
 
@@ -43,17 +50,20 @@ def latitude_trig(
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """cos φ and sin φ of latitudes in a declared unit, exact at the poles.
 
+    A latitude beyond a pole by at most ``POLE_ROUNDOFF`` of the pole is roundoff and lies on it.
+
     Raises:
-        ValueError: If a latitude lies beyond a pole, naming the first such point.
+        ValueError: If a latitude lies further beyond a pole, naming the first such point.
     """
-    outside = np.abs(latitude) > pole
+    past = np.abs(latitude) - pole
+    outside = past > POLE_ROUNDOFF * pole
     if outside.any():
         index = tuple(int(i) for i in np.argwhere(outside)[0])
         raise ValueError(
             f"latitude outside ±{pole:g} at point {index}; it is bounded by the poles",
         )
     # Exact poles land exactly on the axis rather than cos(π/2) ≈ 6e-17 beside it.
-    at_pole = np.abs(latitude) == pole
+    at_pole = past >= 0.0
     radians = latitude * scale
     return (
         np.where(at_pole, 0.0, np.cos(radians)),

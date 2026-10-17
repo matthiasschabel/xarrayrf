@@ -11,6 +11,7 @@ import xarray as xr
 from numpy.testing import assert_allclose
 
 import xarrayrf as xrf
+from xarrayrf._sampling import POSITION_SLACK
 from xarrayrf.native import frame_array
 
 FRAME = xrf.ReferenceFrame.local(
@@ -257,6 +258,28 @@ def test_latitude_beyond_a_pole_is_outside() -> None:
     result = resample(source(POLAR_LON, CENTRED_LAT), grid([10.0], [90.5, -90.5, 89.5]))
     assert np.isnan(result[0, :2]).all()
     assert np.isfinite(result[0, 2])
+
+
+@pytest.mark.parametrize("lat", [CENTRED_LAT, POLE_LAT], ids=["cell-centred", "pole-sample"])
+def test_roundoff_past_a_pole_lands_on_it(lat: npt.NDArray[np.float64]) -> None:
+    # The band is POSITION_SLACK (1e-9) of the 2° step: 2e-9°. 1e-6° is past it.
+    past = [90.0 + 1e-12, np.nextafter(90.0, 100.0), -90.0 - 1e-12, 90.0 + 1e-6]
+    result = resample(source(POLAR_LON, lat), grid([10.0], [90.0, -90.0, *past]))
+    assert_allclose(result[0, 2:5], result[0, [0, 0, 1]], atol=1e-12, rtol=0)
+    assert np.isfinite(result[0, :2]).all()
+    assert np.isnan(result[0, 5])
+
+
+@pytest.mark.parametrize("step", [2.0, 0.5])
+@pytest.mark.parametrize("descending", [False, True], ids=["ascending", "descending"])
+def test_the_pole_band_scales_with_the_latitude_step(step: float, descending: bool) -> None:
+    lat = np.arange(-90.0 + step / 2, 90.0, step)
+    inside, outside = 0.5 * POSITION_SLACK * step, 2.0 * POSITION_SLACK * step
+    targets = [90.0, 90.0 + inside, 90.0 + outside, -90.0, -90.0 - inside, -90.0 - outside]
+    result = resample(source(POLAR_LON, lat[::-1] if descending else lat), grid([10.0], targets))
+    assert np.isfinite(result[0, [0, 1, 3, 4]]).all()
+    assert_allclose(result[0, [1, 4]], result[0, [0, 3]], atol=1e-12, rtol=0)
+    assert np.isnan(result[0, [2, 5]]).all()
 
 
 @pytest.mark.parametrize(

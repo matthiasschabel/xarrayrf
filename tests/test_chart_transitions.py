@@ -264,6 +264,24 @@ def test_the_spherical_centre_is_outside_both_directions() -> None:
 def test_latitude_beyond_the_poles_is_refused() -> None:
     with pytest.raises(ValueError, match=r"latitude outside ±90 at point \(1,\)"):
         wgs84().transform_point([[0.0, 0.0, 0.0], [0.0, 90.000001, 0.0]])
+    # The roundoff band is POLE_ROUNDOFF (1e-12) of the pole, 9e-11°.
+    with pytest.raises(ValueError, match=r"latitude outside ±90 at point \(0,\)"):
+        wgs84().transform_point([[0.0, -90.0 - 1e-9, 0.0]])
+
+
+@pytest.mark.parametrize(
+    "units, pole", [(("deg", "deg", "m"), 90.0), (("rad", "rad", "m"), math.pi / 2)]
+)
+def test_roundoff_past_a_pole_lands_on_it(units: tuple[str, ...], pole: float) -> None:
+    transition = xrf.GeodeticToCartesian(*charts(geodetic(units=units)), **WGS84)
+    exact = transition.transform_point([[0.7, pole, 5.0], [0.7, -pole, 5.0]])
+    past = [pole * (1 + 1e-13), np.nextafter(pole, 2 * pole)]
+    xyz = transition.transform_point(
+        [[0.7, past[0], 5.0], [0.7, past[1], 5.0], [0.7, -past[0], 5.0]]
+    )
+    assert np.all(xyz[:, :2] == 0.0)
+    # Snapped onto the pole, the points are the pole's own (1e-9 m on a 6e6 m radius).
+    assert_allclose(xyz, exact[[0, 0, 1]], atol=1e-9, rtol=0)
 
 
 @pytest.mark.parametrize(

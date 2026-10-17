@@ -1,7 +1,7 @@
 # Angular charts stage 4: a minimal CF reader
 
-**Status:** Implemented (2026-10-12; plan reviewed by Codex gpt-6-sol)
-**Last updated:** 2026-10-12
+**Status:** Implemented (2026-10-12; plan and implementation reviewed by Codex gpt-6-sol)
+**Last updated:** 2026-10-17
 **Scope:** A new adapter, `xarrayrf.cf`, that frames a variable of an xarray Dataset following
 the CF conventions: rectilinear 1-D longitude and latitude, the earth figure from a
 `latitude_longitude` grid mapping, and cell bounds as intervals. Implements section 5 of the
@@ -171,5 +171,5 @@ test's adapter list.
 ## Next Steps
 
 1. Plan review (Codex), implement with the tests above, implementation review, QA, commit and
-   push.
-2. Then value geometry stage 4 (`FrameField`), now unblocked.
+   push. Done (`66488c2`).
+2. Then value geometry stage 4 (`FrameField`), now unblocked. Done (`c8d704b`).
