@@ -1,7 +1,7 @@
 # Field-backed transforms
 
 **Status:** Active (stages 1a and 1b implemented; 1c to come)
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-17
 **Scope:** Stage 1 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): transforms
 between Cartesian frames whose values come from a sampled field or a B-spline control grid
 (deformable registration), declared inverse pairs, a Jacobian-determinant diagnostic, importers,
@@ -114,9 +114,9 @@ them but must not preclude them:
   as new kinds within schema 1. Implemented per the
   [persistence plan](field_transform_persistence_plan.md); the schema bump first planned here
   was dropped (no existing kind changes; schema 1 stays provisional while pre-alpha).
-- **1c, partial domains:** `PositionFieldTransform`, per-point validity in `resample` and
-  `CompositeTransform`, and NGFF import. Their producers (NGFF `coordinates`, SPM `y_`) have no
-  consumer yet.
+- **1c, partial domains:** `PositionFieldTransform` and per-point validity in `resample` and
+  `CompositeTransform`. NGFF import was split out of 1c on 2026-10-17 (maintainer decision) and
+  is deferred until there are demonstrated use cases or user demand; see Deferred Work.
 
 ### Representations
 
@@ -270,10 +270,10 @@ consistent with the rule that identity is never inferred.
   importer builds the whole chain with explicit fixed, intermediate and moving frames, so the
   affine's position in each direction is fixed by construction.
 - **FSL** warps follow later, with golden tests for their conventions.
-- **NGFF (1c):** `xarrayrf.ngff` imports `displacements`, `coordinates` and `bijection` (as a
-  declared pair), including inside `sequence`. NGFF names a multiscale group holding the field,
-  with its own coordinate transformations from array index to the field's input space and a
-  vector axis. The supported subset is defined against official fixtures pinned to a
+- **NGFF (deferred from 1c):** `xarrayrf.ngff` would import `displacements`, `coordinates` and
+  `bijection` (as a declared pair), including inside `sequence`. NGFF names a multiscale group
+  holding the field, with its own coordinate transformations from array index to the field's
+  input space and a vector axis. The supported subset is defined against official fixtures pinned to a
   specification version; unsupported interpolants, axis layouts or levels are refused with a
   report. Export follows once import is tested.
 
@@ -351,8 +351,8 @@ dependency for the fixtures it can regenerate.
 9. (1b) Encoding round trip through a Zarr group and through netCDF, including each half of a
    declared pair.
 10. (1c) A composite mixing valid and invalid rows never passes an invalid row to a later member
-    or the locator; NGFF 0.6 fixtures for `displacements`, `coordinates` and `bijection` import
-    and resample.
+    or the locator. (NGFF 0.6 fixtures for `displacements`, `coordinates` and `bijection` move
+    with the deferred NGFF import.)
 
 ## Alternatives Considered
 
@@ -377,6 +377,11 @@ dependency for the fixtures it can regenerate.
 
 ## Deferred Work
 
+- NGFF field import (`displacements`, `coordinates`, `bijection`), split out of 1c on
+  2026-10-17 until there are demonstrated use cases or user demand. It is an I/O project of its
+  own: the reader refuses every array-backed path today, and import needs referenced multiscale
+  groups resolved, a level chosen, the field's grid and vector axis mapped and its
+  `interpolation` checked, against pinned 0.6 fixtures.
 - Lazy (dask-backed) fields; stage 1 holds the field in memory (a 256³ three-component field is
   about 200 MB as float32, 400 MB as float64).
 - Stationary velocity fields, piecewise-affine simplicial meshes (shared with the CASTalign

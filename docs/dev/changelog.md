@@ -1,5 +1,14 @@
 # Changelog
 
+## [2026-10-17] — NGFF field import split out of stage 1c
+
+- **Problem**: Stage 1c bundled per-point validity and `PositionFieldTransform` with NGFF
+  `displacements`/`coordinates`/`bijection` import, a separate I/O project (array-backed paths,
+  multiscale field groups, level choice, vector axis) whose producers have no consumer.
+- **Resolution**: Maintainer decision: NGFF field import is deferred until there are
+  demonstrated use cases or user demand. 1c keeps validity and `PositionFieldTransform`.
+- **Files affected**: `docs/dev/architecture/field_transform_design.md`, `docs/dev/roadmap.md`.
+
 ## [2026-10-15] — Field transforms persisted by reference (stage 1b)
 
 - **Problem**: `encode` refused `DisplacementFieldTransform`, `BSplineTransform` and declared
