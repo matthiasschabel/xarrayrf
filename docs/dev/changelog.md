@@ -1,5 +1,36 @@
 # Changelog
 
+## [2026-10-17] — Field transforms stage 1c: partial domains
+
+- **Problem**: A field declared `outside="raise"` made `resample` fail as soon as one target
+  left its support, on the general path (in the field, or at the next chain member), the fused
+  lattice path and component resampling. Position fields (SPM `y_`, NGFF `coordinates`) had no
+  representation.
+- **Resolution**: Validity is internal (`_validity.py`): `masked_map` walks the chain with each
+  member evaluated only on rows still valid; built-in fields report invalid rows as NaN, other
+  members raise as before. The general path locates valid rows only; the fused path gives NaN
+  displacements; component requests through a `"raise"` field take the general path so values
+  and component maps are filled at the same targets (the fused path may classify a face
+  differently by roundoff), and invalid component rows are set to `fill_value`.
+  `PositionFieldTransform` is a third field class, supported on its closed sample hull (ITK's
+  cell support with constant extension would collapse the outer half-cells), refusing
+  `"nearest"` and allowing `"identity"` only between equal coordinate systems; new kind
+  `position_field_transform`. Plan review (Codex gpt-6-astra, two rounds) found that
+  interpolation and the component stage classified support independently (fixed by the routing
+  above), and asked for cumulative-mask, empty-block, face and singular-Jacobian tests and an
+  explicit migration of the refusal tests. Implementation review (two rounds) found that a
+  user member's result after a raising field was converted with `np.asarray`, dropping masks
+  and imaginary parts that `CompositeTransform` refuses; it is now validated with
+  `real_float_array`. Masked evaluation costs about 10-15% on the general path when every
+  target is inside a `"raise"` field.
+- **Files affected**: `src/xarrayrf/_validity.py` (new), `_field_transform.py`,
+  `_resampling.py`, `_component_resampling.py`, `_resample.py`, `_encoding.py`, `__init__.py`;
+  `tests/test_field_transform_validity.py` (new), `test_field_transforms.py`,
+  `test_resample_fields.py`, `test_resample_engine.py`, `test_resample_threads.py`,
+  `test_encoding.py`, `test_native_encoding.py`; `docs/core_interface.md`,
+  `docs/dev/architecture/field_transform_design.md`, `field_transform_validity_plan.md` (new),
+  `docs/dev/roadmap.md`.
+
 ## [2026-10-17] — Pole roundoff band; angular-chart review follow-ups
 
 - **Problem**: The 2026-10-17 review of angular charts found the pole boundary decided by bare

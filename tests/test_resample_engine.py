@@ -176,12 +176,9 @@ def test_an_overhanging_target_keeps_numpy_for_other_exteriors(
     source = geometry(np.random.default_rng(6).random((9, 10, 11)), moving, np.eye(3), np.zeros(3))
     target = geometry(np.zeros((8, 9, 10)), fixed, 1.1 * rotation(3, 0.3), np.full(3, 1.0))
     transform = warp(fixed, moving, (6, 7, 8), 1.5, np.zeros(3), outside=outside)
-    if outside == "raise":
-        with pytest.raises(ValueError, match="outside the displacement field's support"):
-            xrf.resample(source, target, transform=transform)
-    else:
-        fused, numpy_only = both(source, target, transform)
-        assert_allclose(fused, numpy_only, rtol=0, atol=0, equal_nan=True)
+    # Targets outside a "raise" field are filled, by NumPy.
+    fused, numpy_only = both(source, target, transform)
+    assert_allclose(fused, numpy_only, rtol=0, atol=0, equal_nan=True)
     assert not calls
 
 

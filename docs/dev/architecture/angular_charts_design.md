@@ -121,7 +121,8 @@ Two public transition classes, each implementing `SupportsPoints`, `SupportsJaco
   the stage plan with a pyproj oracle).
 - Poles and the centre use only today's contract (`transform_point` returns coordinates or
   raises); stage 2 does not depend on the masked evaluation of
-  [field-backed transforms stage 1c](field_transform_design.md), and adopts it when that lands.
+  [field-backed transforms stage 1c](field_transform_design.md). 1c landed on 2026-10-17 for
+  the built-in field types only; transitions still raise (Deferred Work).
   Separately per operation:
   - *Forward points:* the forward domain is the inverse's image, so every accepted point
     round-trips: latitude in ±90°; a radius > 0; a geodetic height above `−N(φ)(1 − e²)`
@@ -304,7 +305,8 @@ Each gets a short plan reviewed before implementation, as for value geometry.
 - Block-diagonal composition of a transition with pass-through axes (time, level).
 - Arcminute and arcsecond units on angular axes.
 - A periodic lattice fast path with seam-aware cropping.
-- Masked (per-point validity) evaluation of transitions, with field-transform stage 1c.
+- Masked (per-point validity) evaluation of transitions: stage 1c's internal mechanism
+  (`_validity.py`) admits them by giving the transition types a `_masked` evaluation.
 - Metric declaration and preservation query (plan deferred work).
 
 ## Next Steps

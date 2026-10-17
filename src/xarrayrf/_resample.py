@@ -318,6 +318,7 @@ def _resample_with_intervals(
         # Dask already runs one task per chunk in parallel; threads inside would oversubscribe.
         workers=1 if workers is None and source_array.chunks is not None else workers,
         pole_halos=components is None or signs is not None,
+        fuse_raising_fields=components is None,
     )
     sign_input = None
     if (
@@ -415,5 +416,6 @@ def _resample_with_intervals(
             target_dims=plan.target_dims,
             target_frame_points=plan.target_frame_points,
             block_points=block_points,
+            fill_value=fill_value,
         )
     return result, plan.intervals, coverage, declaration

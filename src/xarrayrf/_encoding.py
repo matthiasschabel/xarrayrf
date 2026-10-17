@@ -31,7 +31,7 @@ from ._chart_transitions import (
 from ._composite import CompositeTransform
 from ._coordinate_system import CARTESIAN, CoordinateSystem
 from ._declared_inverse import DeclaredInversePair, PairedTransform
-from ._field_transform import BSplineTransform, DisplacementFieldTransform
+from ._field_transform import BSplineTransform, DisplacementFieldTransform, PositionFieldTransform
 from ._frame import ReferenceFrame
 from ._frame_field import EastNorthUp, FrameField
 from ._grid import Coordinate, Grid
@@ -115,6 +115,7 @@ _BUILT_IN: Final = frozenset(
         "symmetric_packing",
         "packed_tensor_component_declaration",
         "displacement_field_transform",
+        "position_field_transform",
         "bspline_transform",
         "declared_inverse_pair",
         "paired_transform",
@@ -144,8 +145,8 @@ def encode(value: object, *, arrays: ArrayStore | None = None) -> dict[str, Any]
             :class:`ReferenceFrame`, :class:`ArrayCoordinates`, :class:`AffineTransform`,
             :class:`CompositeTransform`, :class:`Grid`, :class:`TensorType`,
             :class:`SymmetricPacking`, :class:`TensorComponentDeclaration`,
-            :class:`DisplacementFieldTransform`, :class:`BSplineTransform`,
-            :class:`DeclaredInversePair` or one of its directions, or a user-defined transform
+            :class:`DisplacementFieldTransform`, :class:`PositionFieldTransform`,
+            :class:`BSplineTransform`, :class:`DeclaredInversePair` or one of its directions, or a user-defined transform
             implementing :class:`SupportsEncoding`.
         arrays: A mutable mapping that receives the referenced arrays; required when the value
             holds a field transform. Several values may share one mapping: equal arrays have
@@ -351,6 +352,15 @@ def _encode(value: object, arrays: ArrayStore | None = None) -> dict[str, Any]:
     if isinstance(value, DisplacementFieldTransform):
         return {
             "kind": "displacement_field_transform",
+            "source": _encode(value.source),
+            "target": _encode(value.target),
+            "grid": _encode(value.grid, arrays),
+            "outside": value.outside,
+            "field": _store(value.field, arrays, value),
+        }
+    if isinstance(value, PositionFieldTransform):
+        return {
+            "kind": "position_field_transform",
             "source": _encode(value.source),
             "target": _encode(value.target),
             "grid": _encode(value.grid, arrays),
@@ -569,6 +579,7 @@ _FIELDS: Final = {
     "symmetric_packing": {"index_pairs", "off_diagonal_scale"},
     "packed_tensor_component_declaration": {"tensor_type", "component_dim", "basis", "packing"},
     "displacement_field_transform": {"source", "target", "grid", "outside", "field"},
+    "position_field_transform": {"source", "target", "grid", "outside", "field"},
     "bspline_transform": {
         "source",
         "target",
@@ -829,6 +840,16 @@ class _Decoder:
     def displacement_field_transform(self, fields: Mapping[str, Any]) -> DisplacementFieldTransform:
         source, target = self._frames(fields, "a field transform")
         return DisplacementFieldTransform(
+            source=source,
+            target=target,
+            field=self._array(fields["field"], "field"),
+            grid=self._grid(fields["grid"]),
+            outside=fields["outside"],
+        )
+
+    def position_field_transform(self, fields: Mapping[str, Any]) -> PositionFieldTransform:
+        source, target = self._frames(fields, "a field transform")
+        return PositionFieldTransform(
             source=source,
             target=target,
             field=self._array(fields["field"], "field"),

@@ -169,12 +169,31 @@ def test_fused_path_opens_chains_and_declared_pairs(paired: bool) -> None:
     assert_allclose(fused, general, rtol=0, atol=ATOL, equal_nan=True)
 
 
+def pointwise_validity(target: xrf.Geometry, transform: Any) -> npt.NDArray[np.bool_]:
+    """Which target samples the field maps, classified point by point (dims k, j, i)."""
+    shape = target.array.shape
+    indices = np.indices(shape).reshape(3, -1)[::-1].T.astype(float)
+    points = target.transform.transform_point(indices)
+    _, valid = transform._masked(points, jacobian=False)
+    return np.asarray(valid).reshape(shape)
+
+
 @pytest.mark.usefixtures("fused_only")
-def test_fused_path_refuses_points_outside_a_raising_field() -> None:
-    source, target = case(0.0, None)
-    transform = field("dense", FIXED, MOVING, np.zeros(3), "raise")
-    with pytest.raises(ValueError, match=r"point \(\d+, \d+, \d+\) lies outside the displacement"):
-        xrf.resample(source, target, transform=transform)
+@pytest.mark.parametrize("kind", ["dense", "bspline"])
+def test_fused_path_fills_points_outside_a_raising_field(kind: str) -> None:
+    source, _ = case(0.0, None)
+    target = geometry(np.zeros((8, 9, 10)), FIXED, 1.15 * ROTATION, (1.0, 1.0, 1.0))
+    raising = field(kind, FIXED, MOVING, np.zeros(3), "raise")
+    identity = field(kind, FIXED, MOVING, np.zeros(3), "identity")
+    valid = pointwise_validity(target, raising)
+    assert valid.any() and not valid.all()
+    filled = xrf.resample(source, target, transform=raising, fill_value=-7.0).values
+    inside = xrf.resample(source, target, transform=identity, fill_value=-7.0).values
+    assert_array_equal(filled[~valid], -7.0)
+    assert_allclose(filled[valid], inside[valid], rtol=0, atol=0)
+    # A direct call still refuses.
+    with pytest.raises(ValueError, match="lies outside the"):
+        raising.transform_point(np.full((1, 3), 1e3))
 
 
 def test_a_nonuniform_field_grid_takes_the_general_path() -> None:
@@ -323,16 +342,18 @@ def test_large_coordinate_labels_under_oblique_affines() -> None:
 
 
 @pytest.mark.usefixtures("fused_only")
-def test_a_refusal_in_a_later_block_names_its_target_sample() -> None:
+def test_filling_does_not_depend_on_the_blocks() -> None:
     source, _ = case(0.0, None)
     # The first rows of target samples lie inside the field; later ones leave it.
     target = geometry(np.zeros((8, 9, 10)), FIXED, 1.15 * ROTATION, (1.0, 1.0, 1.0))
     transform = field("dense", FIXED, MOVING, np.zeros(3), "raise")
-    with pytest.raises(ValueError, match=r"point \((\d+), (\d+), (\d+)\)") as error:
-        xrf.resample(source, target, transform=transform, block_points=7)
-    named = tuple(int(n) for n in error.value.args[0].split("(")[1].split(")")[0].split(","))
-    assert np.ravel_multi_index(named, (8, 9, 10)) >= 7
-    # The named target sample's point lies outside the field: transform_point refuses it.
+    blocked = xrf.resample(source, target, transform=transform, block_points=7).values
+    whole = xrf.resample(source, target, transform=transform).values
+    assert_array_equal(blocked, whole)
+    first_filled = np.flatnonzero(np.isnan(blocked))[0]
+    assert first_filled >= 7
+    # That target sample's point lies outside the field: transform_point refuses it.
+    named = np.unravel_index(first_filled, (8, 9, 10))
     point = target.transform.transform_point(np.array(named[::-1], dtype=float))
     with pytest.raises(ValueError, match="outside the displacement field's support"):
         transform.transform_point(point)

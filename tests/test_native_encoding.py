@@ -277,6 +277,22 @@ def displacement(source: ReferenceFrame, target: ReferenceFrame, dtype: type, se
     )
 
 
+def positions(source: ReferenceFrame, target: ReferenceFrame, seed: int) -> Any:
+    from xarrayrf import Grid, PositionFieldTransform
+
+    to_frame = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("p", "q"), ("1", "1")),
+        target=source,
+        matrix=np.diag([1.0, 1.5]),
+        translation=np.zeros(2),
+    )
+    grid = Grid(to_frame, {"p": ("p", np.arange(6)), "q": ("q", np.arange(5))})
+    jitter = np.random.default_rng(seed).normal(scale=0.1, size=(6, 5, 2))
+    return PositionFieldTransform(
+        source=source, target=target, field=grid.points() + jitter, grid=grid, outside="identity"
+    )
+
+
 @pytest.fixture
 def warped() -> xr.DataArray:
     """An image bound to the moving frame through a dense field."""
@@ -337,6 +353,21 @@ def test_a_field_bound_array_round_trips_through_a_dataset(
         assert field.field.dtype == np.float32
         assert_same_mapping(restored.rf.coordinate_transform, warped.rf.coordinate_transform)
         assert_allclose(restored.values, warped.values, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("backend", ["netcdf", "zarr"])
+def test_a_declared_pair_of_position_fields_round_trips(tmp_path: Path, backend: str) -> None:
+    from xarrayrf import DeclaredInversePair
+    from xarrayrf.native import value_from_dataset, value_to_dataset
+
+    pair = DeclaredInversePair(positions(FIXED, MOVING, 1), positions(MOVING, FIXED, 2))
+    with write_and_open(
+        value_to_dataset(pair.forward), tmp_path / f"y.{backend}", backend
+    ) as opened:
+        restored = value_from_dataset(opened)
+        assert restored.direction == "forward"
+        assert_same_mapping(restored, pair.forward)
+        assert_same_mapping(restored.declared_inverse(), pair.backward)
 
 
 @pytest.mark.parametrize("backend", ["netcdf", "zarr"])

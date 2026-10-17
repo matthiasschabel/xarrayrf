@@ -449,7 +449,7 @@ def test_every_built_in_kind_encodes_exactly_its_schema_fields() -> None:
         assert set(encoded) - {"kind"} == _FIELDS[kind], kind
         seen.add(kind)
     pair = xrf.DeclaredInversePair(dense_field(np.float32), backward_field())
-    for value in (dense_field(np.float64), bspline_field(), pair, pair.backward):
+    for value in (dense_field(np.float64), position_field(), bspline_field(), pair, pair.backward):
         encoded = xrf.encode(value, arrays={})["value"]
         kind = encoded["kind"]
         assert set(encoded) - {"kind"} == _FIELDS[kind], kind
@@ -549,6 +549,14 @@ def backward_field() -> xrf.DisplacementFieldTransform:
     )
 
 
+def position_field(outside: Any = "identity") -> xrf.PositionFieldTransform:
+    grid = field_grid((4, 5, 3))
+    jitter = np.random.default_rng(6).normal(scale=0.1, size=(4, 5, 3, 3))
+    return xrf.PositionFieldTransform(
+        source=FIXED, target=MOVING, field=grid.points() + jitter, grid=grid, outside=outside
+    )
+
+
 def bspline_field(support: Any = "half-open") -> xrf.BSplineTransform:
     values = np.random.default_rng(4).normal(scale=0.2, size=(5, 6, 5, 3)).astype(np.float32)
     return xrf.BSplineTransform(
@@ -576,8 +584,16 @@ def by_reference(value: object, **kwargs: Any) -> tuple[Any, dict[str, Any], dic
         dense_field(outside="nearest"),
         bspline_field(),
         bspline_field("closed"),
+        position_field(),
     ],
-    ids=["dense-float32", "dense-raise", "dense-nearest", "bspline-half-open", "bspline-closed"],
+    ids=[
+        "dense-float32",
+        "dense-raise",
+        "dense-nearest",
+        "bspline-half-open",
+        "bspline-closed",
+        "position-identity",
+    ],
 )
 def test_field_transforms_round_trip_by_reference(value: Any) -> None:
     decoded, data, arrays = by_reference(value)
@@ -587,7 +603,7 @@ def test_field_transforms_round_trip_by_reference(value: Any) -> None:
     assert xrf.encode(decoded, arrays={}) == data
     stored, restored = (
         (value.field, decoded.field)
-        if isinstance(value, xrf.DisplacementFieldTransform)
+        if isinstance(value, xrf.DisplacementFieldTransform | xrf.PositionFieldTransform)
         else (value.coefficients, decoded.coefficients)
     )
     assert restored.dtype == stored.dtype and np.array_equal(restored, stored)
@@ -686,6 +702,7 @@ def test_a_big_endian_array_decodes_and_keeps_its_dtype() -> None:
 def test_encoding_a_field_needs_a_store() -> None:
     for value in (
         dense_field(),
+        position_field(),
         bspline_field(),
         xrf.CompositeTransform(dense_field(), affine(MOVING, FIXED)),
         xrf.DeclaredInversePair(dense_field(), backward_field()).backward,

@@ -20,9 +20,7 @@ import numpy.typing as npt
 from ._affine import AffineTransform, equilibrated_inverse
 from ._array_coordinates import ArrayCoordinates
 from ._box import BoxOperator, as_operator, interval_tolerance, weights
-from ._composite import CompositeTransform
-from ._declared_inverse import PairedTransform, _PairedTransformWithJacobian
-from ._field_transform import BSplineTransform, DisplacementFieldTransform
+from ._field_transform import BSplineTransform, DisplacementFieldTransform, PositionFieldTransform
 from ._frame import ReferenceFrame
 from ._frame_adoption import adopt_frame
 from ._frame_compatibility import anonymous_frame_difference
@@ -49,6 +47,7 @@ from ._sampling import (
 )
 from ._sitk_engine import FieldEngine, direction_and_spacing, index_transform, simpleitk
 from ._transform import SupportsAffine, SupportsPoints, check_transform
+from ._validity import chain, has_raising_field, masked_map
 
 type Method = Literal["nearest", "linear", "cubic", "step", "overlap_mean"]
 type Support = Literal["point", "average"]
@@ -261,31 +260,24 @@ def _general_map(
     source_axes = [source.dims.index(dim) for dim in source_dims]
     identity_order = source_dims == source.dims
 
+    masked = has_raising_field(frame_map)
+
     def positions(target_positions: npt.NDArray[np.intp]) -> npt.NDArray[np.float64]:
         points = transform.transform_point(sample_columns(samplings, target_positions, target_dims))
-        if frame_map is not None:
-            points = frame_map.transform_point(points)
-        located = locate(points).T
+        if masked:
+            # Targets a "raise" field does not map have no source position: they are filled.
+            assert frame_map is not None
+            points, _, valid = masked_map(frame_map, np.asarray(points, dtype=np.float64))
+            located = np.full((len(source.dims), points.shape[0]), np.nan)
+            if valid.any():
+                located[:, valid] = locate(points[valid]).T
+        else:
+            if frame_map is not None:
+                points = frame_map.transform_point(points)
+            located = locate(points).T
         return located if identity_order else located[source_axes]
 
     return positions
-
-
-_PAIRED_TYPES: Final = (PairedTransform, _PairedTransformWithJacobian)
-_FIELD_TYPES: Final = (DisplacementFieldTransform, BSplineTransform)
-
-
-def _chain(transform: SupportsPoints) -> list[SupportsPoints]:
-    """The members of a frame map in application order, composites and declared pairs opened.
-
-    Only the exact built-in types are opened: a subclass may override ``transform_point``, and
-    evaluating its members directly would skip the override.
-    """
-    if type(transform) is CompositeTransform:
-        return [member for inner in transform.transforms for member in _chain(inner)]
-    if type(transform) in _PAIRED_TYPES:
-        return _chain(cast(PairedTransform, transform).transform)
-    return [transform]
 
 
 def _affine_parts(
@@ -376,14 +368,15 @@ def _field_lattice_map(
     """
     if frame_map is None:
         return None
-    members = _chain(frame_map)
+    members = chain(frame_map)
     fields = [
         index for index, member in enumerate(members) if not isinstance(member, SupportsAffine)
     ]
     if len(fields) != 1:
         return None
     field = members[fields[0]]
-    if type(field) not in _FIELD_TYPES:
+    # A position field is not a displacement, which the index formula above assumes.
+    if type(field) not in (DisplacementFieldTransform, BSplineTransform):
         return None
     assert isinstance(field, DisplacementFieldTransform | BSplineTransform)
     if field._lookup.index_map is None:
@@ -447,10 +440,9 @@ def _field_lattice_map(
         else:
             columns: npt.NDArray[np.float64] = np.einsum("ij,jn->in", field_linear, steps)
             columns += field_offset[:, None]
-            displacement, first = field._displacement_rows(columns)
-            if first is not None:
-                where = tuple(int(i) for i in indices[:, first])
-                raise field._outside_error(where, columns[:, first])
+            # Under "raise" a column outside the support has a NaN displacement, so a NaN
+            # source position, and is filled.
+            displacement, _ = field._displacement_rows(columns, masked=True)
             linear_push = push
         located: npt.NDArray[np.float64] = np.einsum("ij,jn->in", source_linear, steps)
         located += np.einsum("ij,jn->in", linear_push, displacement)
@@ -803,14 +795,19 @@ def check_workers(workers: object) -> int | None:
     return int(workers)
 
 
-_THREAD_SAFE_TYPES: Final = (AffineTransform, DisplacementFieldTransform, BSplineTransform)
+_THREAD_SAFE_TYPES: Final = (
+    AffineTransform,
+    DisplacementFieldTransform,
+    BSplineTransform,
+    PositionFieldTransform,
+)
 """Point transforms whose evaluation keeps no mutable state; anything else runs inline."""
 
 
 def _thread_safe(*transforms: SupportsPoints | None) -> bool:
     """Whether every member, after opening built-in composites and pairs, is a known type."""
     return all(
-        transform is None or all(type(member) in _THREAD_SAFE_TYPES for member in _chain(transform))
+        transform is None or all(type(member) in _THREAD_SAFE_TYPES for member in chain(transform))
         for transform in transforms
     )
 
@@ -918,6 +915,7 @@ def plan(
     adoption_suffices: Callable[[AffineTransform], bool] | None = None,
     pole_halos: bool = True,
     workers: int | None = None,
+    fuse_raising_fields: bool = True,
 ) -> _Plan:
     """Plan interpolation for trailing source axes and output axes in explicit storage order.
 
@@ -930,6 +928,9 @@ def plan(
     a global longitude/latitude source; it is off for declared components in a basis with no
     pole rule, and ``execute`` takes the signs of those that have one. ``workers`` is None for
     automatic threads, or a count; transforms not known to be thread-safe always run inline.
+    ``fuse_raising_fields`` False keeps a field declared ``"raise"`` off the fused lattice path,
+    so the targets it fills are exactly those that pointwise evaluation of the same target
+    points classifies as invalid (the component stage evaluates them that way).
 
     Raises:
         ValueError: If either storage order does not name exactly its sampling's dims.
@@ -1008,7 +1009,7 @@ def plan(
             # seam, so a periodic source takes the general path.
             mapped = (
                 _field_lattice_map(source, target, source_dims, target_dims, frame_map, domain)
-                if periodic is None
+                if periodic is None and (fuse_raising_fields or not has_raising_field(frame_map))
                 else None
             )
             # The fused map evaluates only the built-in field; the general one evaluates the

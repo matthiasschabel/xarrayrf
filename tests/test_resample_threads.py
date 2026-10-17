@@ -67,16 +67,18 @@ def test_threads_with_missing_values_and_several_slices() -> None:
     assert_array_equal(threaded, inline)
 
 
-def test_the_first_failing_block_is_reported_whatever_the_threads() -> None:
+@pytest.mark.parametrize("kind", ["dense", "bspline"])
+def test_targets_outside_a_raising_field_fill_alike_whatever_the_threads(kind: str) -> None:
     source, _ = case(0.0, None)
     target = geometry(np.zeros((8, 9, 10)), FIXED, 1.15 * ROTATION, (1.0, 1.0, 1.0))
-    transform = field("dense", FIXED, MOVING, np.zeros(3), "raise")
-    messages = []
-    for workers in (1, 4, 8):
-        with pytest.raises(ValueError, match="outside the displacement field") as error:
-            xrf.resample(source, target, transform=transform, block_points=7, workers=workers)
-        messages.append(str(error.value))
-    assert messages[1:] == messages[:1] * 2
+    transform = field(kind, FIXED, MOVING, np.zeros(3), "raise")
+    results = [
+        xrf.resample(source, target, transform=transform, block_points=7, workers=workers).values
+        for workers in (1, 4, 8)
+    ]
+    assert np.isnan(results[0]).any() and np.isfinite(results[0]).any()
+    for result in results[1:]:
+        assert_array_equal(result, results[0])
 
 
 @pytest.mark.usefixtures("no_threads")

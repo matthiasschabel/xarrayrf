@@ -2,22 +2,25 @@
 
 A registration maps one frame to another. Deformable registration tools write that map as a
 displacement ``y = x + u(x)``, either sampled on a grid (ITK and ANTs displacement fields) or
-parameterized by cubic B-spline coefficients on a control grid (ITK, elastix, NiftyReg). Both
-classes here hold the producer's representation as given and evaluate it in float64.
+parameterized by cubic B-spline coefficients on a control grid (ITK, elastix, NiftyReg), or as
+the target position ``y = f(x)`` sampled on a grid (SPM's deformations). The classes here hold
+the producer's representation as given and evaluate it in float64.
 
 The field's grid is a :class:`~xarrayrf.Grid` in the source frame. It is the field's declared
 domain, not a constraint on what the transform applies to: points anywhere in the source frame
 are mapped, and the ``outside`` declaration says what happens beyond the support. ITK's
 conventions define the support: a dense field covers its cells, half-open at the upper index
 edge (continuous index ``[-0.5, n - 0.5)`` for centred cells), and a cubic B-spline covers
-control index ``[1, n - 2]``, closed. Edges are compared exactly, as ITK compares them.
+control index ``[1, n - 2]``, closed. A position field covers its sample hull ``[0, n - 1]``,
+closed: extending edge positions as constants would collapse the outer half-cells onto a point.
+Edges are compared exactly, as ITK compares them.
 
 Evaluation uses SciPy, loaded on first use as resampling loads it: values through
 ``ndimage.map_coordinates`` (linear, or cubic without prefiltering), dense Jacobians through the
 multilinear derivative here, whose tie rule on cell faces is part of the contract, and B-spline
 Jacobians through ``interpolate.NdBSpline``. Construction and inspection need only NumPy.
 
-Neither class has an exact inverse, so neither implements ``inverse()``.
+No class has an exact inverse, so none implements ``inverse()``.
 """
 
 from __future__ import annotations
@@ -49,6 +52,10 @@ from ._validation import REAL_KINDS, real_float_array
 type Outside = Literal["raise", "identity", "nearest"]
 """What a field transform does beyond its support."""
 
+type _GridSupport = Literal["cells", "control", "hull"]
+"""A field grid's support: a dense field's cells, a B-spline's control interior, or the hull of
+a position field's samples."""
+
 Support = Literal["closed", "half-open"]
 """Whether a B-spline's upper support face is inside: ITK's ``"closed"`` or elastix's
 ``"half-open"``."""
@@ -72,8 +79,11 @@ def _check_outside(outside: object) -> Outside:
     return outside
 
 
-def _check_endpoints(source: object, target: object, *, what: str) -> None:
-    """Require Cartesian frames with equal coordinate systems: a displacement is added."""
+def _check_endpoints(
+    source: object, target: object, *, what: str, equal_systems: bool = True
+) -> None:
+    """Require Cartesian frames with equal coordinate systems (a displacement is added), or with
+    equal axis counts only (a position field, whose Jacobian must be square)."""
     for name, endpoint in (("source", source), ("target", target)):
         if not isinstance(endpoint, ReferenceFrame):
             raise TypeError(
@@ -87,6 +97,13 @@ def _check_endpoints(source: object, target: object, *, what: str) -> None:
                 "seam-aware interpolant, which is not implemented)",
             )
     assert isinstance(source, ReferenceFrame) and isinstance(target, ReferenceFrame)
+    if not equal_systems:
+        if len(source.axes) != len(target.axes):
+            raise ValueError(
+                f"{what} source and target need equal axis counts, so its Jacobian is square; got "
+                f"{len(source.axes)} and {len(target.axes)}",
+            )
+        return
     if source.coordinate_system != target.coordinate_system:
         raise ValueError(
             f"{what} adds a displacement to the point, so source and target need equal coordinate "
@@ -158,7 +175,9 @@ class _FieldGrid:
         "values",
     )
 
-    def __init__(self, grid: object, source: ReferenceFrame, *, spline: bool, what: str) -> None:
+    def __init__(
+        self, grid: object, source: ReferenceFrame, *, support: _GridSupport, what: str
+    ) -> None:
         if not isinstance(grid, Grid):
             raise TypeError(f"{what} grid must be a Grid, got {type(grid).__name__}")
         if grid.frame != source:
@@ -203,7 +222,16 @@ class _FieldGrid:
                 raise ValueError(
                     f"the {what} grid's coordinate along {dim!r} is not strictly monotonic"
                 )
-            if spline:
+            if support == "hull":
+                if size < 2:
+                    raise ValueError(
+                        f"the {what} grid has a single sample along {dim!r}; a position field "
+                        "needs two samples per axis for a derivative there",
+                    )
+                step = uniform_step(values, EXACT_STEP_TOLERANCE)
+                lower.append(0.0)
+                upper.append(size - 1.0)
+            elif support == "control":
                 if size < 4:
                     raise ValueError(
                         f"a cubic B-spline needs at least four control points per axis; {dim!r} has {size}",
@@ -383,6 +411,10 @@ class _FieldTransform:
 
     _upper_closed: bool
     _clamp_to_support: bool
+    _grid_support: _GridSupport
+    _adds_point: bool = True
+    """Whether the stored value is added to the point (a displacement) or is the image."""
+    _exterior_hint = "Declare outside='identity' or 'nearest' to map such points"
     _what: str
 
     def _setup(
@@ -396,7 +428,7 @@ class _FieldTransform:
         field: str,
         upper_closed: bool,
     ) -> None:
-        _check_endpoints(source, target, what=self._what)
+        _check_endpoints(source, target, what=self._what, equal_systems=self._adds_point)
         self._upper_closed = upper_closed
         self._derivative_cache: Any = None
         # The SimpleITK engine's index-space ITK transform, built on first use and kept: a
@@ -406,7 +438,7 @@ class _FieldTransform:
         self._source = source
         self._target = target
         self._outside = _check_outside(outside)
-        self._lookup = _FieldGrid(grid, source, spline=self._clamp_to_support, what=self._what)
+        self._lookup = _FieldGrid(grid, source, support=self._grid_support, what=self._what)
         assert isinstance(grid, Grid)
         self._grid = grid
         self._stored = _frozen_values(
@@ -454,18 +486,19 @@ class _FieldTransform:
         index = tuple(round(float(p), 6) for p in np.asarray(position))
         return ValueError(
             f"point {where} lies outside the {self._what}'s support at continuous index "
-            f"{index}; the support is {support}. Declare outside='identity' or 'nearest' to map "
-            "such points",
+            f"{index}; the support is {support}. {self._exterior_hint}",
         )
 
     def _displacement_rows(
-        self, columns: npt.NDArray[np.float64]
-    ) -> tuple[npt.NDArray[np.float64], int | None]:
-        """Displacements ``(C, N)`` at continuous index rows ``(D, N)`` under the exterior.
+        self, columns: npt.NDArray[np.float64], *, masked: bool = False
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.bool_] | None]:
+        """Stored values ``(C, N)`` at continuous index rows ``(D, N)`` under the exterior, and
+        which columns lie outside the support (``None`` when none does).
 
-        Under ``"raise"`` a column outside the support returns its number instead, unclamped
-        in ``columns``, for the caller to report; ``"identity"`` gives zero there, and
-        ``"nearest"`` the clamped value. ``columns`` is clamped in place.
+        Under ``"raise"`` the values are empty when a column is outside, for the caller to report
+        the first one (unclamped in ``columns``), or with ``masked`` NaN there; ``"identity"``
+        gives zero there (the caller maps those points to themselves), and ``"nearest"`` the
+        clamped value. ``columns`` is clamped in place.
         """
         lookup = self._lookup
         samples = np.array(lookup.shape, dtype=np.float64) - 1
@@ -484,19 +517,24 @@ class _FieldTransform:
         bound = lookup.upper[:, None]
         above = columns > bound if self._upper_closed else columns >= bound
         outside = np.any((columns < lookup.lower[:, None]) | above, axis=0)
-        if self._outside == "raise":
-            return np.empty((0, 0)), int(np.argmax(outside))
+        if self._outside == "raise" and not masked:
+            return np.empty((0, 0)), outside
         result = np.zeros((len(self._target.axes), columns.shape[1]))
-        rows = ~outside if self._outside == "identity" else slice(None)
+        rows = slice(None) if self._outside == "nearest" else ~outside
         selected = np.clip(columns[:, rows], lowest[:, None], highest[:, None])
         if selected.size:
             result[:, rows] = self._values(selected)
-        return result, None
+        if self._outside == "raise":
+            result[:, outside] = np.nan
+        return result, outside
 
     def _evaluate(
-        self, points: npt.NDArray[np.float64], *, jacobian: bool
+        self, points: npt.NDArray[np.float64], *, jacobian: bool, masked: bool = False
     ) -> npt.NDArray[np.float64]:
-        """Mapped points, or Jacobians, for points ``(..., D)``."""
+        """Mapped points, or Jacobians, for points ``(..., D)``.
+
+        With ``masked``, a point outside a ``"raise"`` support is NaN instead of refused.
+        """
         lookup = self._lookup
         flat = points.reshape(-1, points.shape[-1])
         dims = flat.shape[-1]
@@ -510,10 +548,17 @@ class _FieldTransform:
             for start in range(0, flat.shape[0], _VALUE_BLOCK):
                 block = flat[start : start + _VALUE_BLOCK]
                 columns = lookup.columns(block)
-                displacement, first = self._displacement_rows(columns)
-                if first is not None:
+                values, outside = self._displacement_rows(columns, masked=masked)
+                if not values.size and outside is not None:
+                    first = int(np.argmax(outside))
                     raise_outside(start + first, columns[:, first])
-                np.add(block, displacement.T, out=result[start : start + len(block)])
+                out = result[start : start + len(block)]
+                if self._adds_point:
+                    np.add(block, values.T, out=out)
+                else:
+                    out[...] = values.T
+                    if outside is not None and self._outside == "identity":
+                        out[outside] = block[outside]
             return result.reshape(points.shape)
         result = np.broadcast_to(np.eye(dims), (flat.shape[0], dims, dims)).copy()
         samples = np.array(lookup.shape, dtype=np.float64) - 1
@@ -525,9 +570,11 @@ class _FieldTransform:
             )
             outside_rows = np.any((positions < lookup.lower) | above, axis=-1)
             if outside_rows.any() and self._outside == "raise":
-                first = int(np.argmax(outside_rows))
-                raise_outside(start + first, positions[first])
-            rows = ~outside_rows if self._outside == "identity" else np.ones(len(block), dtype=bool)
+                if not masked:
+                    first = int(np.argmax(outside_rows))
+                    raise_outside(start + first, positions[first])
+                result[np.flatnonzero(outside_rows) + start] = np.nan
+            rows = ~outside_rows if self._outside != "nearest" else np.ones(len(block), dtype=bool)
             if not rows.any():
                 continue
             wanted = positions[rows]
@@ -540,8 +587,28 @@ class _FieldTransform:
             # The constant extension beyond the samples, or beyond the support under "nearest",
             # has no derivative along the clamped axis.
             derivative[np.broadcast_to((clamped != wanted)[:, None, :], derivative.shape)] = 0.0
-            result[target] += derivative @ lookup.position_jacobian(clamped)
+            chained = derivative @ lookup.position_jacobian(clamped)
+            # A displacement adds I (already in result); a position's Jacobian is its derivative.
+            if self._adds_point:
+                result[target] += chained
+            else:
+                result[target] = chained
         return result.reshape((*points.shape[:-1], dims, dims))
+
+    def _masked(
+        self, points: npt.NDArray[np.float64], *, jacobian: bool
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.bool_]]:
+        """Values (or Jacobians) and validity at points ``(..., D)``, for ``resample``.
+
+        Only a ``"raise"`` exterior has invalid points; their values are NaN. The points are
+        validated as :meth:`transform_point` validates them, since an earlier chain member may
+        be user code.
+        """
+        values = self._evaluate(
+            self._points(points, field="points"), jacobian=jacobian, masked=True
+        )
+        first = values[..., 0, 0] if jacobian else values[..., 0]
+        return values, ~np.isnan(first)
 
     def _values(self, columns: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Displacements ``(C, N)`` at index rows ``(D, N)`` already clamped."""
@@ -551,7 +618,8 @@ class _FieldTransform:
         raise NotImplementedError
 
     def transform_point(self, points: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        """Map points ``(..., D)`` ordered as the source axes to ``x + u(x)`` in the target.
+        """Map points ``(..., D)`` ordered as the source axes into the target: ``x + u(x)`` for a
+        displacement or B-spline, ``f(x)`` for a position field.
 
         Raises:
             TypeError: If the values are not real.
@@ -561,7 +629,7 @@ class _FieldTransform:
         return self._evaluate(self._points(points, field="points"), jacobian=False)
 
     def jacobian(self, at: npt.ArrayLike | None = None) -> npt.NDArray[np.float64]:
-        """Return ``I + ∂u/∂x`` at points ``(..., D)``, shaped ``(..., D, D)``.
+        """Return ``I + ∂u/∂x`` (or ``∂f/∂x``) at points ``(..., D)``, shaped ``(..., D, D)``.
 
         The derivative is that of the interpolant, chained with the world-to-index map. It is the
         identity at an ``"identity"`` exterior point, and has no component along an axis that is
@@ -598,6 +666,7 @@ class DisplacementFieldTransform(_FieldTransform):
     __slots__ = ()
 
     _clamp_to_support = False
+    _grid_support: _GridSupport = "cells"
     _what = "displacement field"
 
     def __init__(
@@ -661,6 +730,99 @@ class DisplacementFieldTransform(_FieldTransform):
         )
 
 
+class PositionFieldTransform(_FieldTransform):
+    """``y = f(x)``: the target position sampled on a grid and interpolated linearly.
+
+    The representation of SPM's DARTEL and Shoot deformations (``y_`` and ``iy_`` files) and of
+    NGFF's ``coordinates``. Source and target may differ in axes and units but not in axis
+    count. The support is the hull of the samples, continuous index ``[0, n - 1]`` on every axis,
+    closed; a single-sample axis has none. Equality is identity.
+    """
+
+    __slots__ = ()
+
+    _clamp_to_support = True
+    _grid_support: _GridSupport = "hull"
+    _adds_point = False
+    _exterior_hint = (
+        "Declare outside='identity' to map such points to themselves (equal coordinate systems)"
+    )
+    _what = "position field"
+
+    def __init__(
+        self,
+        *,
+        source: ReferenceFrame,
+        target: ReferenceFrame,
+        field: npt.ArrayLike,
+        grid: Grid,
+        outside: Outside = "raise",
+    ) -> None:
+        """Validate the endpoints, exterior and grid, and copy the field into immutable storage.
+
+        Args:
+            source: The frame points are mapped from; the grid's frame.
+            target: The frame points are mapped to, with as many axes as ``source``.
+            field: Target positions shaped ``(*grid sizes in grid.dims order, D)``, components
+                ordered as the target axes; float32 and float64 are kept, integers are stored as
+                float64.
+            grid: The sampling grid: an affine, square, invertible transform from array
+                coordinates to ``source``, with strictly monotonic coordinates and at least two
+                samples on every axis.
+            outside: ``"raise"`` or ``"identity"`` (``y = x``, only when source and target have
+                equal coordinate systems). ``"nearest"`` is refused: a constant position has a
+                zero Jacobian.
+
+        Raises:
+            TypeError: If an endpoint is not a ReferenceFrame, ``grid`` is not a Grid, or the
+                field is masked or not real.
+            ValueError: If the endpoints are not Cartesian or differ in axis count, ``outside``
+                is unknown, ``"nearest"``, or ``"identity"`` between unequal coordinate systems,
+                the grid is not admissible, or the field has the wrong shape or is not finite.
+        """
+        outside = _check_outside(outside)
+        _check_endpoints(source, target, what=self._what, equal_systems=False)
+        if outside == "nearest":
+            raise ValueError(
+                "a position field cannot extend its edge positions as constants "
+                "(outside='nearest'): they have a zero Jacobian; declare 'raise' or 'identity'",
+            )
+        if outside == "identity" and source.coordinate_system != target.coordinate_system:
+            raise ValueError(
+                "outside='identity' maps a point to itself, so source and target need equal "
+                f"coordinate systems; got {source.coordinate_system!r} and "
+                f"{target.coordinate_system!r}",
+            )
+        self._setup(source, target, field, grid, outside, field="field", upper_closed=True)
+
+    def _values(self, columns: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        # Positions are clamped to the samples, so "nearest" padding is never reached.
+        return _sampled_values(self._stored, columns, order=1, mode="nearest")
+
+    def _derivative(self, positions: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        return _multilinear_derivative(self._stored, positions)
+
+    @property
+    def field(self) -> npt.NDArray[np.floating]:
+        """The stored target positions, a read-only view."""
+        return self._stored.view()
+
+    def __reduce__(self) -> tuple[object, ...]:
+        """Rebuild through the constructor; the copy is a new, unequal transform."""
+        return (
+            _rebuild,
+            (
+                PositionFieldTransform,
+                self._source,
+                self._target,
+                "field",
+                np.array(self._stored),
+                self._grid,
+                self._outside,
+            ),
+        )
+
+
 class BSplineTransform(_FieldTransform):
     """``y = x + Σ c_k β(x - k)``: a cubic B-spline displacement from control-point coefficients.
 
@@ -673,6 +835,7 @@ class BSplineTransform(_FieldTransform):
     __slots__ = ()
 
     _clamp_to_support = True
+    _grid_support: _GridSupport = "control"
     _what = "B-spline transform"
 
     def __init__(
@@ -786,7 +949,7 @@ class BSplineTransform(_FieldTransform):
 
 
 def _rebuild(
-    cls: type[DisplacementFieldTransform] | type[BSplineTransform],
+    cls: type[DisplacementFieldTransform] | type[BSplineTransform] | type[PositionFieldTransform],
     source: ReferenceFrame,
     target: ReferenceFrame,
     name: str,
@@ -794,7 +957,7 @@ def _rebuild(
     grid: Grid,
     outside: Outside,
     options: dict[str, object] | None = None,
-) -> DisplacementFieldTransform | BSplineTransform:
+) -> DisplacementFieldTransform | BSplineTransform | PositionFieldTransform:
     keywords: dict[str, Any] = {name: values, **(options or {})}
     return cls(source=source, target=target, grid=grid, outside=outside, **keywords)
 
@@ -834,7 +997,7 @@ def sample_displacement_field(
             f"{transform.source.identifier}; sample in the transform's source frame",
         )
     # The grid's admissibility is checked before the transform is evaluated on it.
-    _FieldGrid(grid, transform.source, spline=False, what="displacement field")
+    _FieldGrid(grid, transform.source, support="cells", what="displacement field")
     points = grid.points()
     displacement = transform_points(transform, points) - points
     return DisplacementFieldTransform(

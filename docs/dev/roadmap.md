@@ -67,7 +67,8 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
   ([design](architecture/field_transform_design.md); stage 1a, the transforms, declared
   inverse pairs and the elastix, ITK and ANTs importers, is implemented, with fast resampling
   through fields ([plan](architecture/resample_performance_plan.md)), and so is 1b
-  persistence; 1c validity comes next, with NGFF field import deferred until there is demand;
+  persistence and 1c partial domains (per-point validity in `resample` and
+  `PositionFieldTransform`); NGFF field import is deferred until there is demand;
   Pirana adopts them only after the release gate), then angular charts
   with chart transitions and a minimal CF reader (rectilinear GCM and celestial grids), then
   curvilinear coordinate fields, then provider adapters (pyproj, Astropy). Angular charts change

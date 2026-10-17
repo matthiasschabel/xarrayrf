@@ -761,13 +761,17 @@ def test_declared_vectors_follow_the_fields_pointwise_jacobian() -> None:
     )
 
 
-def test_a_raise_field_refuses_a_target_point_outside_its_support() -> None:
+def test_a_raise_field_fills_target_points_outside_its_support() -> None:
     pytest.importorskip("scipy", minversion="1.18")
-    source = framed(np.zeros((6, 6, 6)), MOVING)
+    source = framed(np.ones((6, 6, 6)), MOVING)
     target = framed(np.zeros((6, 6, 6)), FIXED)
     field = dense(np.zeros((4, 4, 4, 3)), grid((4, 4, 4)))
+    result = source.rf.resample_to(target, transform=field, fill_value=-1.0).values
+    assert (result == 1.0).any() and (result == -1.0).any()
+    assert np.isin(result, [1.0, -1.0]).all()
+    # A direct call still refuses the same points.
     with pytest.raises(ValueError, match="outside the displacement field's support"):
-        source.rf.resample_to(target, transform=field)
+        field.transform_point(np.full((1, 3), 5.0))
 
 
 def test_evaluation_without_scipy_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -835,3 +839,173 @@ def test_large_coordinate_values_keep_local_indices() -> None:
     mapped = dense(field, g).transform_point(np.array([[1e15 + 0.125, 0.0, 0.0]]))
     # 0.125 / 0.375 rounds once.
     assert_allclose(mapped[:, 1], [1 / 3], rtol=1e-15, atol=0)
+
+
+# PositionFieldTransform
+
+VOXELS = xrf.CoordinateSystem(("u", "v", "w"), ("um",) * 3)
+VOXEL_FRAME = xrf.ReferenceFrame.declared(("test", "voxels"), VOXELS)
+POSITION_MAP = xrf.AffineTransform.from_matrix(
+    source=FIXED,
+    target=VOXEL_FRAME,
+    matrix=1000.0 * np.array([[1.1, 0.2, 0.0], [0.0, 0.9, 0.1], [0.1, 0.0, 1.2]]),
+    translation=(5.0, -3.0, 2.0),
+)
+
+
+def positions(
+    transform: Any = POSITION_MAP,
+    *,
+    target: xrf.ReferenceFrame = VOXEL_FRAME,
+    g: xrf.Grid | None = None,
+    outside: Any = "raise",
+) -> xrf.PositionFieldTransform:
+    g = grid((4, 5, 3), source=POINTS) if g is None else g
+    return xrf.PositionFieldTransform(
+        source=FIXED,
+        target=target,
+        field=transform.transform_point(g.points()),
+        grid=g,
+        outside=outside,
+    )
+
+
+def test_a_position_field_of_an_affine_reproduces_it() -> None:
+    # Multilinear interpolation reproduces an affine exactly, values and derivative; the axes
+    # and units of the target differ from the source's.
+    field = positions()
+    points = np.random.default_rng(7).uniform([0, 0, 0], [3, 4, 2], size=(50, 3))
+    assert_allclose(field.transform_point(points), POSITION_MAP.transform_point(points), atol=1e-9)
+    assert_allclose(
+        field.jacobian(points),
+        np.broadcast_to(POSITION_MAP.matrix, (50, 3, 3)),
+        atol=1e-9,
+    )
+
+
+def test_a_nonuniform_position_field_reproduces_an_affine() -> None:
+    g = grid((4, 5, 3), source=POINTS, coordinates={"i": [0.0, 0.5, 2.0, 2.25]})
+    field = positions(g=g)
+    points = np.random.default_rng(8).uniform([0, 0, 0], [2.25, 4, 2], size=(30, 3))
+    assert_allclose(field.transform_point(points), POSITION_MAP.transform_point(points), atol=1e-9)
+    assert_allclose(
+        field.jacobian(points), np.broadcast_to(POSITION_MAP.matrix, (30, 3, 3)), atol=1e-9
+    )
+
+
+def test_the_position_support_is_the_closed_sample_hull() -> None:
+    field = positions()
+    corners = np.array([[0.0, 0.0, 0.0], [3.0, 4.0, 2.0]])
+    assert_allclose(
+        field.transform_point(corners), POSITION_MAP.transform_point(corners), atol=1e-9
+    )
+    for beyond in ([-1e-9, 0.0, 0.0], [3.0, 4.0, 2.0 + 1e-9]):
+        with pytest.raises(ValueError, match="outside the position field's support"):
+            field.transform_point([beyond])
+
+
+def test_a_position_field_with_an_identity_exterior_maps_points_to_themselves() -> None:
+    same = xrf.AffineTransform.from_matrix(
+        source=FIXED, target=MOVING, matrix=np.diag([1.1, 0.9, 1.0]), translation=(0.5, 0, 0)
+    )
+    field = positions(same, target=MOVING, outside="identity")
+    outside = np.array([[-2.0, 1.0, 1.0], [10.0, 0.0, 0.0]])
+    assert_allclose(field.transform_point(outside), outside, rtol=0, atol=0)
+    assert_allclose(field.jacobian(outside), np.broadcast_to(np.eye(3), (2, 3, 3)), atol=0)
+    inside = np.array([[1.5, 2.0, 1.0]])
+    assert_allclose(field.transform_point(inside), same.transform_point(inside), atol=1e-12)
+
+
+def test_position_jacobians_match_finite_differences() -> None:
+    values = grid((5, 5, 4), source=POINTS).points()
+    values = values + 0.2 * np.sin(values[..., ::-1])
+    field = xrf.PositionFieldTransform(
+        source=FIXED, target=MOVING, field=values, grid=grid((5, 5, 4), source=POINTS)
+    )
+    # Inside cells (away from faces, where the multilinear derivative jumps).
+    point = np.array([1.3, 2.6, 1.4])
+    step = 1e-6
+    numeric = np.stack(
+        [
+            (field.transform_point(point + step * e) - field.transform_point(point - step * e))
+            / (2 * step)
+            for e in np.eye(3)
+        ],
+        axis=-1,
+    )
+    assert_allclose(field.jacobian(point[None])[0], numeric, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "kwargs, error, message",
+    [
+        pytest.param({"outside": "nearest"}, ValueError, "zero Jacobian", id="nearest"),
+        pytest.param(
+            {"outside": "identity"}, ValueError, "equal coordinate systems", id="identity-unequal"
+        ),
+        pytest.param({"outside": "far"}, ValueError, "outside must be one of", id="unknown"),
+        pytest.param(
+            {
+                "target": xrf.ReferenceFrame.declared(
+                    ("t", "2d"), xrf.CoordinateSystem(("x", "y"), ("mm", "mm"))
+                )
+            },
+            ValueError,
+            "equal axis counts",
+            id="axis-count",
+        ),
+        pytest.param(
+            {"grid": grid((4, 1, 3), intervals={"j": [[-0.5, 0.5]]})},
+            ValueError,
+            "single sample along 'j'",
+            id="single-sample",
+        ),
+        pytest.param({"target": "frame"}, TypeError, "target must be a ReferenceFrame", id="type"),
+    ],
+)
+def test_position_field_refusals(kwargs: dict[str, Any], error: type, message: str) -> None:
+    options: dict[str, Any] = {
+        "source": FIXED,
+        "target": VOXEL_FRAME,
+        "grid": grid((4, 5, 3), source=POINTS),
+        "outside": "raise",
+        **kwargs,
+    }
+    shape = (*options["grid"].sizes.values(), 3)
+    with pytest.raises(error, match=message):
+        xrf.PositionFieldTransform(field=np.zeros(shape), **options)
+
+
+def test_position_fields_refuse_angular_endpoints() -> None:
+    sphere = xrf.ReferenceFrame.declared(
+        ("test", "sphere"),
+        xrf.CoordinateSystem(
+            ("lon", "lat", "r"),
+            ("degrees_east", "degrees_north", "m"),
+            representation=xrf.SPHERICAL,
+            axis_roles=("longitude", "latitude", "radius"),
+        ),
+    )
+    with pytest.raises(ValueError, match="spherical coordinate system"):
+        positions(target=sphere)
+
+
+def test_resampling_through_a_position_field_matches_its_affine() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
+    affine = xrf.AffineTransform.from_matrix(
+        source=FIXED, target=MOVING, matrix=np.diag([1.1, 0.9, 1.0]), translation=(0.2, 0.1, 0)
+    )
+    field = positions(affine, target=MOVING, g=grid((8, 8, 8), source=POINTS))
+    source = framed(np.random.default_rng(9).random((8, 8, 8)), MOVING)
+    target = framed(np.zeros((6, 6, 6)), FIXED)
+    through_field = source.rf.resample_to(target, transform=field).values
+    expected = source.rf.resample_to(target, transform=affine).values
+    assert_allclose(through_field, expected, atol=1e-9, equal_nan=True)
+
+
+def test_a_position_field_pickles_to_a_new_equal_mapping() -> None:
+    field = positions()
+    copy = pickle.loads(pickle.dumps(field))
+    assert type(copy) is xrf.PositionFieldTransform and copy != field
+    points = np.array([[1.0, 2.0, 1.0]])
+    assert_allclose(copy.transform_point(points), field.transform_point(points), rtol=0, atol=0)

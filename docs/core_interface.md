@@ -411,13 +411,15 @@ as a lon/lat/height grid onto Earth-centred Cartesian points.
 ### Field transforms
 
 A deformable registration maps one Cartesian frame to another by a displacement,
-`y = x + u(x)`. Two classes hold the producer's representation as given. Both provide
-points and a pointwise Jacobian, have no inverse, and compare by identity:
+`y = x + u(x)`, or by the target position itself, `y = f(x)`. Three classes hold the
+producer's representation as given. All provide points and a pointwise Jacobian, have no
+inverse, and compare by identity:
 
 | Class | Representation | Producers | Support, in continuous index |
 |---|---|---|---|
 | `DisplacementFieldTransform(*, source, target, field, grid, outside="raise")` | `u` sampled on a grid, interpolated linearly | ITK and ANTs displacement fields, NGFF `displacements` | The grid's cells, half-open above: `[-0.5, n - 0.5)` for centred cells |
 | `BSplineTransform(*, source, target, coefficients, grid, order=3, outside="raise")` | Cubic B-spline coefficients on a control grid, without prefiltering | ITK `BSplineTransform`, elastix, NiftyReg | `[1, n - 2]`, closed |
+| `PositionFieldTransform(*, source, target, field, grid, outside="raise")` | `f` sampled on a grid, interpolated linearly | SPM DARTEL and Shoot deformations (`y_`, `iy_`), NGFF `coordinates` | The sample hull, `[0, n - 1]`, closed |
 
 ```python
 grid = rf.Grid(to_fixed, {axis: (axis, np.arange(n)) for axis, n in zip("ijk", (41, 41, 21))})
@@ -428,8 +430,10 @@ moved = warp.transform_point(points)  # points in fixed, results in moving
 report = rf.jacobian_determinant_report(warp, grid)  # .determinant, .minimum, .folding_fraction
 ```
 
-**Endpoints.** `source` and `target` are Cartesian `ReferenceFrame`s with equal coordinate
-systems, since the displacement is added to the point. Angular charts are refused.
+**Endpoints.** `source` and `target` are Cartesian `ReferenceFrame`s. A displacement or
+B-spline needs equal coordinate systems, since the displacement is added to the point; a
+position field allows different axes and units but needs equal axis counts, so its Jacobian is
+square. Angular charts are refused.
 
 **Grid.** The grid is located in `source` (`grid.frame == source`). Its transform must be an
 affine that is square and invertible, with one varying dimension per frame axis and no
@@ -437,6 +441,9 @@ retained scalars. Coordinates must be strictly monotonic and may be nonuniform o
 - A dense field needs cells on every axis: a `sample_offset`, or intervals that tile the axis.
   A single-sample axis needs its interval, which gives the slab its thickness.
 - A B-spline needs at least four control points per axis, uniformly spaced to 1e-12 steps.
+- A position field needs at least two samples per axis and no cells: its support is the hull
+  of its samples. Extending edge positions as constants, as a dense field does with its
+  displacements, would collapse the outer half-cells onto one point.
 
 **Values.** `field` and `coefficients` are shaped `(*grid sizes in grid.dims order, D)`, with
 components ordered as the target axes. float32 and float64 are kept as given; integers are
@@ -454,15 +461,20 @@ constants.
 - `"raise"`: refuse, naming the first point and the support.
 - `"identity"`: return the point unchanged with an identity Jacobian; this is ITK's semantics.
 - `"nearest"`: evaluate at the nearest point of the support, which for a dense field is the edge
-  displacement.
+  displacement. A position field refuses it (a constant position has a zero Jacobian), and
+  allows `"identity"` only between equal coordinate systems.
 
 `resample(source, target, transform=warp)` pulls through a field from the target image's frame
-to the source image's, by the general path. A `"raise"` field refuses the whole resampling if
-any target sample lies outside its support. Declared vector and tensor components follow the
-field's pointwise Jacobian.
+to the source image's. Target samples that a `"raise"` field does not map receive
+`fill_value`, as samples outside the source do; in a chain, such a sample never reaches a later
+member. Only the built-in field classes report this: any other transform that raises still
+makes `resample` raise, and calling `transform_point` or `jacobian` directly still refuses the
+point. Declared vector and tensor components follow the field's pointwise Jacobian, and are
+`fill_value` where the field does not map.
 
-**Jacobian.** `jacobian(at)` is `I + ∂u/∂x`: the interpolant's derivative chained with the
-world-to-index map, using local steps on nonuniform axes. `at` is required.
+**Jacobian.** `jacobian(at)` is `I + ∂u/∂x` (`∂f/∂x` for a position field): the
+interpolant's derivative chained with the world-to-index map, using local steps on nonuniform
+axes. `at` is required.
 - A dense field's derivative on an interior sample face is the upper cell's, and at the last
   sample the lower cell's.
 - There is no derivative along an axis where the value is clamped (beyond the samples, or by
@@ -1224,6 +1236,9 @@ allow, and the paths agree within one precision contract rather than bit for bit
   decisions agree with the general path to roundoff (within about `1e-9` index units of a
   support face or domain edge). A 256³ image through a 128³ dense field resamples at about
   8 Mpt/s on one thread, against SimpleITK's 36 (`benchmarks/field_resample_benchmark.py`).
+  A displacement field or B-spline qualifies; a position field takes the general path, and
+  so do declared components through a `"raise"` field, so that the values and the component
+  maps are filled at exactly the same target samples.
 - With SimpleITK installed (`xarrayrf[simpleitk]`), the fused path above hands a
   `DisplacementFieldTransform` to ITK's C++ field evaluation when ITK's semantics are
   exactly ours: centred cells on every field axis (support `[-0.5, n - 0.5)`, the edge held
@@ -1313,8 +1328,8 @@ checked strictly, and constructor errors become
 chained `MalformedDataError`.
 Intervals are not encoded in stages 1 or 2. Schema 1 is not frozen.
 
-**Arrays by reference.** `DisplacementFieldTransform`, `BSplineTransform`,
-`DeclaredInversePair` and its directions are encoded too, but a field's array is not inline.
+**Arrays by reference.** `DisplacementFieldTransform`, `PositionFieldTransform`,
+`BSplineTransform`, `DeclaredInversePair` and its directions are encoded too, but a field's array is not inline.
 `encode(value, arrays=store)` puts it into the caller's mutable mapping under a reference that
 is its content digest: `"sha256:"` and the SHA-256 of `"<dtype>:<shape>\n"` followed by the
 C-order, little-endian bytes. The record holds `{"reference": ..., "dtype": ...}`. Equal arrays

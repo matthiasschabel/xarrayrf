@@ -57,6 +57,7 @@ from ._encoding import (
 from ._field_transform import (
     BSplineTransform,
     DisplacementFieldTransform,
+    PositionFieldTransform,
     sample_displacement_field,
 )
 from ._frame import LOCAL_NAMESPACE, ReferenceFrame, Role
@@ -144,6 +145,7 @@ __all__ = [
     "MissingArrayError",
     "MissingDecoderError",
     "PairedTransform",
+    "PositionFieldTransform",
     "ReferenceFrame",
     "Role",
     "RoundTripResidualReport",

@@ -1,6 +1,6 @@
 # Field-backed transforms
 
-**Status:** Active (stages 1a and 1b implemented; 1c to come)
+**Status:** Implemented (stages 1a, 1b and 1c; NGFF field import deferred)
 **Last updated:** 2026-10-17
 **Scope:** Stage 1 of the [nonlinear geometry plan](nonlinear_geometry_plan.md): transforms
 between Cartesian frames whose values come from a sampled field or a B-spline control grid
@@ -133,7 +133,9 @@ implement `SupportsPoints` and `SupportsJacobian`, with frame endpoints:
   this is not a `DisplacementFieldTransform` with a cubic interpolant. Rasterizing it into a
   dense field is an explicit conversion with a caller-chosen grid.
 - `PositionFieldTransform(*, source, target, field, grid, outside)` (1c): `y = f(x)`, the stored
-  value is the target position itself. This is NGFF's `coordinates`.
+  value is the target position itself. This is NGFF's `coordinates` and SPM's deformations. As
+  built (validity plan): its support is the closed sample hull, it needs equal axis counts, and
+  it refuses `"nearest"` and allows `"identity"` only between equal coordinate systems.
 
 **The sampling grid is an xarrayrf `Grid`** in the source frame, not a new lattice declaration:
 `Grid` already holds frozen, possibly nonuniform 1-D coordinates and a transform into its frame,
@@ -282,21 +284,24 @@ consistent with the rule that identity is never inferred.
 Schema 1 stores parameters inline as JSON, which is unsuitable for arrays, and `rf.encode()`
 returns a single DataArray, which cannot carry a companion array.
 
-- Standalone `encode`/`decode` stay defined. A field record holds its declaration (endpoints,
-  grid, interpolant or order, exterior, dtype, shape, digest) and a reference to where its array
-  lives; decoding requires a caller-supplied resolver for that reference and raises without one,
-  never guesses. The resolver is storage-neutral; Dataset and Zarr assembly live in integration
-  code, per the [core layering](core_layering_design.md).
-- A declared pair is encoded as one record owning both directions, plus which direction was
-  encoded, so decoding a half returns that half with its original source and target.
-- A container-level API writes and reads a framed array together with its arrays, as a Dataset
-  (netCDF) or a Zarr group, and also handles the affine-only case, so users have one save path
-  whatever the transform. Array variables use reserved, collision-checked names; a name already
-  present is refused. Loading copies data into immutable storage and verifies the digest.
-- Revised in 1b: no schema bump. The records are new kinds within schema 1, which an older
-  reader refuses as unknown; references are content digests over dtype, shape and bytes, so
-  one string locates and verifies an array; the container API lives in `xarrayrf.native`
-  ([persistence plan](field_transform_persistence_plan.md)).
+As built in 1b ([persistence plan](field_transform_persistence_plan.md)):
+
+- Field transforms and declared pairs are new kinds within schema 1, with no schema bump; an
+  older reader refuses them as unknown. A field record holds its declaration (endpoints, grid,
+  interpolant or order, exterior) and `{"reference", "dtype"}` for its array. The reference is
+  a content digest, `"sha256:"` over `"<dtype>:<shape>\n"` and the little-endian bytes, so one
+  string locates the array and verifies its dtype, shape and data on decode.
+- `encode(value, arrays=store)` fills a caller mapping and `decode(data, arrays=store)` resolves
+  from any mapping, raising `MissingArrayError` rather than guessing when it cannot. The core
+  stays storage-neutral, per the [core layering](core_layering_design.md).
+- A declared pair is one record owning both directions, plus which direction was encoded, so
+  decoding a half returns that half with its original source and target.
+- The container API is in `xarrayrf.native` (`rf.to_dataset`, `array_from_dataset`,
+  `value_to_dataset`, `value_from_dataset`): a framed array or a value is written with its
+  arrays as one Dataset (netCDF) or Zarr group, the affine-only case included, under reserved,
+  collision-checked variable names; loading copies into immutable storage and verifies the
+  digest.
+- 1c adds the `position_field_transform` kind the same way.
 
 NGFF 0.6 stores field transforms as references to multiscale groups and is handled by the NGFF
 adapter, not by this schema.
@@ -316,6 +321,10 @@ row from a field fails at the next member before `resample` sees it. The contrac
   as a domain exclusion.
 - `resample` locates only valid rows and fills the rest with `fill_value`.
 - Direct `transform_point` calls still raise; NaN is never returned as an ordinary result.
+
+Realized in the [validity plan](field_transform_validity_plan.md): validity is internal (no
+public masked protocol), invalid rows become NaN source positions, and declared components
+through a `"raise"` field take the general path so values and component maps fill alike.
 
 This resolves open decision 4 of the [relativity notes](relativity_notes.md) in favour of
 "exceptions by default, validity only when explicitly requested", with `resample` as the
@@ -446,6 +455,7 @@ No disagreements remain open; the 1a scope and open decision 2 are maintainer de
    Field evaluation needs SciPy (`xarrayrf[resample]`), confirmed by the maintainer.
 2. Done: resampling through fields made fast (`resample_performance_plan.md`): fused lattice
    path, threads, and the optional SimpleITK field engine.
-3. Done: 1b, persistence by reference (`field_transform_persistence_plan.md`). 1c when a
-   consumer of partial-domain fields appears. Pirana adopts the
-   classes only after xarrayrf's release gate (see the [roadmap](../roadmap.md)).
+3. Done: 1b, persistence by reference (`field_transform_persistence_plan.md`).
+4. Done: 1c, per-point validity and `PositionFieldTransform`
+   ([validity plan](field_transform_validity_plan.md)). Pirana adopts the classes only after
+   xarrayrf's release gate (see the [roadmap](../roadmap.md)).

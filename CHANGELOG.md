@@ -7,6 +7,9 @@
 - Field transforms between Cartesian frames, for deformable registration:
   - `DisplacementFieldTransform`: a displacement sampled on a `Grid` and interpolated linearly.
   - `BSplineTransform`: cubic B-spline coefficients on a control grid.
+  - `PositionFieldTransform`: the target position sampled on a `Grid` and interpolated linearly
+    (SPM's deformations), supported on its sample hull; source and target may differ in axes
+    and units. It persists by reference like the others (`position_field_transform`).
   - Both follow ITK's support conventions and declare their exterior (`"raise"`, `"identity"`
     or `"nearest"`). Both have analytic pointwise Jacobians, keep float32 or float64 storage
     and evaluate in float64. They resample through the general path, including declared
@@ -75,6 +78,11 @@
 
 ### Changed
 
+- `resample` fills target samples that a field declared `outside="raise"` does not map with
+  `fill_value`, for scalars and declared components, instead of refusing the whole resampling.
+  Inside a chain, such a sample never reaches a later member. Direct `transform_point` and
+  `jacobian` calls still refuse, and any other transform that raises still makes `resample`
+  raise.
 - With SimpleITK installed (the new `xarrayrf[simpleitk]` extra), resampling through a
   `DisplacementFieldTransform` with centred cells lets ITK evaluate the field where its
   boundary behaviour is exactly xarrayrf's, about 1.6× faster on one thread; everything else,

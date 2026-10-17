@@ -35,6 +35,7 @@ from ._tensor_components import (
 )
 from ._tensor_type import polar_orthogonal_factor
 from ._transform import SupportsAffine, SupportsJacobian, SupportsPoints
+from ._validity import has_raising_field, masked_map
 
 type ComponentReorientation = (
     Literal["jacobian", "polar_orthogonal_factor"]
@@ -179,8 +180,12 @@ def resample_components(
     target_dims: Sequence[str],
     target_frame_points: Callable[[int, int], npt.NDArray[np.float64]],
     block_points: int,
+    fill_value: float,
 ) -> tuple[xr.DataArray, TensorComponentDeclaration]:
     """Map resampled source-basis components into the output basis, and relabel them.
+
+    Targets that a field declared ``"raise"`` does not map get ``fill_value``; the plan keeps
+    such a field off the fused path, so interpolation filled exactly the same targets.
 
     Returns the relabelled values without a declaration index, and the declaration to attach
     once the result is framed.
@@ -283,12 +288,26 @@ def resample_components(
     else:
         shape = tuple(result.sizes[dim] for dim in target_dims)
         component_ndim = len(dims)
+        masked = has_raising_field(frame_map)
 
-        def maps_at(start: int, stop: int) -> list[npt.NDArray[np.float64]]:
+        def maps_at(
+            start: int, stop: int
+        ) -> tuple[list[npt.NDArray[np.float64]], npt.NDArray[np.bool_] | None]:
+            """The block's component maps, at its valid targets only when ``valid`` is given."""
             target_points = target_frame_points(start, stop)
+            valid = None
             if frame_map is None:
                 push = np.eye(len(target_frame.axes))
                 source_points = target_points
+            elif masked:
+                source_points, jacobian, valid = masked_map(
+                    frame_map, np.asarray(target_points, dtype=np.float64), jacobian=True
+                )
+                if not valid.any():
+                    return [], valid
+                assert jacobian is not None
+                target_points, source_points = target_points[valid], source_points[valid]
+                push = _push(jacobian[valid])
             else:
                 if isinstance(frame_map, SupportsAffine):
                     push = _push(np.asarray(frame_map.matrix, dtype=np.float64))
@@ -310,7 +329,7 @@ def resample_components(
                     side.matrix(source_points) if isinstance(side, FrameField) else side,
                 )
                 for side in inputs
-            ]
+            ], valid
 
         def apply_pointwise(values: npt.NDArray[Any]) -> npt.NDArray[Any]:
             leading = values.shape[: values.ndim - len(shape) - component_ndim]
@@ -323,12 +342,14 @@ def resample_components(
                 try:
                     # A transform or frame field may raise where its matrix does not exist (a
                     # pole) rather than return a singular matrix.
-                    maps = maps_at(start, stop)
+                    maps, valid = maps_at(start, stop)
                     for matrix in maps:
                         equilibrated_inverse(np.asarray(matrix, dtype=np.float64))
                 except ValueError as error:
                     # Both failures name a block-relative index; report the target sample.
-                    sample = _first_failing(maps_at, start, stop, shape, target_dims)
+                    sample = _first_failing(
+                        lambda a, b: maps_at(a, b)[0], start, stop, shape, target_dims
+                    )
                     raise ValueError(
                         f"the component maps (the frame map's Jacobian, or a frame-field basis) "
                         f"are singular, not finite or undefined at target sample {sample}, so "
@@ -336,7 +357,17 @@ def resample_components(
                         "or a pole of a chart transition or frame field, cannot carry tensor "
                         "components"
                     ) from error
-                out[block] = transform_declared_components(flat[block], declaration, maps)
+                if valid is None:
+                    out[block] = transform_declared_components(flat[block], declaration, maps)
+                    continue
+                rows = np.flatnonzero(valid)
+                block_out = np.full(flat[block].shape, fill_value, dtype=dtype)
+                if rows.size:
+                    kept = (slice(None),) * len(leading) + (rows,)
+                    block_out[kept] = transform_declared_components(
+                        flat[block][kept], declaration, maps
+                    )
+                out[block] = block_out
             return out.reshape(values.shape)
 
         mapped = _apply(result, apply_pointwise, [*target_dims, *dims], dtype)
