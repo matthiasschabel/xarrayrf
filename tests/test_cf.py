@@ -290,6 +290,69 @@ def test_descending_latitude_with_descending_bounds() -> None:
     assert "no-bounds" not in codes(geometry)
 
 
+def centred(labels: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    return cell_bounds(labels)
+
+
+def upper_edge(labels: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Edge-sampled bounds: each label on its cell's upper edge."""
+    step = labels[1] - labels[0]
+    return np.stack([labels - step, labels], axis=-1)
+
+
+@pytest.mark.parametrize(
+    "lon, cells, wrap",
+    [
+        pytest.param(LON, centred, lambda b: np.mod(b, 360.0), id="0-360"),
+        pytest.param(
+            LON - 180.0, centred, lambda b: np.mod(b + 180.0, 360.0) - 180.0, id="-180-180"
+        ),
+        # The seam label lies above its sorted bounds: label 360's cell [358.75, 1.25].
+        pytest.param(LON + 2.5, centred, lambda b: np.mod(b, 360.0), id="2.5-360"),
+        # The seam label sits on a bound: label 0's cell [357.5, 0].
+        pytest.param(LON, upper_edge, lambda b: np.mod(b, 360.0), id="edge-sampled"),
+    ],
+)
+def test_bounds_crossing_the_seam_are_unwrapped(
+    lon: npt.NDArray[np.float64], cells: Any, wrap: Any
+) -> None:
+    """Bounds normalized into one turn store the seam cell as, for example, [358.75, 1.25]."""
+    ds = dataset(lon=lon)
+    ds["lon_bnds"] = (("lon", "bnds"), wrap(cells(lon)))
+    geometry = rfcf.from_dataset(ds, "tas")
+    assert codes(geometry).count("bounds-unwrapped") == 1
+    assert "bounds-off-centre" not in codes(geometry)
+    intervals = np.asarray(geometry.grid.intervals["lon"])
+    assert_allclose(intervals, cells(lon), rtol=0, atol=1e-12)
+    # The intervals tile the turn, so the grid is global and resamples across the seam.
+    tas = rfcf.frame_variable(ds, "tas")
+    target_lon = np.array([lon[-1] + 1.0, lon[0] - 0.5])
+    target = xrf.Grid(tas.rf.grid.transform, {"lon": ("lon", target_lon), "lat": ("lat", [0.0])})
+    values = xrf.resample(tas.rf.geometry, target).transpose("time", "lat", "lon").values
+    assert_allclose(values[0], sphere_field(target_lon, [0.0]), atol=2e-3, rtol=0)
+
+
+def test_bounds_crossing_the_seam_are_unwrapped_in_radians() -> None:
+    lon = np.radians(LON)
+    ds = dataset(lon=lon, lon_attrs={"units": "rad"})
+    ds["lon_bnds"] = (("lon", "bnds"), np.mod(cell_bounds(lon), 2 * np.pi))
+    geometry = rfcf.from_dataset(ds, "tas")
+    assert codes(geometry).count("bounds-unwrapped") == 1
+    assert_allclose(
+        np.asarray(geometry.grid.intervals["lon"]), cell_bounds(lon), rtol=0, atol=1e-12
+    )
+
+
+def test_latitude_bounds_are_never_unwrapped() -> None:
+    ds = dataset()
+    wide = cell_bounds(LAT)
+    wide[0] = [100.0, -100.0]  # not a seam: latitude does not wrap
+    ds["lat_bnds"] = (("lat", "bnds"), wide)
+    geometry = rfcf.from_dataset(ds, "tas")
+    assert "bounds-unwrapped" not in codes(geometry)
+    assert "lat" not in geometry.grid.intervals
+
+
 def test_off_centre_bounds_are_dropped_and_reported() -> None:
     """Gaussian-grid latitudes sit at varying positions within their cells."""
     ds = dataset()

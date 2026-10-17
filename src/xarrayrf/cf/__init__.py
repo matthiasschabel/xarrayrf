@@ -30,6 +30,7 @@ from xarrayrf import (
 )
 from xarrayrf._geometry import adopt_frame
 from xarrayrf._sampling import INTERVAL_ROUNDOFF_FACTOR, INTERVAL_TOLERANCE
+from xarrayrf._validation import angular_period
 from xarrayrf.native import Report
 
 _RADIANS = frozenset({"rad", "radian", "radians"})
@@ -254,10 +255,40 @@ def _figure(
     return definition, [("figure", f"earth figure from grid_mapping {mapping_name!r}")]
 
 
+def _unwrapped(
+    bounds: npt.NDArray[np.float64], labels: npt.NDArray[np.float64], period: float
+) -> tuple[npt.NDArray[np.float64], int]:
+    """Longitude cells that cross the seam, written with the other bound one period on.
+
+    Bounds normalized into one turn store a seam cell as ``[358.75, 1.25]``; sorted, that reads
+    as a cell 357.5 wide that misses its label 0. A sorted cell wider than half a turn whose
+    label lies outside it is that seam cell: it becomes ``[-1.25, 1.25]`` (or ``[358.75,
+    361.25]``), whichever contains the label. With more than one cell, such a width cannot be
+    genuine (the cells would overlap by more than a turn), so a label on a bound counts too:
+    edge-sampled ``[357.5, 0]`` for label 0 becomes ``[-2.5, 0]``. A lone cell may span the turn
+    and moves only when its label is strictly outside. Returns the bounds and how many moved.
+    """
+    lower, upper = bounds[:, 0], bounds[:, 1]
+    several = labels.size > 1
+    below_side = labels <= lower if several else labels < lower
+    above_side = labels >= upper if several else labels > upper
+    wraps = (upper - lower > period / 2) & (below_side | above_side)
+    if not wraps.any():
+        return bounds, 0
+    below = np.stack([upper - period, lower], axis=-1)
+    above = np.stack([upper, lower + period], axis=-1)
+    shifted = np.where(below_side[:, None], below, above)
+    return np.where(wraps[:, None], shifted, bounds), int(wraps.sum())
+
+
 def _intervals(
-    dataset: xr.Dataset, axis: _Axis, coordinate: xr.DataArray
+    dataset: xr.Dataset, axis: _Axis, coordinate: xr.DataArray, period: float | None
 ) -> tuple[npt.NDArray[np.float64] | None, float | None, list[tuple[str, str]]]:
-    """Sorted bounds and the one sample offset they imply, or nothing with a reason."""
+    """Sorted bounds and the one sample offset they imply, or nothing with a reason.
+
+    ``period`` is the longitude axis's full turn, for cells that cross the seam; ``None`` on
+    latitude.
+    """
     bounds_name = coordinate.attrs.get("bounds", coordinate.encoding.get("bounds"))
     if bounds_name is None:
         return None, None, [("no-bounds", f"{axis.name!r} declares no bounds")]
@@ -273,6 +304,17 @@ def _intervals(
             f"bounds {bounds_name!r} of {axis.name!r} have shape {bounds.shape}; expected "
             f"{(labels.size, 2)}"
         )
+    entries: list[tuple[str, str]] = []
+    if period is not None and np.all(np.isfinite(bounds)):
+        bounds, moved = _unwrapped(bounds, labels, period)
+        if moved:
+            entries.append(
+                (
+                    "bounds-unwrapped",
+                    f"{moved} cell(s) of {bounds_name!r} cross the longitude seam; their other "
+                    "bound is taken one period on, so each cell contains its label",
+                )
+            )
     width = bounds[:, 1] - bounds[:, 0]
     if np.any(width <= 0) or not np.all(np.isfinite(bounds)):
         raise ValueError(f"bounds {bounds_name!r} of {axis.name!r} need finite, positive widths")
@@ -295,7 +337,7 @@ def _intervals(
                 )
             ],
         )
-    return bounds, offset, []
+    return bounds, offset, entries
 
 
 def from_dataset(
@@ -350,7 +392,8 @@ def from_dataset(
     intervals: dict[str, npt.NDArray[np.float64]] = {}
     offsets: list[float | None] = []
     for axis, coordinate in axes:
-        bounds, offset, entries = _intervals(dataset, axis, coordinate)
+        period = angular_period(axis.frame_unit) if axis is lon else None
+        bounds, offset, entries = _intervals(dataset, axis, coordinate, period)
         report += entries
         offsets.append(offset)
         if bounds is not None:

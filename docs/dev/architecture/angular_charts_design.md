@@ -305,6 +305,9 @@ Each gets a short plan reviewed before implementation, as for value geometry.
 - Block-diagonal composition of a transition with pass-through axes (time, level).
 - Arcminute and arcsecond units on angular axes.
 - A periodic lattice fast path with seam-aware cropping.
+- Box methods on 2-D longitude/latitude sources: they refuse every such source, latitude
+  always, even point-sampled; section 2 reads as if longitude slabs worked. Narrow the refusal
+  or document it (2026-10-17 review finding M1; maintainer: deferred).
 - Masked (per-point validity) evaluation of transitions: stage 1c's internal mechanism
   (`_validity.py`) admits them by giving the transition types a `_masked` evaluation.
 - Metric declaration and preservation query (plan deferred work).

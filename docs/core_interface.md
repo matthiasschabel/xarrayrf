@@ -1630,9 +1630,12 @@ other = rfcf.frame_variable(xr.open_dataset("tas_Amon_model_2.nc"), "tas", frame
   Projected mappings, the extended grid-mapping syntax and a nonzero prime meridian are refused.
 - Bounds become `Grid` intervals with one derived sample offset; bounds placing labels at varying
   positions in their cells (Gaussian latitudes) are dropped and reported. Missing bounds are not
-  inferred. Declared bounds decide global longitude coverage for resampling exactly.
+  inferred. Declared bounds decide global longitude coverage for resampling exactly. A longitude
+  cell stored across the seam, such as `[358.75, 1.25]` for label 0 in bounds normalized into
+  one turn, is read as `[-1.25, 1.25]` (its other bound one period on) and reported; so is an
+  edge-sampled `[357.5, 0]`, read as `[-2.5, 0]`.
 - Report codes: `figure`, `figure-ignored`, `west-longitude`, `south-latitude`, `no-bounds`,
-  `bounds-off-centre`.
+  `bounds-off-centre`, `bounds-unwrapped`.
 
 **elastix import:** `xarrayrf.elastix` reads elastix registration results with NumPy alone; it
 needs no ITK runtime and no extra.

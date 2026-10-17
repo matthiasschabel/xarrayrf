@@ -129,6 +129,10 @@
 
 ### Fixed
 
+- The CF reader keeps longitude bounds that cross the seam (`[358.75, 1.25]` for label 0, as
+  bounds normalized into one turn store it). It dropped them as off-centre, and with them the
+  axis's intervals, so a global grid with such bounds lost its declared coverage. The cell is
+  read one period on and reported as `bounds-unwrapped`.
 - Roundoff just past a pole no longer changes the result. Resampling locates a target past a
   pole by at most 1e-9 of the latitude step on the pole (it was filled); chart transitions and
   `FrameField` take a latitude past a pole by at most 1e-12 of it as the pole (it raised).

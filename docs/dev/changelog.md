@@ -1,5 +1,21 @@
 # Changelog
 
+## [2026-10-17] — CF longitude bounds across the seam
+
+- **Problem**: `cf._intervals` sorts each bounds row, so a seam cell stored as
+  `[358.75, 1.25]` (bounds normalized into one turn) became a 357.5-wide cell missing its
+  label; the axis's bounds were dropped as off-centre and the grid lost its declared global
+  coverage (2026-10-17 stage 2 review, M6).
+- **Resolution**: On the longitude axis only, a sorted cell wider than half a turn whose label
+  lies outside it is shifted by one period to contain its label, and reported as
+  `bounds-unwrapped`; with more than one cell a label on a bound counts too, so edge-sampled
+  `[357.5, 0]` is recovered (implementation review, Codex gpt-6-astra, N1; a lone cell may span
+  the turn, so it keeps the strict rule). Latitude bounds are never shifted. M1 (box methods
+  refusing 2-D lon/lat sources) is recorded as deferred in the angular charts design, per the
+  maintainer.
+- **Files affected**: `src/xarrayrf/cf/__init__.py`, `tests/test_cf.py`,
+  `docs/core_interface.md`, `docs/dev/architecture/angular_charts_design.md`.
+
 ## [2026-10-17] — Field transforms stage 1c: partial domains
 
 - **Problem**: A field declared `outside="raise"` made `resample` fail as soon as one target
