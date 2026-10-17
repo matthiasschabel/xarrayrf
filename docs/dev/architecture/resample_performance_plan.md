@@ -387,6 +387,7 @@ image too (design (a)) or a compiled kernel.
 - Single-sample target dims in the engine: their zero lattice columns need an orthonormal
   completion before ITK can take them as a direction.
 - Box methods' performance.
+- A compiled fused kernel for the field path (parked 2026-10-17 until a consumer needs it).
 
 ## Next Steps
 
