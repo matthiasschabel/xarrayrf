@@ -398,6 +398,7 @@ def test_arithmetic_comparison_where_and_ufunc(framed: xr.DataArray) -> None:
 
 
 _HAS_INDEX_HOOKS = hasattr(xr.Index, "join_overlapping")
+_HAS_CHECK_DROP = hasattr(xr.Index, "check_drop")
 
 
 def _supports_mixed_index_alignment() -> bool:
@@ -556,6 +557,28 @@ def test_unframed_unit_conflict_raises(framed: xr.DataArray, reverse: bool) -> N
         _ = other + framed if reverse else framed + other
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("fixed", [False, True])
+def test_matching_unindexed_coordinates_keep_binding(
+    framed: xr.DataArray, reverse: bool, fixed: bool
+) -> None:
+    source = framed.isel(y=0) if fixed else framed
+    other = source.rf.unframe().drop_indexes(list(source.dims))
+    result = other + source if reverse else source + other
+    assert result.rf.is_framed
+    assert result.rf.coordinate_transform is source.rf.coordinate_transform
+    xr.testing.assert_identical(result.rf.geometry.points(), source.rf.geometry.points())
+
+
+@_NEEDS_HOOKS
+@pytest.mark.parametrize("reverse", [False, True])
+def test_unindexed_unit_attribute_is_validated(framed: xr.DataArray, reverse: bool) -> None:
+    other = framed.rf.unframe().drop_indexes("x")
+    other.coords["x"].attrs["units"] = 3
+    with pytest.raises(TypeError, match="must be a string"):
+        _ = other + framed if reverse else framed + other
+
+
 @_NEEDS_HOOKS
 @pytest.mark.parametrize("reverse", [False, True])
 def test_indexed_plain_unit_conflict_raises(framed: xr.DataArray, reverse: bool) -> None:
@@ -596,7 +619,9 @@ def test_unindexed_axis_label_conflict_raises(framed: xr.DataArray) -> None:
 
 @_NEEDS_HOOKS
 @pytest.mark.parametrize("order", ["framed_first", "framed_second", "both_framed"])
-def test_align_override_raises(framed: xr.DataArray, order: str) -> None:
+@pytest.mark.parametrize("fixed", [False, True])
+def test_align_override_raises(framed: xr.DataArray, order: str, fixed: bool) -> None:
+    framed = framed.isel(y=0) if fixed else framed
     plain = framed.rf.unframe()
     operands = {
         "framed_first": (framed, plain),
@@ -924,11 +949,32 @@ def _assert_same_binding_and_points(result: xr.DataArray, original: xr.DataArray
     )
 
 
+@pytest.mark.parametrize(
+    ("operation", "message"),
+    [
+        ("stack", "cannot stack geometry dimensions; call rf.unframe()"),
+        ("pad", "cannot pad geometry dimensions; call rf.unframe()"),
+        ("coarsen", "cannot coarsen geometry dimensions; call rf.unframe()"),
+        (
+            "interp",
+            "cannot interpolate geometry dimensions; use rf.resample_to or call rf.unframe()",
+        ),
+    ],
+)
+def test_binding_drop_refusal_messages(framed: xr.DataArray, operation: str, message: str) -> None:
+    # Exercise the protocol even in lanes without the corresponding xarray call site.
+    index = framed.xindexes["x"]
+    assert isinstance(index, BindingIndex)
+    with pytest.raises(ValueError) as error:
+        index.check_drop(operation, ("x",))
+    assert str(error.value) == message
+
+
 @pytest.mark.xfail(
-    not hasattr(xr.Index, "check_stack"),
+    not _HAS_CHECK_DROP,
     strict=True,
     raises=pytest.fail.Exception,
-    reason="this xarray lane lacks the Index.check_stack preflight",
+    reason="this xarray lane lacks Index.check_drop preflight",
 )
 @pytest.mark.parametrize("dims", [("y", "x"), ("x", "echo")])
 def test_stack_geometry_is_refused(framed: xr.DataArray, dims: tuple[str, str]) -> None:
@@ -947,10 +993,10 @@ def test_stack_unstack_nongeometry_keeps_binding(framed: xr.DataArray) -> None:
 
 
 @pytest.mark.xfail(
-    not hasattr(xr.Index, "check_pad"),
+    not _HAS_CHECK_DROP,
     strict=True,
     raises=pytest.fail.Exception,
-    reason="this xarray lane lacks the Index.check_pad preflight",
+    reason="this xarray lane lacks Index.check_drop preflight",
 )
 @pytest.mark.parametrize("width", [(0, 0), (1, 2)])
 def test_pad_geometry_is_refused(framed: xr.DataArray, width: tuple[int, int]) -> None:
@@ -966,10 +1012,10 @@ def test_pad_nongeometry_keeps_binding(framed: xr.DataArray) -> None:
 
 
 @pytest.mark.xfail(
-    not hasattr(xr.Index, "check_coarsen"),
+    not _HAS_CHECK_DROP,
     strict=True,
     raises=pytest.fail.Exception,
-    reason="this xarray lane lacks the Index.check_coarsen preflight",
+    reason="this xarray lane lacks Index.check_drop preflight",
 )
 @pytest.mark.parametrize("dataset", [False, True], ids=["dataarray", "dataset"])
 def test_coarsen_geometry_is_refused(framed: xr.DataArray, dataset: bool) -> None:
@@ -979,7 +1025,7 @@ def test_coarsen_geometry_is_refused(framed: xr.DataArray, dataset: bool) -> Non
 
 
 @pytest.mark.xfail(
-    not hasattr(xr.Index, "check_coarsen"),
+    not _HAS_CHECK_DROP,
     strict=True,
     raises=AssertionError,
     reason="this xarray lane lacks coarsen retention of unaffected indexes",

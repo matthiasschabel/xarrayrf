@@ -297,10 +297,10 @@ def test_join_keeps_the_frame_and_concatenation_is_refused() -> None:
 
 
 @pytest.mark.xfail(
-    not hasattr(xr.Index, "check_override"),
+    not hasattr(xr.Index, "check_drop"),
     strict=True,
     raises=pytest.fail.Exception,
-    reason="this xarray lane lacks the check_override Index hook (known align_override hole)",
+    reason="this xarray lane lacks consolidated join_overlapping override validation",
 )
 def test_override_alignment_across_crs_is_refused() -> None:
     with pytest.raises(ValueError, match=r"frame|reference|conflict"):

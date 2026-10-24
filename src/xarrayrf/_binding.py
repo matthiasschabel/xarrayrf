@@ -290,21 +290,36 @@ class BindingIndex(xr.Index):
         other_indexes: Mapping[Hashable, xr.Index],
         *,
         other_variables: Mapping[Hashable, xr.Variable],
-        how: str,
+        how: str | None,
     ) -> tuple[BindingIndex, dict[Hashable, xr.Index]]:
-        """Join plain indexes on source axes while retaining this binding's ownership.
+        """Join or validate source coordinates while retaining this binding's ownership.
 
         Args:
             other_indexes: Indexes keyed by their overlapping source coordinate.
-            other_variables: Coordinate variables belonging to those indexes.
-            how: Alignment join, relative to this binding as the left operand.
+            other_variables: Shared coordinate variables, including unindexed coordinates
+                when ``how=None``.
+            how: Alignment join, relative to this binding as the left operand;
+                ``"override"`` refuses replacement and ``None`` validates unindexed values.
 
         Returns:
-            The joined binding and target indexes for each overlapping coordinate.
+            The joined binding and target indexes for each overlapping coordinate,
+            or ``(self, {})`` after validating unindexed coordinates.
 
         Raises:
-            ValueError: If an overlap covers a fixed term or uses an unsupported index.
+            ValueError: If override is requested, unindexed values or units conflict,
+                or an indexed overlap covers a fixed term or uses an unsupported index.
+            TypeError: If a coordinate's ``units`` attribute is not a string.
         """
+        if how == "override":
+            raise ValueError("join='override' is unsupported for framed coordinates")
+        if how is None:
+            owned = self.create_variables()
+            for name, variable in other_variables.items():
+                if name not in owned or not variable.equals(owned[name]):  # type: ignore[no-untyped-call]
+                    raise ValueError(f"conflicting unindexed coordinate {name!r}")
+                check_coordinate_unit(variable, name=str(name), declared=self.units[name])
+            return self, {}
+
         axes = dict(self.axes)
         targets: dict[Hashable, xr.Index] = {}
         for name, other in other_indexes.items():
@@ -330,53 +345,23 @@ class BindingIndex(xr.Index):
             axes, self.fixed, self.transform, self.dims, self._rows_for_axes(axes)
         ), targets
 
-    def check_unindexed_coord_conflicts(self, variables: Mapping[Hashable, xr.Variable]) -> None:
-        """Reject discarded plain coordinates that contradict bound source coordinates.
+    def check_drop(self, operation: str, dims: Sequence[Hashable]) -> None:
+        """Refuse native operations that discard this binding's geometry.
 
         Args:
-            variables: Same-name, same-dimension unindexed coordinates to replace.
+            operation: Native operation about to drop or replace this index.
+            dims: Operation dimensions supplied by xarray for this affected index.
 
         Raises:
-            ValueError: If a coordinate has different values or source units.
-            TypeError: If a coordinate's ``units`` attribute is not a string.
+            ValueError: Always: xarray calls this only before dropping the binding, and no
+                native operation may discard geometry. Interpolation names the resampling
+                route.
         """
-        owned = self.create_variables()
-        for name, variable in variables.items():
-            if name not in owned or not variable.equals(owned[name]):  # type: ignore[no-untyped-call]
-                raise ValueError(f"conflicting unindexed coordinate {name!r}")
-            check_coordinate_unit(variable, name=str(name), declared=self.units[name])
-
-    def check_override(self, other: xr.Index) -> None:
-        """Refuse replacement of this binding under ``join='override'``.
-
-        Raises:
-            ValueError: Always, because override discards coordinate evidence.
-        """
-        raise ValueError("join='override' is unsupported for framed coordinates")
-
-    def check_stack(self, dims: Sequence[Hashable]) -> None:
-        """Refuse stacking dimensions of this binding's source coordinates.
-
-        Raises:
-            ValueError: Always, because native stacking changes geometry dimensions.
-        """
-        raise ValueError("cannot stack geometry dimensions; call rf.unframe()")
-
-    def check_pad(self, pad_width: Mapping[Hashable, int | tuple[int, int]]) -> None:
-        """Refuse padding dimensions of this binding's source coordinates.
-
-        Raises:
-            ValueError: Always, because native padding does not declare sample positions.
-        """
-        raise ValueError("cannot pad geometry dimensions; call rf.unframe()")
-
-    def check_coarsen(self, windows: Mapping[Hashable, int]) -> None:
-        """Refuse coarsening dimensions of this binding's source coordinates.
-
-        Raises:
-            ValueError: Always, because native coarsening has no geometry aggregation policy.
-        """
-        raise ValueError("cannot coarsen geometry dimensions; call rf.unframe()")
+        if operation == "interp":
+            raise ValueError(
+                "cannot interpolate geometry dimensions; use rf.resample_to or call rf.unframe()"
+            )
+        raise ValueError(f"cannot {operation} geometry dimensions; call rf.unframe()")
 
     def reindex_like(
         self, other: xr.Index, method: str | None = None, tolerance: Any = None
