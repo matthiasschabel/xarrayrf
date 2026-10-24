@@ -46,8 +46,10 @@ point = f.isel(y=1, x=2)
 
 # Source-component order and declared geometry order both differ from pixel storage order.
 ordered_transform = AffineTransform.from_matrix(
-    source=ArrayCoordinates(("x", "y"), ("1", "1")), target=frame,
-    matrix=[[2, 0.5], [-1, 3]], translation=[11, -7],
+    source=ArrayCoordinates(("x", "y"), ("1", "1")),
+    target=frame,
+    matrix=[[2, 0.5], [-1, 3]],
+    translation=[11, -7],
 )
 ordered = raw.rf.frame(ordered_transform, dims=("x", "y"))
 
@@ -56,13 +58,16 @@ anonymous_frame = ReferenceFrame.anonymous(system)
 anonymous_transform = transform.with_endpoints(target=anonymous_frame)
 anonymous = raw.rf.frame(anonymous_transform, dims=("y", "x"))
 independent = raw.rf.frame(
-    transform.with_endpoints(target=ReferenceFrame.local(system)), dims=("y", "x"),
+    transform.with_endpoints(target=ReferenceFrame.local(system)),
+    dims=("y", "x"),
 )
 anonymous_other = raw.rf.frame(
-    transform.with_endpoints(target=ReferenceFrame.anonymous(system)), dims=("y", "x"),
+    transform.with_endpoints(target=ReferenceFrame.anonymous(system)),
+    dims=("y", "x"),
 )
 lazy = raw.copy(data=da.from_array(raw.data, chunks=(2, 2))).rf.frame(
-    transform, dims=("y", "x"),
+    transform,
+    dims=("y", "x"),
 )
 ```
 
@@ -80,14 +85,20 @@ from xarrayrf import CompositeTransform, DisplacementFieldTransform, Grid
 
 field_grid_transform = AffineTransform.from_matrix(
     source=ArrayCoordinates(("y", "x"), ("1", "1"), sample_offset=(0.5, 0.5)),
-    target=frame, matrix=np.eye(2), translation=np.zeros(2),
+    target=frame,
+    matrix=np.eye(2),
+    translation=np.zeros(2),
 )
 field_grid = Grid(field_grid_transform, {"y": ("y", [0, 2, 4]), "x": ("x", [0, 3, 6, 9])})
-yy, xx = np.meshgrid(np.array([0, 2, 4], dtype=np.float64),
-                     np.array([0, 3, 6, 9], dtype=np.float64), indexing="ij")
+yy, xx = np.meshgrid(
+    np.array([0, 2, 4], dtype=np.float64), np.array([0, 3, 6, 9], dtype=np.float64), indexing="ij"
+)
 warp = DisplacementFieldTransform(
-    source=frame, target=ReferenceFrame.local(system),
-    field=np.stack((yy * xx / 100, xx / 10), axis=-1), grid=field_grid, outside="raise",
+    source=frame,
+    target=ReferenceFrame.local(system),
+    field=np.stack((yy * xx / 100, xx / 10), axis=-1),
+    grid=field_grid,
+    outside="raise",
 )
 field_transform = CompositeTransform(transform, warp)
 field_image = raw.rf.frame(field_transform, dims=("y", "x"))
