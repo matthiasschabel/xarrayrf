@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-24
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -40,14 +40,13 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
    passes locked, minimum-core, minimum-resample and current. Hosted validation of the patched
    pin remains separate work; passing stock CI with known xfails does not meet criterion 1.
 5. The TestPyPI rehearsal completed ([release notes](architecture/release_and_repository_notes.md),
-   [releasing.md](../releasing.md)).
+   [releasing.md](../releasing.md)). Met on 2026-10-24 for `0.0.1.dev0`.
 
 ### Planned work, in rough priority order
 
-- **Release preparation.** Extend the native-operation audit, add hosted validation of the
-  immutable patched pin and complete the TestPyPI rehearsal
-  when publishing is authorized. Dependency-floor hosted verification is complete. Steps and
-  order: [release plan](release_plan.md).
+- **Release preparation.** Extend the native-operation audit and add hosted validation of the
+  immutable patched pin. The TestPyPI rehearsal and dependency-floor hosted verification are
+  complete. Steps and order: [release plan](release_plan.md).
 - **xarray upstream.** Respond to review on the open bug-fix PRs, retire duplicate patches when
   a new series baseline includes their merged fixes, verify released-xarray support when fixes
   ship, and reduce the lifecycle hook patches to two `Index` methods before

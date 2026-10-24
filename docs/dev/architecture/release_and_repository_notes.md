@@ -9,8 +9,8 @@ hosted steps still outstanding. The maintainer procedure is [releasing.md](../..
 
 xarrayrf is a standalone repository (`matthiasschabel/xarrayrf`, public, MIT). Runtime
 dependencies are NumPy and xarray; domain producers such as DICOM applications are downstream
-clients or optional adapter extras. Nothing has been published to PyPI or TestPyPI. The version
-is `0.0.1.dev0`, and the first TestPyPI upload will consume it. Native-operation gaps on stock
+clients or optional adapter extras. Version `0.0.1.dev0` is on TestPyPI from the
+2026-10-24 rehearsal (below); nothing has been published to PyPI. Native-operation gaps on stock
 xarray remain release blockers ([the architecture](../../design.md) §5), so a TestPyPI upload is a
 packaging rehearsal, not a release. Clean fixes belong in xarray itself where appropriate,
 maintained locally as small upstream-sized changes ([upstream workflow](../../upstream.md)).
@@ -98,6 +98,17 @@ and PyPI. The TestPyPI publisher's fields are confirmed (project `xarrayrf`, own
 PyPI publisher is unused until a production job exists; that job must match its workflow and
 environment fields.
 
+TestPyPI rehearsal completed 2026-10-24 on `3bc80f2`: local checks in a fresh clone (2994 passed,
+47 stock-lane xfails; build, payload check and `twine check --strict` passed), then [run 40111808490](https://github.com/matthiasschabel/xarrayrf/actions/runs/40111808490)
+built and uploaded through OIDC, creating the TestPyPI project. Uploaded files:
+`xarrayrf-0.0.1.dev0-py3-none-any.whl` (sha256 `3ea29138039cdfa8…`) and
+`xarrayrf-0.0.1.dev0.tar.gz` (`36df9e58479f76b9…`). A fresh Python 3.12 environment outside the
+checkout installed NumPy and xarray 2026.9.0 from PyPI and xarrayrf from TestPyPI with
+`--no-deps`; `pip check` and the workflow smoke test passed. The metadata shows MIT,
+`>=3.12`, the Pre-Alpha classifier and public repository/issue links; the sdist contains LICENSE,
+README and CHANGELOG and no `docs/dev`. The run warns that `actions/checkout@v4`,
+`upload-artifact@v4` and `setup-uv@v6` target the deprecated Node.js 20 runtime.
+
 ## Alternatives Considered
 
 - Keeping development inside a downstream application: couples its dependencies and history to
@@ -109,12 +120,11 @@ environment fields.
 
 ## Deferred Work
 
-- First hosted rehearsal: run the workflow, inspect the
-  TestPyPI page and install from it. OIDC upload has never run.
+- Move the workflows' actions to Node.js 24 majors before GitHub drops Node.js 20.
 - A later version number and a production publishing policy, after the release gate.
 - Keep both minimum lanes current as dependency floors move.
 
 ## Next Steps
 
-The hosted patched-pin job and the TestPyPI rehearsal are R3 and R6 of the
-[release plan](../release_plan.md), which holds their acceptance checks and approvals.
+The hosted patched-pin job is R3 of the [release plan](../release_plan.md), which holds its
+acceptance checks and approvals; the TestPyPI rehearsal (R6) is complete.

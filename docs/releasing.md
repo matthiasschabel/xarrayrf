@@ -63,7 +63,8 @@ lanes must satisfy the release gate before a production release; previous local 
 results are recorded in the patch manifest, but this workflow does not run that lane.
 
 Hosted setup progress is recorded in the [setup note](dev/architecture/release_and_repository_notes.md).
-OIDC upload, TestPyPI installation, and production publishing remain unvalidated.
+The first rehearsal (`0.0.1.dev0`) validated OIDC upload and TestPyPI installation;
+production publishing remains unvalidated.
 Changed artifacts need a new version because an
 uploaded filename cannot be replaced. An unchanged artifact need not be uploaded again;
 the workflow deliberately does not suppress duplicate-upload errors. Decide the next version

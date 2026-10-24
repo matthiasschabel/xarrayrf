@@ -1,7 +1,7 @@
 # Release plan
 
 **Status:** Active
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-24
 **Scope:** The remaining release gates in the [roadmap](roadmap.md#release-criteria), their
 upstream xarray dependencies and the packaging rehearsal. Packaging, CI lanes and the publishing
 workflow themselves are in [release and repository notes](architecture/release_and_repository_notes.md);
@@ -19,7 +19,7 @@ APIs are separate workstreams, not release gates.
 
 ### Status on 2026-10-13
 
-No release work has started since 2026-10-08; R1–R3 and R5–R7 below are open and R4 is
+R6 (TestPyPI rehearsal) completed on 2026-10-24; R1–R3, R5 and R7 below are open and R4 is
 dropped for the pre-alpha release. Criterion 4
 (dependency-floor CI) is met. Upstream: #11613, #11615 and #11616 are merged (`b335cea`,
 `dfd25c7`, `23c9dd1`); #11613 and #11615 are in v2026.09.0, #11616 is on xarray `main` only.
@@ -117,12 +117,16 @@ against [releasing.md, One-time hosted setup](../releasing.md). Run its local ch
 isolated checkout, then present the SHA and version (`0.0.1.dev0`) for dispatch approval. After
 upload, install core dependencies from PyPI and xarrayrf from TestPyPI with `--no-deps` outside
 the checkout, then run `pip check` and the smoke test and inspect the metadata. Uploaded
-filenames cannot be reused, so inventory the published files before any retry. This rehearsal
-can happen before R5 closes.
+filenames cannot be reused, so inventory the published files before any retry.
+*Done 2026-10-24:* [run 40111808490](https://github.com/matthiasschabel/xarrayrf/actions/runs/40111808490) on `3bc80f2` uploaded `0.0.1.dev0`; install,
+`pip check`, smoke test and metadata review passed
+([release notes](architecture/release_and_repository_notes.md)). Re-run it with a new version
+when the packaging changes before R7.
 
 **R7: production approval**, once R1–R3, R5 and R6 close. Compile one readiness record, rebuild and
 install the final artifacts, and recheck floors, changelog and classifier. Production Trusted
-Publishing does not exist yet; the workflow only uploads to TestPyPI. A patched-xarray
+Publishing does not exist yet; the workflow only uploads to TestPyPI. The PyPI pending
+publisher is registered; the production job must match its workflow and environment fields. A patched-xarray
 distribution is a separate product decision.
 
 ### Fixed constraints
