@@ -596,6 +596,7 @@ def by_reference(value: object, **kwargs: Any) -> tuple[Any, dict[str, Any], dic
     ],
 )
 def test_field_transforms_round_trip_by_reference(value: Any) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     decoded, data, arrays = by_reference(value)
     assert type(decoded) is type(value)
     # Equality is identity, so the decoded transform is new; its declaration and data are not.
@@ -615,7 +616,7 @@ def test_field_transforms_round_trip_by_reference(value: Any) -> None:
     assert_points_equal(decoded, value)
 
 
-def xrf_reference(values: npt.NDArray[np.floating]) -> str:
+def xrf_reference(values: npt.NDArray[np.floating[Any]]) -> str:
     """The documented digest, computed independently of the encoder's blocked hashing."""
     import hashlib
 
@@ -631,6 +632,7 @@ def assert_points_equal(decoded: Any, original: Any) -> None:
 
 
 def test_a_composite_with_a_field_round_trips() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     chain = xrf.CompositeTransform(
         affine(FIELD_INDEX, FIXED), dense_field(np.float32), affine(MOVING, FIXED)
     )
@@ -643,6 +645,7 @@ def test_a_composite_with_a_field_round_trips() -> None:
 
 
 def test_a_declared_pair_and_each_direction_round_trip() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     pair = xrf.DeclaredInversePair(dense_field(np.float32), backward_field())
     decoded, _, arrays = by_reference(pair)
     assert isinstance(decoded, xrf.DeclaredInversePair) and len(arrays) == 2
@@ -730,7 +733,9 @@ def test_a_resolved_array_must_match_its_record() -> None:
     stored = arrays[reference]
     altered = np.array(stored)
     altered[0, 0, 0, 0] += 1
-    masked = np.ma.masked_array(stored, mask=np.zeros(stored.shape, bool))
+    masked: np.ma.MaskedArray[Any, Any] = np.ma.masked_array(
+        stored, mask=np.zeros(stored.shape, bool)
+    )  # type: ignore[no-untyped-call, unused-ignore]
     masked[1, 1, 1, 1] = np.ma.masked
     for entry, message in (
         (stored.astype(np.float64), "recorded as float32"),

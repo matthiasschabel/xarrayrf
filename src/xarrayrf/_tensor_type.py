@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Final, Literal, cast
+from typing import Any, Final, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -299,7 +299,7 @@ def transform_tensor_components(
     tensor_type: TensorType,
     *,
     component_axes: Sequence[int] | None = None,
-) -> npt.NDArray[np.floating | np.complexfloating]:
+) -> npt.NDArray[np.floating[Any] | np.complexfloating[Any, Any]]:
     """Apply the tensor transformation law to components under a linear map.
 
     Args:
@@ -394,7 +394,7 @@ def transform_tensor_components(
         result = _apply_on_slot(result, slot_map, slot, order)
     if odd or exponent != 0.0:
         result = result * _scalar_factor(matrix, odd=odd, exponent=exponent, order=order)
-    transformed: npt.NDArray[np.floating | np.complexfloating] = np.moveaxis(
+    transformed: npt.NDArray[np.floating[Any] | np.complexfloating[Any, Any]] = np.moveaxis(
         result, range(-len(axes), 0), axes
     )
     return transformed

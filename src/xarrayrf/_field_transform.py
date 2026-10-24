@@ -114,7 +114,7 @@ def _check_endpoints(
 
 def _frozen_values(
     value: object, *, field: str, shape: tuple[int, ...]
-) -> npt.NDArray[np.floating]:
+) -> npt.NDArray[np.floating[Any]]:
     """Copy values into a bytes-backed buffer, keeping float32 or float64 as given.
 
     The buffer is component-major, so each component is one contiguous array for SciPy's
@@ -331,7 +331,7 @@ class _FieldGrid:
 
 
 def _multilinear_derivative(
-    values: npt.NDArray[np.floating], positions: npt.NDArray[np.float64]
+    values: npt.NDArray[np.floating[Any]], positions: npt.NDArray[np.float64]
 ) -> npt.NDArray[np.float64]:
     """``∂u/∂p`` ``(N, C, D)`` of the multilinear interpolant at positions clamped to the samples.
 
@@ -374,7 +374,11 @@ def _scipy_interpolation() -> Any:
 
 
 def _sampled_values(
-    stored: npt.NDArray[np.floating], columns: npt.NDArray[np.float64], *, order: int, mode: str
+    stored: npt.NDArray[np.floating[Any]],
+    columns: npt.NDArray[np.float64],
+    *,
+    order: int,
+    mode: str,
 ) -> npt.NDArray[np.float64]:
     """``(C, N)`` values of the order-``order`` B-spline of ``stored`` at index rows ``(D, N)``,
     without prefiltering."""
@@ -710,7 +714,7 @@ class DisplacementFieldTransform(_FieldTransform):
         return _multilinear_derivative(self._stored, positions)
 
     @property
-    def field(self) -> npt.NDArray[np.floating]:
+    def field(self) -> npt.NDArray[np.floating[Any]]:
         """The stored displacements, a read-only view."""
         return self._stored.view()
 
@@ -803,7 +807,7 @@ class PositionFieldTransform(_FieldTransform):
         return _multilinear_derivative(self._stored, positions)
 
     @property
-    def field(self) -> npt.NDArray[np.floating]:
+    def field(self) -> npt.NDArray[np.floating[Any]]:
         """The stored target positions, a read-only view."""
         return self._stored.view()
 
@@ -912,7 +916,7 @@ class BSplineTransform(_FieldTransform):
         )
 
     @property
-    def coefficients(self) -> npt.NDArray[np.floating]:
+    def coefficients(self) -> npt.NDArray[np.floating[Any]]:
         """The stored control-point coefficients, a read-only view."""
         return self._stored.view()
 
@@ -953,7 +957,7 @@ def _rebuild(
     source: ReferenceFrame,
     target: ReferenceFrame,
     name: str,
-    values: npt.NDArray[np.floating],
+    values: npt.NDArray[np.floating[Any]],
     grid: Grid,
     outside: Outside,
     options: dict[str, object] | None = None,

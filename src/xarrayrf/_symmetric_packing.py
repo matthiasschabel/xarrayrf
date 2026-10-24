@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Final
+from typing import Any, Final
 
 import numpy as np
 import numpy.typing as npt
@@ -177,7 +177,9 @@ class SymmetricPacking:
             )
         return labels
 
-    def unpack(self, components: npt.ArrayLike) -> npt.NDArray[np.floating | np.complexfloating]:
+    def unpack(
+        self, components: npt.ArrayLike
+    ) -> npt.NDArray[np.floating[Any] | np.complexfloating[Any, Any]]:
         """Expand packed components on the last axis into symmetric matrices on the last two.
 
         Raises:
@@ -199,7 +201,9 @@ class SymmetricPacking:
         matrices[..., columns, rows] = entries
         return matrices
 
-    def pack(self, matrices: npt.ArrayLike) -> npt.NDArray[np.floating | np.complexfloating]:
+    def pack(
+        self, matrices: npt.ArrayLike
+    ) -> npt.NDArray[np.floating[Any] | np.complexfloating[Any, Any]]:
         """Pack symmetric matrices on the last two axes into components on the last axis.
 
         Mirrored entries must agree: both missing (NaN) or neither, identical when either is
@@ -211,7 +215,7 @@ class SymmetricPacking:
             ValueError: If the last two axes are not ``n x n``, or a matrix is not symmetric.
         """
         raw = self._matrix_array(matrices)
-        values: npt.NDArray[np.floating | np.complexfloating] = raw.astype(
+        values: npt.NDArray[np.floating[Any] | np.complexfloating[Any, Any]] = raw.astype(
             np.result_type(raw.dtype, np.float64), copy=False
         )
         rows, columns, _ = self._entries()
@@ -236,7 +240,7 @@ class SymmetricPacking:
 
     def pack_symmetric_part(
         self, matrices: npt.ArrayLike
-    ) -> npt.NDArray[np.floating | np.complexfloating]:
+    ) -> npt.NDArray[np.floating[Any] | np.complexfloating[Any, Any]]:
         """Pack the symmetric part ``(T + T^T) / 2``, without checking symmetry.
 
         For matrices symmetric by construction, such as a symmetric tensor after a change of
@@ -246,7 +250,7 @@ class SymmetricPacking:
 
     def _pack_mean(
         self, values: npt.NDArray[np.generic]
-    ) -> npt.NDArray[np.floating | np.complexfloating]:
+    ) -> npt.NDArray[np.floating[Any] | np.complexfloating[Any, Any]]:
         rows, columns, scales = self._entries()
         dtype = np.result_type(values.dtype, np.float64)
         upper = values[..., rows, columns].astype(dtype, copy=False)
@@ -255,7 +259,7 @@ class SymmetricPacking:
         with np.errstate(invalid="ignore"):
             midpoint = np.where(upper == lower, upper, upper / 2 + lower / 2)
         mean = np.where(rows == columns, upper, midpoint)
-        packed: npt.NDArray[np.floating | np.complexfloating] = mean * scales
+        packed: npt.NDArray[np.floating[Any] | np.complexfloating[Any, Any]] = mean * scales
         return packed
 
     def _matrix_array(self, matrices: npt.ArrayLike) -> npt.NDArray[np.generic]:

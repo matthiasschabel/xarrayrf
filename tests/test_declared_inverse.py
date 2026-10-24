@@ -101,6 +101,7 @@ def translation(
 
 
 def test_each_direction_maps_with_its_member_and_returns_the_other() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     pair = constant_pair([0.5, -0.25, 1.0])
     forward, backward = pair.forward, pair.backward
     assert forward.direction == "forward" and backward.direction == "backward"
@@ -117,6 +118,7 @@ def test_each_direction_maps_with_its_member_and_returns_the_other() -> None:
 
 
 def test_a_smooth_pair_round_trips_within_interpolation_error() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     pair = smooth_pair()
     for direction in (pair.forward, pair.backward):
         report = xrf.round_trip_residual_report(direction, INTERIOR)
@@ -127,6 +129,7 @@ def test_a_smooth_pair_round_trips_within_interpolation_error() -> None:
 
 
 def test_an_exact_pair_round_trips_to_roundoff() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     report = xrf.round_trip_residual_report(constant_pair([0.5, -0.25, 1.0]).forward, INTERIOR)
     assert report.maximum <= ATOL
     assert report.residual.shape == INTERIOR.shape
@@ -200,6 +203,7 @@ def ants_chain(pair: xrf.DeclaredInversePair) -> xrf.CompositeTransform:
 
 
 def test_a_chain_with_a_pair_and_an_affine_inverts() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     pair = smooth_pair()
     chain = ants_chain(pair)
     inverse = chain.declared_inverse()
@@ -216,6 +220,7 @@ def test_a_chain_with_a_pair_and_an_affine_inverts() -> None:
 
 
 def test_nested_chains_invert_recursively() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     pair = constant_pair([0.5, 0.0, 0.0])
     inner = ants_chain(pair)
     outer = xrf.CompositeTransform(
@@ -259,6 +264,7 @@ def test_a_members_inverse_error_propagates() -> None:
 
 
 def test_the_report_accepts_a_grid_and_freezes_its_values() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     pair = constant_pair([0.25, 0.0, 0.0])
     g = xrf.Grid(
         xrf.AffineTransform.from_matrix(
@@ -362,6 +368,7 @@ def test_equality_and_hash_follow_the_members() -> None:
 
 
 def test_pickling_keeps_both_directions_on_one_pair() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     pair = constant_pair([0.25, 0.0, 0.0])
     forward = pickle.loads(pickle.dumps(pair.forward))
     assert isinstance(forward, xrf.PairedTransform)

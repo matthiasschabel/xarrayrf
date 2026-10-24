@@ -224,7 +224,7 @@ def test_invalid_constructor_arguments_are_refused(
         (lambda p: p.pack(np.ones((3, 3))), ValueError, r"2 x 2 matrices"),
         (lambda p: p.pack(np.ones(2)), ValueError, r"2 x 2 matrices"),
         (lambda p: p.pack(np.ones((2, 2), dtype=bool)), TypeError, "boolean"),
-        (lambda p: p.unpack(np.ma.masked_array(np.ones(3))), TypeError, "masked"),
+        (lambda p: p.unpack(np.ma.masked_array(np.ones(3))), TypeError, "masked"),  # type: ignore[no-untyped-call, unused-ignore]
     ],
 )
 def test_invalid_values_are_refused(call: object, error: type[Exception], match: str) -> None:

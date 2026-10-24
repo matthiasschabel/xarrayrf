@@ -70,7 +70,8 @@ def _euler_3d(angles: npt.NDArray[np.float64], zyx: bool) -> npt.NDArray[np.floa
     ry = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]])
     rz = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
     # ITK's Euler3DTransform: Z·Y·X when ComputeZYX, else Z·X·Y.
-    return np.linalg.multi_dot((rz, ry, rx) if zyx else (rz, rx, ry))
+    rotation: npt.NDArray[np.float64] = np.linalg.multi_dot((rz, ry, rx) if zyx else (rz, rx, ry))
+    return rotation
 
 
 def _versor(vector: npt.NDArray[np.float64], *, where: str) -> npt.NDArray[np.float64]:

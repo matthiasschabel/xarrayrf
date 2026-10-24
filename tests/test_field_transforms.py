@@ -116,11 +116,15 @@ def _away_from_edges(
     index: npt.NDArray[np.float64], low: float, high: npt.NDArray[np.float64]
 ) -> npt.NDArray[np.bool_]:
     """Probes at least 1e-9 from every edge, whose classification no roundoff can change."""
-    return np.all((np.abs(index - low) > 1e-9) & (np.abs(index - high) > 1e-9), axis=1)
+    away: npt.NDArray[np.bool_] = np.all(
+        (np.abs(index - low) > 1e-9) & (np.abs(index - high) > 1e-9), axis=1
+    )
+    return away
 
 
 @pytest.mark.parametrize("case", ["dense", "slab"])
 def test_a_dense_field_matches_itk_inside_and_at_its_support_edges(case: str) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     data = FIXTURE[case]
     transform = dense(data["field"], field_grid(data), outside="identity")
     points, expected = np.asarray(data["points"]), np.asarray(data["mapped"])
@@ -138,6 +142,7 @@ def test_a_dense_field_matches_itk_inside_and_at_its_support_edges(case: str) ->
 
 
 def test_a_bspline_matches_itk_inside_and_at_its_support_edges() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     data = FIXTURE["bspline"]
     transform = spline(data["coefficients"], field_grid(data), outside="identity")
     points, expected = np.asarray(data["points"]), np.asarray(data["mapped"])
@@ -182,6 +187,7 @@ def test_a_dense_support_is_closed_below_and_open_above(coordinate: float, insid
     transform = dense(np.ones((4, 4, 4, 3)), grid((4, 4, 4)))
     point = np.array([coordinate, 1.0, 1.0])
     if inside:
+        pytest.importorskip("scipy", minversion="1.18")
         assert_allclose(transform.transform_point(point), point + 1.0)
     else:
         with pytest.raises(ValueError, match="outside the displacement field's support"):
@@ -203,6 +209,7 @@ def test_a_bspline_support_is_closed_at_both_ends(coordinate: float, inside: boo
     transform = spline(np.ones((6, 6, 6, 3)), grid((6, 6, 6), source=POINTS))
     point = np.array([2.5, coordinate, 2.5])
     if inside:
+        pytest.importorskip("scipy", minversion="1.18")
         assert_allclose(transform.transform_point(point), point + 1.0, atol=ATOL)
     else:
         with pytest.raises(ValueError, match="outside the B-spline transform's support"):
@@ -221,6 +228,7 @@ def test_a_bspline_support_is_closed_at_both_ends(coordinate: float, inside: boo
 def test_a_half_open_bspline_support_excludes_its_upper_face(
     coordinate: float, inside: bool
 ) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     transform = xrf.BSplineTransform(
         source=FIXED,
         target=MOVING,
@@ -267,6 +275,7 @@ def test_the_support_declaration_is_checked_kept_and_shown() -> None:
 
 
 def test_a_constant_field_is_the_translation() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     offset = np.array([1.5, -2.0, 0.25])
     transform = dense(np.broadcast_to(offset, (4, 5, 3, 3)), grid())
     translation = xrf.AffineTransform.from_matrix(
@@ -277,6 +286,7 @@ def test_a_constant_field_is_the_translation() -> None:
 
 
 def test_a_field_sampled_from_an_affine_reproduces_it_between_the_samples() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     affine = xrf.AffineTransform.from_matrix(
         source=FIXED, target=MOVING, matrix=oblique(), translation=(1.0, 2.0, 3.0)
     )
@@ -289,6 +299,7 @@ def test_a_field_sampled_from_an_affine_reproduces_it_between_the_samples() -> N
 
 
 def test_rasterizing_a_bspline_agrees_at_the_samples() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     coefficients = rng().normal(scale=0.3, size=(6, 6, 6, 3))
     source = spline(coefficients, grid((6, 6, 6), source=POINTS))
     target_grid = grid((3, 3, 3), translation=(1.5, 1.5, 1.5))
@@ -299,6 +310,7 @@ def test_rasterizing_a_bspline_agrees_at_the_samples() -> None:
 
 @pytest.mark.parametrize("dtype", [np.float64, np.float32])
 def test_dense_jacobians_match_central_differences(dtype: type) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     field: npt.NDArray[Any] = rng().normal(scale=0.3, size=(5, 4, 4, 3)).astype(dtype)
     # Nonuniform along i, descending along k, oblique: every term of the chain rule is exercised.
     g = grid(
@@ -325,6 +337,7 @@ def test_dense_jacobians_match_central_differences(dtype: type) -> None:
 
 @pytest.mark.parametrize("dtype", [np.float64, np.float32])
 def test_bspline_jacobians_match_central_differences(dtype: type) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     coefficients: npt.NDArray[Any] = rng().normal(scale=0.3, size=(6, 7, 5, 3)).astype(dtype)
     g = grid((6, 7, 5), matrix=oblique(), translation=(0.5, 0.0, 2.0), source=POINTS)
     transform = spline(coefficients, g)
@@ -336,6 +349,7 @@ def test_bspline_jacobians_match_central_differences(dtype: type) -> None:
 
 
 def test_a_slab_jacobian_has_no_derivative_across_the_slab() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     data = FIXTURE["slab"]
     transform = dense(data["field"], field_grid(data))
     point = np.array([1.3, 2.2, -4.0 + 0.4 * 2.5])
@@ -347,6 +361,7 @@ def test_a_slab_jacobian_has_no_derivative_across_the_slab() -> None:
 
 
 def test_a_dense_derivative_uses_the_upper_cell_on_a_face_and_the_lower_at_the_end() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     field = np.zeros((3, 1, 1, 3))
     field[:, 0, 0, 0] = [0.0, 1.0, 3.0]
     transform = dense(field, grid((3, 1, 1), intervals={"j": [[-0.5, 0.5]], "k": [[-0.5, 0.5]]}))
@@ -359,6 +374,7 @@ def test_a_dense_derivative_uses_the_upper_cell_on_a_face_and_the_lower_at_the_e
 
 
 def test_values_follow_the_grid_dimension_order_not_the_source_axis_order() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     transform = xrf.AffineTransform.from_matrix(
         source=INDEX, target=FIXED, matrix=oblique(), translation=(1.0, -2.0, 0.5)
     )
@@ -390,6 +406,7 @@ def test_the_raise_exterior_names_the_point_and_the_support() -> None:
 
 
 def test_the_identity_exterior_leaves_points_and_jacobians_unchanged() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     transform = dense(np.ones((4, 5, 3, 3)), grid(), outside="identity")
     points = np.array([[10.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
     assert_allclose(transform.transform_point(points), [[10.0, 0.0, 0.0], [2.0, 2.0, 2.0]])
@@ -397,6 +414,7 @@ def test_the_identity_exterior_leaves_points_and_jacobians_unchanged() -> None:
 
 
 def test_the_nearest_exterior_extends_the_edge_displacement() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     field = rng().normal(size=(4, 5, 3, 3))
     transform = dense(field, grid(), outside="nearest")
     point = np.array([12.0, 2.0, 1.0])
@@ -406,6 +424,7 @@ def test_the_nearest_exterior_extends_the_edge_displacement() -> None:
 
 
 def test_the_nearest_exterior_of_a_bspline_evaluates_at_the_support_edge() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     coefficients = rng().normal(size=(6, 6, 6, 3))
     transform = spline(coefficients, grid((6, 6, 6), source=POINTS), outside="nearest")
     edge = transform.transform_point(np.array([4.0, 2.0, 3.0])) - np.array([4.0, 2.0, 3.0])
@@ -437,6 +456,7 @@ def test_points_must_be_finite_and_real() -> None:
 
 
 def test_a_descending_axis_with_tiling_intervals_is_accepted() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     g = grid(
         (2, 1, 1),
         coordinates={"i": [1, 0]},
@@ -606,6 +626,7 @@ def test_equality_is_identity_and_transforms_are_hashable() -> None:
 
 
 def test_a_pickled_field_maps_the_same_points() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     field = rng().normal(size=(4, 5, 3, 3)).astype(np.float32)
     transform = dense(field, grid(), outside="nearest")
     copy = pickle.loads(pickle.dumps(transform))
@@ -629,6 +650,7 @@ def test_repr_names_the_declaration_without_the_values() -> None:
 
 
 def test_a_composite_chains_a_field_jacobian() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     field = rng().normal(scale=0.2, size=(4, 5, 3, 3))
     transform = dense(field, grid())
     affine = xrf.AffineTransform.from_matrix(
@@ -797,6 +819,7 @@ def test_bspline_jacobians_are_exact_at_the_support_faces(outside: str) -> None:
     # Cardinal cubic B-splines reproduce quadratics: coefficients k**2 give p**2 + 1/3, whose
     # derivative 2p holds on the whole support, faces included. Four control points per axis put
     # both faces at a tap boundary.
+    pytest.importorskip("scipy", minversion="1.18")
     k = np.arange(4.0)
     coefficients = np.zeros((4, 4, 4, 3))
     coefficients[..., 0] = k[:, None, None] ** 2
@@ -817,6 +840,7 @@ def test_a_large_grid_origin_keeps_local_indices() -> None:
     # A 0.1-spaced axis at 1e15: folding the translation into the index affine would round
     # 1e15 + 0.125 to index 2 instead of 1.25, and move 1e15 + 0.25 (index 2.5, the excluded
     # upper face) inside.
+    pytest.importorskip("scipy", minversion="1.18")
     g = grid((3, 3, 3), matrix=np.diag([0.1, 1.0, 1.0]), translation=(1e15, 0.0, 0.0))
     field = np.zeros((3, 3, 3, 3))
     field[..., 1] = np.arange(3.0)[:, None, None]
@@ -833,6 +857,7 @@ def test_a_large_grid_origin_keeps_local_indices() -> None:
 def test_large_coordinate_values_keep_local_indices() -> None:
     # The origin can sit in the coordinate values rather than the translation; the index map
     # must cancel it before scaling by 1 / 0.375 too.
+    pytest.importorskip("scipy", minversion="1.18")
     g = grid((3, 3, 3), coordinates={"i": 1e15 + np.array([0.0, 0.375, 0.75])})
     field = np.zeros((3, 3, 3, 3))
     field[..., 1] = np.arange(3.0)[:, None, None]
@@ -873,6 +898,7 @@ def positions(
 def test_a_position_field_of_an_affine_reproduces_it() -> None:
     # Multilinear interpolation reproduces an affine exactly, values and derivative; the axes
     # and units of the target differ from the source's.
+    pytest.importorskip("scipy", minversion="1.18")
     field = positions()
     points = np.random.default_rng(7).uniform([0, 0, 0], [3, 4, 2], size=(50, 3))
     assert_allclose(field.transform_point(points), POSITION_MAP.transform_point(points), atol=1e-9)
@@ -884,6 +910,7 @@ def test_a_position_field_of_an_affine_reproduces_it() -> None:
 
 
 def test_a_nonuniform_position_field_reproduces_an_affine() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     g = grid((4, 5, 3), source=POINTS, coordinates={"i": [0.0, 0.5, 2.0, 2.25]})
     field = positions(g=g)
     points = np.random.default_rng(8).uniform([0, 0, 0], [2.25, 4, 2], size=(30, 3))
@@ -894,6 +921,7 @@ def test_a_nonuniform_position_field_reproduces_an_affine() -> None:
 
 
 def test_the_position_support_is_the_closed_sample_hull() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     field = positions()
     corners = np.array([[0.0, 0.0, 0.0], [3.0, 4.0, 2.0]])
     assert_allclose(
@@ -905,6 +933,7 @@ def test_the_position_support_is_the_closed_sample_hull() -> None:
 
 
 def test_a_position_field_with_an_identity_exterior_maps_points_to_themselves() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     same = xrf.AffineTransform.from_matrix(
         source=FIXED, target=MOVING, matrix=np.diag([1.1, 0.9, 1.0]), translation=(0.5, 0, 0)
     )
@@ -917,6 +946,7 @@ def test_a_position_field_with_an_identity_exterior_maps_points_to_themselves() 
 
 
 def test_position_jacobians_match_finite_differences() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     values = grid((5, 5, 4), source=POINTS).points()
     values = values + 0.2 * np.sin(values[..., ::-1])
     field = xrf.PositionFieldTransform(
@@ -1004,6 +1034,7 @@ def test_resampling_through_a_position_field_matches_its_affine() -> None:
 
 
 def test_a_position_field_pickles_to_a_new_equal_mapping() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     field = positions()
     copy = pickle.loads(pickle.dumps(field))
     assert type(copy) is xrf.PositionFieldTransform and copy != field

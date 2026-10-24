@@ -30,13 +30,14 @@ from typing import Any
 
 import ants
 import numpy as np
+import numpy.typing as npt
 import SimpleITK as sitk  # noqa: N813 (SimpleITK's own spelling)
 
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
 DIRECTORY = FIXTURES / "itk"
 
 
-def _rotation(angles: tuple[float, float, float]) -> np.ndarray:
+def _rotation(angles: tuple[float, float, float]) -> npt.NDArray[np.float64]:
     a, b, c = angles
     rx = np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
     ry = np.array([[np.cos(b), 0, np.sin(b)], [0, 1, 0], [-np.sin(b), 0, np.cos(b)]])
@@ -44,7 +45,7 @@ def _rotation(angles: tuple[float, float, float]) -> np.ndarray:
     return np.asarray(rz @ ry @ rx, dtype=float)
 
 
-def _query(transform: sitk.Transform, points: np.ndarray) -> list[list[float]]:
+def _query(transform: sitk.Transform, points: npt.NDArray[np.float64]) -> list[list[float]]:
     return [list(transform.TransformPoint([float(v) for v in point])) for point in points]
 
 
@@ -53,7 +54,7 @@ def _field_image(
     size: tuple[int, ...],
     spacing: tuple[float, ...],
     origin: tuple[float, ...],
-    direction: np.ndarray,
+    direction: npt.NDArray[np.float64],
 ) -> sitk.Image:
     vectors = rng.normal(scale=0.7, size=(*reversed(size), len(size)))
     image = sitk.GetImageFromArray(vectors, isVector=True)
@@ -67,7 +68,9 @@ def _read_field(path: Path) -> sitk.DisplacementFieldTransform:
     return sitk.DisplacementFieldTransform(sitk.ReadImage(str(path), sitk.sitkVectorFloat64))
 
 
-def _inside(rng: np.random.Generator, image: sitk.Image, count: int = 40) -> np.ndarray:
+def _inside(
+    rng: np.random.Generator, image: sitk.Image, count: int = 40
+) -> npt.NDArray[np.float64]:
     """Physical points well inside a field image's samples."""
     size = np.array(image.GetSize(), dtype=float)
     index = rng.uniform(0.2, 1.0, size=(count, len(size))) * (size - 1.4)
@@ -125,7 +128,7 @@ def euler_for_composite() -> sitk.Euler3DTransform:
 def _ants_registration(directory: Path) -> dict[str, Any]:
     z, y, x = np.indices((16, 18, 15), dtype=np.float32)
 
-    def blob(cx: float, cy: float, cz: float) -> np.ndarray:
+    def blob(cx: float, cy: float, cz: float) -> npt.NDArray[np.float64]:
         main = np.exp(-((x - cx) ** 2 / 12 + (y - cy) ** 2 / 16 + (z - cz) ** 2 / 14))
         side = np.exp(-((x - cx - 3) ** 2 / 5 + (y - cy + 3) ** 2 / 6 + (z - cz) ** 2 / 5))
         return np.asarray(main + 0.6 * side, dtype=np.float32)

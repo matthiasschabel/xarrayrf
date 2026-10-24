@@ -314,7 +314,7 @@ class Malformed:
     def transform_point(self, points: npt.ArrayLike) -> Any:
         values = np.asarray(points, dtype=np.float64)
         if self.kind == "masked":
-            return np.ma.array(values, mask=np.ones(values.shape, dtype=bool))
+            return np.ma.array(values, mask=np.ones(values.shape, dtype=bool))  # type: ignore[no-untyped-call, unused-ignore]
         return values + 0j
 
 

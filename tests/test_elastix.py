@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from numpy.testing import assert_allclose
 
@@ -93,6 +94,8 @@ def spline_stage(**keys: Sequence[str] | str) -> dict[str, tuple[str, ...]]:
 def test_imported_chains_match_transformix(name: str) -> None:
     case = FIXTURE[name]
     result = imported(case["maps"], case)
+    if "bspline" in name:
+        pytest.importorskip("scipy", minversion="1.18")
     mapped = result.transform.transform_point(np.asarray(case["points"]))
     assert_allclose(mapped, case["mapped"], atol=TRANSFORMIX_ATOL, rtol=0)
     stages = len(case["maps"])
@@ -123,12 +126,15 @@ def test_parameter_files_round_trip_through_the_reader(name: str, tmp_path: Path
             np.asarray(given["TransformParameters"], dtype=float),
             rtol=1e-15,
         )
+    if "bspline" in name:
+        pytest.importorskip("scipy", minversion="1.18")
     mapped = imported(maps, case).transform.transform_point(np.asarray(case["points"]))
     assert_allclose(mapped, case["mapped"], atol=TRANSFORMIX_ATOL, rtol=0)
 
 
 @pytest.mark.parametrize("name", [name for name in CASES if "face_points" in FIXTURE[name]])
 def test_bspline_faces_match_transformix_up_to_roundoff(name: str) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     case = FIXTURE[name]
     # The generator probes the B-spline stage alone.
     member = spline = imported(case["maps"][-1:], case).transform
@@ -166,6 +172,7 @@ def test_a_parameter_object_is_read_in_index_order() -> None:
 
 
 def test_ras_frames_are_joined_by_coordinate_changes() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     case = FIXTURE["rigid_bspline_3d"]
     fixed, moving = frames(RAS_MM)
     result = rfe.transform_from_parameter_maps(case["maps"], fixed=fixed, moving=moving)
@@ -324,6 +331,7 @@ def test_stage_errors_name_the_stage_and_maps_are_checked() -> None:
 
 
 def test_a_bspline_stage_declares_elastix_support() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     fixed, moving = frames(LPS_MM)
     result = rfe.transform_from_parameter_maps([spline_stage()], fixed=fixed, moving=moving)
     assert "bspline-support" in [code for code, _ in result.report]
@@ -418,7 +426,7 @@ def test_an_imported_chain_resamples_the_moving_image_onto_the_fixed_grid() -> N
     fixed, moving = frames(LPS_MM)
     index = xrf.ArrayCoordinates(("i", "j", "k"), ("1",) * 3)
 
-    def framed(values: np.ndarray, frame: xrf.ReferenceFrame) -> Any:
+    def framed(values: npt.NDArray[np.float64], frame: xrf.ReferenceFrame) -> Any:
         array = xr.DataArray(
             values,
             dims=("i", "j", "k"),

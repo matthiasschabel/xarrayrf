@@ -129,7 +129,7 @@ little-endian bytes."""
 _DIGEST_BLOCK_BYTES: Final = 2**24
 """Bytes copied at once to hash a non-contiguous array."""
 
-type ArrayStore = MutableMapping[str, npt.NDArray[np.floating]]
+type ArrayStore = MutableMapping[str, npt.NDArray[np.floating[Any]]]
 """Where :func:`encode` puts the arrays a record references, keyed by reference."""
 
 
@@ -423,7 +423,7 @@ def _encode_extension(value: SupportsEncoding) -> dict[str, Any]:
 
 
 def _store(
-    values: npt.NDArray[np.floating], arrays: ArrayStore | None, owner: object
+    values: npt.NDArray[np.floating[Any]], arrays: ArrayStore | None, owner: object
 ) -> dict[str, Any]:
     if arrays is None:
         raise TypeError(
@@ -437,7 +437,7 @@ def _store(
     return {"reference": reference, "dtype": str(values.dtype)}
 
 
-def array_reference(values: npt.NDArray[np.floating]) -> str:
+def array_reference(values: npt.NDArray[np.floating[Any]]) -> str:
     """Return ``"sha256:<hex>"`` of ``values``' dtype, shape and C-order, little-endian bytes.
 
     The header ``"float32:2,6,2\n"`` keeps arrays with equal bytes but another shape or dtype
@@ -451,7 +451,7 @@ def array_reference(values: npt.NDArray[np.floating]) -> str:
     return _REFERENCE_PREFIX + digest.hexdigest()
 
 
-def _hash_blocks(digest: Any, values: npt.NDArray[np.floating], little: np.dtype[Any]) -> None:
+def _hash_blocks(digest: Any, values: npt.NDArray[np.floating[Any]], little: np.dtype[Any]) -> None:
     """Feed ``values`` in C order, splitting leading axes until each block fits the bound.
 
     The last axis holds the components (two or three), so a 1-D block is always small.
@@ -891,7 +891,7 @@ class _Decoder:
             )
         return grid
 
-    def _array(self, data: object, field: str) -> npt.NDArray[np.floating]:
+    def _array(self, data: object, field: str) -> npt.NDArray[np.floating[Any]]:
         """Resolve a reference, check its dtype and digest; the constructor checks the shape."""
         record = _mapping(data, f"{field} array reference")
         self._expect(f"{field} array reference", record, {"reference", "dtype"})

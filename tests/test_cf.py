@@ -75,6 +75,7 @@ def codes(geometry: rfcf.CfGeometry) -> list[str]:
 
 
 def test_a_cmip_style_field_is_framed_and_resamples_across_the_seam_and_poles() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     tas = rfcf.frame_variable(dataset(lazy=True), "tas")
     frame = tas.rf.reference_frame
     assert frame.coordinate_system.representation == "geodetic"
@@ -227,6 +228,7 @@ def test_an_unspecified_figure_needs_a_frame(mapping: dict[str, Any] | None) -> 
 
 
 def test_a_supplied_frame_is_shared_and_replaces_a_declared_figure() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     first = rfcf.frame_variable(dataset(), "tas")
     second = rfcf.frame_variable(dataset(), "tas")
     # The same radius does not make the same frame.
@@ -317,6 +319,7 @@ def test_bounds_crossing_the_seam_are_unwrapped(
     lon: npt.NDArray[np.float64], cells: Any, wrap: Any
 ) -> None:
     """Bounds normalized into one turn store the seam cell as, for example, [358.75, 1.25]."""
+    pytest.importorskip("scipy", minversion="1.18")
     ds = dataset(lon=lon)
     ds["lon_bnds"] = (("lon", "bnds"), wrap(cells(lon)))
     geometry = rfcf.from_dataset(ds, "tas")
@@ -435,6 +438,7 @@ def test_argument_refusals() -> None:
 
 
 def test_a_netcdf_round_trip_reads_back_identically(tmp_path: Path) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     path = tmp_path / "tas.nc"
     dataset().to_netcdf(path, engine="scipy")
     with xr.open_dataset(path, engine="scipy") as reopened:

@@ -307,7 +307,7 @@ class _ChartTransition:
                 "centre, where the point has a nearer surface foot and no unique inverse",
             )
         across = (n + height) * cos_lat
-        xyz = np.stack(
+        xyz: npt.NDArray[np.float64] = np.stack(
             (
                 across * np.cos(longitude),
                 across * np.sin(longitude),

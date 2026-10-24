@@ -416,7 +416,7 @@ def test_symmetry_requires_equal_variance() -> None:
 @pytest.mark.parametrize(
     ("values", "error", "match"),
     [
-        (np.ma.masked_array([1.0, 2.0, 3.0], mask=[False, True, False]), TypeError, "masked array"),
+        (np.ma.masked_array([1.0, 2.0, 3.0], mask=[False, True, False]), TypeError, "masked array"),  # type: ignore[no-untyped-call, unused-ignore]
         (np.array([True, False, True]), TypeError, "boolean dtype"),
         (np.array(["1", "2", "3"]), TypeError, "dtype <U1"),
         (np.array([1, 2, 3], dtype=object), TypeError, "dtype object"),

@@ -133,7 +133,8 @@ def _euler_matrix(stage: _Stage, angles: npt.NDArray[np.float64]) -> npt.NDArray
     rz = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
     # elastix's Euler3DTransform: Z·Y·X when ComputeZYX is true, else Z·X·Y (ITK's default).
     order = (rz, ry, rx) if stage.flag("ComputeZYX", "false") else (rz, rx, ry)
-    return np.linalg.multi_dot(order)
+    rotation: npt.NDArray[np.float64] = np.linalg.multi_dot(order)
+    return rotation
 
 
 def _linear(

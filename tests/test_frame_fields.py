@@ -280,7 +280,9 @@ def solid_body_enu(points: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
 
 
 def declared(
-    values: npt.NDArray[np.float64], target: xrf.Grid, basis: xrf.ReferenceFrame | xrf.FrameField
+    values: npt.NDArray[np.number[Any]],
+    target: xrf.Grid,
+    basis: xrf.ReferenceFrame | xrf.FrameField,
 ) -> xr.DataArray:
     plain = xr.DataArray(
         values, dims=("lon", "lat", "h", "component"), coords={"component": list(basis.axes)}
@@ -356,6 +358,7 @@ def test_a_pointwise_transform_must_touch_the_arrays_frame() -> None:
 
 
 def test_east_north_components_regrid_within_one_frame_across_the_seam() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source = declared(solid_body_enu(points_of(grid())), grid(), ENU)
     target = grid(lon=np.array([355.0, 5.0, 190.0]), lat=np.array([-20.0, 30.0]), h=np.array([0.0]))
     with pytest.raises(ValueError, match="cannot declare components in EastNorthUp"):
@@ -376,6 +379,7 @@ def test_east_north_components_regrid_within_one_frame_across_the_seam() -> None
 def test_east_north_components_resample_onto_earth_centred_points() -> None:
     # Heights span the target box, whose corners reach 350 m above and below its centre; 2°
     # latitude cells keep the interpolation error of cos φ near 1e-4.
+    pytest.importorskip("scipy", minversion="1.18")
     deep = grid(lat=np.arange(0.0, 21.0, 2.0), h=np.array([-1000.0, 1000.0]))
     source = declared(solid_body_enu(points_of(deep)), deep, ENU)
     centre = TO_ECEF.transform_point([40.0, 10.0, 250.0])
@@ -404,6 +408,7 @@ def test_east_north_components_resample_onto_earth_centred_points() -> None:
 
 
 def test_earth_centred_components_cross_the_poles() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     lon, lat = np.arange(0.0, 360.0, 10.0), np.arange(-85.0, 86.0, 10.0)
     source_grid = grid(lon=lon, lat=lat, h=np.array([0.0, 1.0]))
     points = points_of(source_grid)
@@ -458,6 +463,7 @@ def resample_enu(source: xr.DataArray, target: xrf.Grid, **options: Any) -> xr.D
 
 
 def test_east_north_components_cross_a_pole_with_east_and_north_reversed() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source, _ = east_north(CELL_CENTRED)
     # Linear at the pole on meridian 20°: the mean of the outer row and its mirror, which is
     # the row on meridian 200° with east and north negated.
@@ -480,6 +486,7 @@ def test_east_north_components_cross_a_pole_with_east_and_north_reversed() -> No
 def test_east_north_components_are_accurate_in_both_polar_caps(
     lat: npt.NDArray[np.float64], method: str
 ) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source, _ = east_north(lat)
     cap = grid(
         lon=np.array([3.0, 127.0, 251.0]),
@@ -492,6 +499,7 @@ def test_east_north_components_are_accurate_in_both_polar_caps(
 
 
 def test_a_field_smooth_in_east_north_is_as_accurate_in_the_cap_as_inside() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
     wind = declared(solid_body_enu(points_of(source_grid)), source_grid, ENU)
     cap = grid(lon=np.array([20.0, 200.0]), lat=np.array([88.0, -89.0]), h=np.array([0.0]))
@@ -507,6 +515,7 @@ def outer(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
 
 
 def test_second_order_east_north_tensors_cross_a_pole_unpacked_and_packed() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
     tensor = outer(constant_enu(points_of(source_grid)))
     labels = list(ENU.axes)
@@ -541,6 +550,7 @@ def test_second_order_east_north_tensors_cross_a_pole_unpacked_and_packed() -> N
 
 
 def test_a_pseudovector_crosses_a_pole_with_no_determinant_factor() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
     plain = xr.DataArray(
         constant_enu(points_of(source_grid)),
@@ -556,6 +566,7 @@ def test_a_pseudovector_crosses_a_pole_with_no_determinant_factor() -> None:
 
 
 def test_a_two_dimensional_east_north_field_crosses_a_pole() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     surface = geodetic(("lon", "lat"), ("degrees_east", "degrees_north"), ("longitude", "latitude"))
     field = xrf.EastNorthUp(surface, **FIGURE, length_unit="m")
     transform = xrf.AffineTransform.from_matrix(
@@ -594,6 +605,7 @@ def test_a_two_dimensional_east_north_field_crosses_a_pole() -> None:
 
 
 def test_east_north_pole_halos_follow_dask_chunks() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source, _ = east_north(CELL_CENTRED)
     timed = xr.concat([source, 2.0 * source], dim="time")
     cap = grid(lon=np.array([20.0, 200.0]), lat=np.array([88.0, -89.0]), h=np.array([0.0]))
@@ -610,6 +622,7 @@ def test_east_north_pole_halos_follow_dask_chunks() -> None:
 
 
 def test_bases_without_a_pole_rule_leave_the_cap_outside() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
     # The chart basis: its longitude component diverges like 1 / cos φ at a pole.
     chart = declared(np.ones((*points_of(source_grid).shape[:-1], 3)), source_grid, EARTH)
@@ -621,6 +634,7 @@ def test_bases_without_a_pole_rule_leave_the_cap_outside() -> None:
 
 
 def test_components_that_cannot_be_negated_are_refused() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source_grid = grid(lon=LONGITUDES, lat=CELL_CENTRED, h=np.array([0.0, 1.0]))
     shape = (*points_of(source_grid).shape[:-1], 3)
     cap = grid(lon=np.array([20.0]), lat=np.array([88.0]), h=np.array([0.0]))
@@ -664,6 +678,7 @@ class Rotation:
 
 
 def test_a_user_frame_field_works_through_both_operations() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     plane = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("m", "m")))
     field = Rotation(plane, math.radians(30.0))
     assert isinstance(field, xrf.FrameField)
@@ -712,6 +727,7 @@ def test_east_north_up_declarations_persist() -> None:
 
 def test_a_callable_reorientation_is_applied_even_within_one_frame() -> None:
     """The identity shortcut holds only for the named reorientations."""
+    pytest.importorskip("scipy", minversion="1.18")
     source = declared(solid_body_enu(points_of(grid())), grid(), ENU)
     inner = grid(lat=np.array([0.0, 30.0]), h=np.array([0.0]))
     doubled = source.rf.resample_to(
@@ -746,6 +762,7 @@ class Collapse(Rotation):
 
 
 def test_a_singular_user_field_is_refused_by_both_operations() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     plane = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("x", "y"), ("m", "m")))
     transform = xrf.AffineTransform.from_matrix(
         source=xrf.ArrayCoordinates(("x", "y"), ("m", "m")),
@@ -772,6 +789,7 @@ def test_a_singular_user_field_is_refused_by_both_operations() -> None:
 
 
 def test_a_zero_callable_reorientation_is_refused() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     source = declared(solid_body_enu(points_of(grid())), grid(), ENU)
     with pytest.raises(
         ValueError, match=r"0\.0 times the identity; a component map must be invertible"

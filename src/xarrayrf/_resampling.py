@@ -1141,7 +1141,7 @@ def _linear_inputs(
         return volume, None
     values = cast(npt.NDArray[np.number[Any]], volume.copy())
     # Zero and one are exact in any floating dtype, so the mask matches the values' dtype.
-    missing = np.zeros(volume.shape, dtype=volume.dtype)
+    missing = cast(npt.NDArray[np.number[Any]], np.zeros(volume.shape, dtype=volume.dtype))
     if np.iscomplexobj(volume):
         for component, mask in ((values.real, missing.real), (values.imag, missing.imag)):
             absent = np.isnan(component)

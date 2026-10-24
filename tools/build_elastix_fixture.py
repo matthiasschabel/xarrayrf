@@ -26,6 +26,7 @@ from typing import Any
 
 import itk
 import numpy as np
+import numpy.typing as npt
 
 FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "elastix_transforms.json"
 
@@ -57,7 +58,7 @@ def _common(dimension: int) -> Map:
     }
 
 
-def _rotation(angles: tuple[float, ...]) -> np.ndarray:
+def _rotation(angles: tuple[float, ...]) -> npt.NDArray[np.float64]:
     if len(angles) == 1:
         c, s = np.cos(angles[0]), np.sin(angles[0])
         return np.array([[c, -s], [s, c]])
@@ -108,7 +109,7 @@ def _bspline(
     spacing: tuple[float, ...],
     origin: tuple[float, ...],
     index: tuple[int, ...],
-    direction: np.ndarray,
+    direction: npt.NDArray[np.float64],
 ) -> Map:
     # Component-major parameters, each component's control grid with the first index fastest.
     coefficients = rng.normal(scale=0.6, size=(dimension, *reversed(size)))
@@ -160,7 +161,7 @@ def _translation(dimension: int, values: list[float]) -> Map:
     }
 
 
-def _transformix(maps: list[Map], grid: dict[str, Any], directory: Path) -> np.ndarray:
+def _transformix(maps: list[Map], grid: dict[str, Any], directory: Path) -> npt.NDArray[np.float64]:
     """Displacements at the output grid's points, shaped like the grid (first index fastest)."""
     dimension = len(grid["size"])
     parameters = itk.ParameterObject.New()
@@ -179,7 +180,7 @@ def _transformix(maps: list[Map], grid: dict[str, Any], directory: Path) -> np.n
     return np.transpose(field, (*reversed(range(dimension)), dimension))
 
 
-def _grid_points(grid: dict[str, Any]) -> np.ndarray:
+def _grid_points(grid: dict[str, Any]) -> npt.NDArray[np.float64]:
     dimension = len(grid["size"])
     index = np.moveaxis(np.indices(grid["size"], dtype=float), 0, -1)
     matrix = np.asarray(grid["direction"]) * np.asarray(grid["spacing"])
@@ -187,7 +188,9 @@ def _grid_points(grid: dict[str, Any]) -> np.ndarray:
     return np.asarray(points, dtype=float).reshape(-1, dimension)
 
 
-def _face_probes(entry: Map, directory: Path) -> tuple[np.ndarray, np.ndarray]:
+def _face_probes(
+    entry: Map, directory: Path
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Points on and beside each support face of a B-spline's control grid, and their images."""
     dimension = int(entry["FixedImageDimension"][0])
     size = np.asarray(entry["GridSize"], dtype=float)

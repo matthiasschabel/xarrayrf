@@ -316,6 +316,7 @@ def warped() -> xr.DataArray:
 
 
 def assert_same_mapping(restored: Any, original: Any) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     assert_allclose(
         restored.transform_point(FIELD_POINTS),
         original.transform_point(FIELD_POINTS),
@@ -402,6 +403,7 @@ def test_affine_bindings_and_values_use_the_same_path(framed: xr.DataArray) -> N
 
 
 def test_datasets_holding_one_field_merge(warped: xr.DataArray) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     from xarrayrf.native import array_from_dataset, value_from_dataset, value_to_dataset
 
     field = warped.rf.coordinate_transform.transforms[1]
@@ -427,6 +429,7 @@ def poisoned(shape: tuple[int, ...]) -> Any:
 
 
 def test_reading_a_dataset_loads_only_the_referenced_arrays(warped: xr.DataArray) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     from xarrayrf.native import array_from_dataset
 
     dataset = warped.rf.to_dataset()
@@ -448,6 +451,7 @@ def test_any_hashable_array_name_round_trips(warped: xr.DataArray) -> None:
 
 
 def test_a_field_binding_needs_a_store_or_a_dataset(warped: xr.DataArray) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     with pytest.raises(TypeError, match=r"rf\.to_dataset\(\)"):
         warped.rf.encode()
     arrays: dict[str, Any] = {}

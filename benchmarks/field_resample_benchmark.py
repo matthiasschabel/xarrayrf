@@ -99,7 +99,7 @@ def field_grid(size: int, dims: int, frame: xrf.ReferenceFrame, *, cells: bool) 
 
 
 def framed(
-    data: npt.NDArray[np.floating], frame: xrf.ReferenceFrame, step: float, origin: float
+    data: npt.NDArray[np.floating[Any]], frame: xrf.ReferenceFrame, step: float, origin: float
 ) -> Any:
     """A cell-sampled image with centred cells, sample ``n`` at ``origin + n * step``."""
     names = index_dims(data.ndim)
@@ -119,7 +119,7 @@ def framed(
     return array.rf.frame(binding, dims=names)
 
 
-def sitk_image(sitk: Any, data: npt.NDArray[np.floating], step: float, origin: float) -> Any:
+def sitk_image(sitk: Any, data: npt.NDArray[np.floating[Any]], step: float, origin: float) -> Any:
     """SimpleITK stores x fastest, so our (i, j, k) array is reversed into its (k, j, i)."""
     image = sitk.GetImageFromArray(np.ascontiguousarray(data.T))
     image.SetSpacing((step,) * data.ndim)
@@ -127,7 +127,7 @@ def sitk_image(sitk: Any, data: npt.NDArray[np.floating], step: float, origin: f
     return image
 
 
-def sitk_field(sitk: Any, field: npt.NDArray[np.floating]) -> Any:
+def sitk_field(sitk: Any, field: npt.NDArray[np.floating[Any]]) -> Any:
     dims = field.ndim - 1
     reversed_axes = (*range(dims - 1, -1, -1), dims)
     image = sitk.GetImageFromArray(
@@ -150,7 +150,7 @@ def run_case(
     dims: int,
     image: int,
     field: int,
-    dtype: type[np.floating],
+    dtype: type[np.floating[Any]],
     kind: str,
     sitk: Any,
     options: Options,

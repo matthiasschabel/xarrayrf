@@ -34,7 +34,7 @@ class LinearStage:
 class FieldStage:
     """A displacement field in ITK physical (LPS) space, vectors indexed ``[i, j, (k,) c]``."""
 
-    vectors: npt.NDArray[np.floating]
+    vectors: npt.NDArray[np.floating[Any]]
     origin: npt.NDArray[np.float64]
     spacing: npt.NDArray[np.float64]
     direction: npt.NDArray[np.float64]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -86,6 +86,7 @@ SEAM_TARGETS = np.array([356.0, 358.75, 359.9, 0.0, 0.5, 1.25, -1.25, 718.75])
 @pytest.mark.parametrize("method", ["nearest", "linear", "cubic"])
 def test_a_global_grid_interpolates_across_the_seam(method: xrf.Method) -> None:
     """Rotated by half a turn, the same samples put the seam far from the targets."""
+    pytest.importorskip("scipy", minversion="1.18")
     wrapped = resample(source(GLOBAL_LON, LAT), grid(SEAM_TARGETS, [0.0, 20.0]), method=method)
     rotated_lon = GLOBAL_LON - 180.0
     interior = resample(
@@ -98,6 +99,7 @@ def test_a_global_grid_interpolates_across_the_seam(method: xrf.Method) -> None:
 
 
 def test_descending_and_closing_duplicate_grids_match_the_ascending_one() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     target = grid(SEAM_TARGETS, [0.0, 20.0])
     expected = resample(source(GLOBAL_LON, LAT), target)
     descending = resample(source(GLOBAL_LON[::-1], LAT), target)
@@ -112,6 +114,7 @@ def test_descending_and_closing_duplicate_grids_match_the_ascending_one() -> Non
 
 def test_nonuniform_global_longitude_locates_exactly() -> None:
     # 0, 2, 5, 7, …, 355, 357: steps alternate 2° and 3°, and the seam step 357 → 360 is 3°.
+    pytest.importorskip("scipy", minversion="1.18")
     lon = np.concatenate(([0.0], np.cumsum(np.tile([2.0, 3.0], 72))[:-1]))
     assert lon[-1] == 357.0
     values = np.repeat(lon[:, None], LAT.size, axis=1)
@@ -133,7 +136,8 @@ def test_nonuniform_global_longitude_locates_exactly() -> None:
         pytest.param(np.cumsum(np.tile([2.0, 3.0], 72))[:-1], False, id="missing-2-degree-sample"),
     ],
 )
-def test_coverage_from_labels(lon: npt.NDArray[np.floating], is_global: bool) -> None:
+def test_coverage_from_labels(lon: npt.NDArray[np.floating[Any]], is_global: bool) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     lon64 = lon.astype(np.float64)
     result = resample(
         source(lon64, LAT), grid([float(lon64[-1]) + 0.5 * float(lon64[-1] - lon64[-2])], LAT)
@@ -143,6 +147,7 @@ def test_coverage_from_labels(lon: npt.NDArray[np.floating], is_global: bool) ->
 
 def test_a_fine_float64_global_grid_keeps_its_last_sample() -> None:
     """A float32 rounding allowance would call this 0.0001° seam a duplicate endpoint."""
+    pytest.importorskip("scipy", minversion="1.18")
     lon = np.arange(3_600_000) / 10_000
     values = np.repeat(np.arange(lon.size, dtype=float)[:, None], 2, axis=1)
     result = resample(source(lon, [0.0, 1.0], values), grid([359.99995], [0.0]))
@@ -151,6 +156,7 @@ def test_a_fine_float64_global_grid_keeps_its_last_sample() -> None:
 
 
 def test_declared_intervals_decide_coverage() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     target = grid([358.75], LAT)
     offset = transform(sample_offset=(0.5, 0.5))
     lat_bounds = LAT[:, None] + [-1.0, 1.0]
@@ -176,6 +182,7 @@ def test_declared_intervals_decide_coverage() -> None:
 def test_a_regional_grid_is_found_from_another_branch(
     labels: npt.NDArray[np.float64], targets: list[float], equivalent: list[float]
 ) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     values = np.repeat(labels[:, None], LAT.size, axis=1)
     result = resample(source(labels, LAT, values), grid(targets, LAT))
     assert_allclose(result[:, 0], equivalent, atol=ROUNDOFF, rtol=0)
@@ -184,6 +191,7 @@ def test_a_regional_grid_is_found_from_another_branch(
 
 
 def test_cells_reach_into_the_shifted_branch() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     labels = np.arange(170.0, 190.1, 1.0)
     values = np.repeat(labels[:, None], LAT.size, axis=1)
     src = source(labels, LAT, values, mapping=transform(sample_offset=(0.5, 0.5)))
@@ -194,6 +202,7 @@ def test_cells_reach_into_the_shifted_branch() -> None:
 
 def test_a_coupled_source_mapping_does_not_wrap() -> None:
     """lon = u + 0.1 v: shifting u by a period would also move the sample along v."""
+    pytest.importorskip("scipy", minversion="1.18")
     coupled = transform(matrix=((1.0, 0.1), (0.0, 1.0)))
     src = source(GLOBAL_LON, LAT, mapping=coupled)
     result = xrf.resample(src.rf.geometry, grid([359.0 + 0.1 * 15.0], [15.0]))
@@ -201,6 +210,7 @@ def test_a_coupled_source_mapping_does_not_wrap() -> None:
 
 
 def test_transposed_storage_wraps_the_longitude_axis() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     target = grid(SEAM_TARGETS, [0.0, 20.0])
     expected = resample(source(GLOBAL_LON, LAT), target, method="cubic")
     transposed = source(GLOBAL_LON, LAT).transpose("lat", "lon")
@@ -208,6 +218,7 @@ def test_transposed_storage_wraps_the_longitude_axis() -> None:
 
 
 def test_cubic_wraps_a_grid_smaller_than_its_halo() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     lon = np.arange(0.0, 360.0, 45.0)
     targets = np.array([340.0, 10.0, 357.0])
     wrapped = resample(source(lon, LAT), grid(targets, [15.0]), method="cubic")
@@ -220,6 +231,7 @@ def test_cubic_wraps_a_grid_smaller_than_its_halo() -> None:
 
 
 def test_missing_values_near_the_seam_spread_only_to_their_neighbours() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     values = sphere_field(GLOBAL_LON, LAT)
     values[0, :] = np.nan
     result = resample(source(GLOBAL_LON, LAT, values), grid([358.75, 1.25, 3.75], LAT))
@@ -239,6 +251,7 @@ LINEAR_ERROR = 1e-3
 
 @pytest.mark.parametrize("lat", [CENTRED_LAT, POLE_LAT], ids=["cell-centred", "pole-sample"])
 def test_the_polar_cap_interpolates_across_the_pole(lat: npt.NDArray[np.float64]) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     lon_t, lat_t = CAP_TARGETS
     result = resample(source(POLAR_LON, lat), grid(lon_t, lat_t))
     assert_allclose(result, sphere_field(lon_t, lat_t), atol=LINEAR_ERROR, rtol=0)
@@ -248,6 +261,7 @@ def test_the_polar_cap_interpolates_across_the_pole(lat: npt.NDArray[np.float64]
 
 
 def test_cubic_across_the_pole_is_accurate() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     lon_t, lat_t = CAP_TARGETS
     result = resample(source(POLAR_LON, CENTRED_LAT), grid(lon_t, lat_t), method="cubic")
     # Cubic splines over 2° cells: error of order (2°)⁴, far below the linear bound.
@@ -255,6 +269,7 @@ def test_cubic_across_the_pole_is_accurate() -> None:
 
 
 def test_latitude_beyond_a_pole_is_outside() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     result = resample(source(POLAR_LON, CENTRED_LAT), grid([10.0], [90.5, -90.5, 89.5]))
     assert np.isnan(result[0, :2]).all()
     assert np.isfinite(result[0, 2])
@@ -263,6 +278,7 @@ def test_latitude_beyond_a_pole_is_outside() -> None:
 @pytest.mark.parametrize("lat", [CENTRED_LAT, POLE_LAT], ids=["cell-centred", "pole-sample"])
 def test_roundoff_past_a_pole_lands_on_it(lat: npt.NDArray[np.float64]) -> None:
     # The band is POSITION_SLACK (1e-9) of the 2° step: 2e-9°. 1e-6° is past it.
+    pytest.importorskip("scipy", minversion="1.18")
     past = [90.0 + 1e-12, np.nextafter(90.0, 100.0), -90.0 - 1e-12, 90.0 + 1e-6]
     result = resample(source(POLAR_LON, lat), grid([10.0], [90.0, -90.0, *past]))
     assert_allclose(result[0, 2:5], result[0, [0, 0, 1]], atol=1e-12, rtol=0)
@@ -273,6 +289,7 @@ def test_roundoff_past_a_pole_lands_on_it(lat: npt.NDArray[np.float64]) -> None:
 @pytest.mark.parametrize("step", [2.0, 0.5])
 @pytest.mark.parametrize("descending", [False, True], ids=["ascending", "descending"])
 def test_the_pole_band_scales_with_the_latitude_step(step: float, descending: bool) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     lat = np.arange(-90.0 + step / 2, 90.0, step)
     inside, outside = 0.5 * POSITION_SLACK * step, 2.0 * POSITION_SLACK * step
     targets = [90.0, 90.0 + inside, 90.0 + outside, -90.0, -90.0 - inside, -90.0 - outside]
@@ -298,6 +315,7 @@ def test_the_pole_band_scales_with_the_latitude_step(step: float, descending: bo
 def test_no_pole_crossing_without_antipodal_global_coverage(
     lon: npt.NDArray[np.float64], lat: npt.NDArray[np.float64]
 ) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     beyond = float(lat[-1]) + 0.5
     result = resample(source(lon, lat), grid([10.0], [beyond]))
     assert np.isnan(result).all()
@@ -305,6 +323,7 @@ def test_no_pole_crossing_without_antipodal_global_coverage(
 
 def test_poles_follow_the_latitude_unit_and_mapping() -> None:
     """Degrees of longitude with radians of latitude, and latitude = 2c + 10 (in radians)."""
+    pytest.importorskip("scipy", minversion="1.18")
     frame = xrf.ReferenceFrame.local(
         xrf.CoordinateSystem(
             ("lon", "lat"),
@@ -327,6 +346,7 @@ def test_poles_follow_the_latitude_unit_and_mapping() -> None:
 
 
 def test_declared_components_wrap_at_the_seam_but_not_across_the_pole() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     values = np.stack([sphere_field(POLAR_LON, CENTRED_LAT)] * 2, axis=-1)
     plain = xr.DataArray(
         values, dims=("lon", "lat", "component"), coords={"component": list(FRAME.axes)}
@@ -346,6 +366,7 @@ def test_declared_components_wrap_at_the_seam_but_not_across_the_pole() -> None:
 
 
 def test_a_single_longitude_cell_keeps_its_declared_extent() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     src = source(
         [0.0],
         LAT,
@@ -389,6 +410,7 @@ def test_only_wrapping_sources_leave_the_lattice_path(monkeypatch: pytest.Monkey
 
     Uniform latitudes, since a lattice needs uniform samples on every axis.
     """
+    pytest.importorskip("scipy", minversion="1.18")
     assert _paths(monkeypatch, source(GLOBAL_LON, UNIFORM_LAT)) == ["_general_block"]
     cartesian = xrf.ReferenceFrame.local(xrf.CoordinateSystem(("lon", "lat"), ("m", "m")))
     for matrix in (((1.0, 0.0), (0.0, 1.0)), ((1.0, 0.1), (0.0, 1.0))):

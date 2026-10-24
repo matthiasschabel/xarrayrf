@@ -72,7 +72,8 @@ def oracle_points() -> npt.NDArray[np.float64]:
     longitudes = [-179.9, -90.0, 0.0, 45.0, 179.9]
     heights = [-10e3, 0.0, 1e6]
     grid = np.meshgrid(longitudes, latitudes, heights, indexing="ij")
-    return np.stack(grid, axis=-1).reshape(-1, 3)
+    points: npt.NDArray[np.float64] = np.stack(grid, axis=-1).reshape(-1, 3)
+    return points
 
 
 def test_geodetic_transition_matches_pyproj_both_ways() -> None:
@@ -474,6 +475,7 @@ def test_a_malformed_transition_record_is_refused() -> None:
 
 def test_resampling_a_geodetic_grid_onto_earth_centred_points() -> None:
     """A field linear in longitude, latitude and height is reproduced by linear resampling."""
+    pytest.importorskip("scipy", minversion="1.18")
     frame, cartesian = charts(geodetic())
     to_geodetic = xrf.CartesianToGeodetic(cartesian, frame, **WGS84)
     lon, lat, h = np.arange(20.0, 41.0), np.arange(30.0, 51.0), np.array([-2e3, 0.0, 2e3])
@@ -635,6 +637,7 @@ def polar_target() -> xrf.Grid:
 
 
 def test_scalar_resampling_reaches_the_pole_through_a_transition() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     frame, cartesian = charts(geodetic())
     result = xrf.resample(
         polar_source(components=False).rf.geometry,
@@ -647,6 +650,7 @@ def test_scalar_resampling_reaches_the_pole_through_a_transition() -> None:
 
 
 def test_component_resampling_through_the_pole_names_the_target_sample() -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     frame, cartesian = charts(geodetic())
     with pytest.raises(ValueError, match=r"undefined at target sample \{'x': 0, 'y': 0, 'z': 0\}"):
         xrf.resample(

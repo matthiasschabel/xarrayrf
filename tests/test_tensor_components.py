@@ -596,6 +596,7 @@ def test_encoding_round_trips_the_binding_and_the_declaration(velocity: xr.DataA
 
 
 def test_an_unframed_declaration_round_trips_through_netcdf(wind: xr.DataArray) -> None:
+    pytest.importorskip("scipy", minversion="1.18")
     payload = wind.rf.encode().to_netcdf(engine="scipy")
     with xr.open_dataarray(io.BytesIO(payload), engine="scipy") as raw:
         decoded = raw.load().rf.decode()

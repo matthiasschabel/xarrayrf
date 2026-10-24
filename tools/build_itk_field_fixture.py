@@ -33,14 +33,14 @@ FIXTURE = (
 EDGE_OFFSETS = (-1e-6, 0.0, 1e-6)
 
 
-def _rotation(angle: float) -> np.ndarray:
+def _rotation(angle: float) -> npt.NDArray[np.float64]:
     cos, sin = np.cos(angle), np.sin(angle)
     return np.array([[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]])
 
 
 def _probes(
     rng: np.random.Generator, shape: tuple[int, ...], low: list[float], high: list[float]
-) -> np.ndarray:
+) -> npt.NDArray[np.float64]:
     """Continuous indices: random interior points, then each axis's edges with the others inside."""
     lows, highs = np.asarray(low, dtype=float), np.asarray(high, dtype=float)
     interior = lows + (highs - lows) * rng.uniform(0.05, 0.95, size=(24, len(shape)))
@@ -56,8 +56,11 @@ def _probes(
 
 
 def _physical(
-    origin: npt.ArrayLike, direction: npt.ArrayLike, spacing: npt.ArrayLike, index: np.ndarray
-) -> np.ndarray:
+    origin: npt.ArrayLike,
+    direction: npt.ArrayLike,
+    spacing: npt.ArrayLike,
+    index: npt.NDArray[np.float64],
+) -> npt.NDArray[np.float64]:
     return np.asarray(np.asarray(origin) + index @ (np.asarray(direction) * np.asarray(spacing)).T)
 
 
@@ -66,7 +69,7 @@ def _dense(
     shape: tuple[int, int, int],
     spacing: tuple[float, ...],
     origin: tuple[float, ...],
-    direction: np.ndarray,
+    direction: npt.NDArray[np.float64],
 ) -> dict[str, object]:
     field = rng.normal(scale=0.5, size=(*shape, 3))
     image = itk.image_from_array(
