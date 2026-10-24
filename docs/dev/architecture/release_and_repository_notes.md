@@ -106,8 +106,11 @@ built and uploaded through OIDC, creating the TestPyPI project. Uploaded files:
 checkout installed NumPy and xarray 2026.9.0 from PyPI and xarrayrf from TestPyPI with
 `--no-deps`; `pip check` and the workflow smoke test passed. The metadata shows MIT,
 `>=3.12`, the Pre-Alpha classifier and public repository/issue links; the sdist contains LICENSE,
-README and CHANGELOG and no `docs/dev`. The run warns that `actions/checkout@v4`,
-`upload-artifact@v4` and `setup-uv@v6` target the deprecated Node.js 20 runtime.
+README and CHANGELOG and no `docs/dev`. The run warned that `actions/checkout@v4`,
+`upload-artifact@v4` and `setup-uv@v6` target the deprecated Node.js 20 runtime. Both workflows
+now use Node.js 24 releases: `checkout@v7`, `upload-artifact@v7`, `download-artifact@v8` and
+`setup-uv@v10.3.2`. setup-uv no longer publishes floating major tags, so it is pinned exactly.
+download-artifact v8 fails on a digest mismatch instead of warning.
 
 ## Alternatives Considered
 
@@ -120,7 +123,6 @@ README and CHANGELOG and no `docs/dev`. The run warns that `actions/checkout@v4`
 
 ## Deferred Work
 
-- Move the workflows' actions to Node.js 24 majors before GitHub drops Node.js 20.
 - A later version number and a production publishing policy, after the release gate.
 - Keep both minimum lanes current as dependency floors move.
 
