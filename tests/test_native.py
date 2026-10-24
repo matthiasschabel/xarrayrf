@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pickle
+import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, Literal, cast
@@ -59,6 +60,148 @@ def pixel_tasks() -> Iterator[list[object]]:
     tasks: list[object] = []
     with Callback(pretask=lambda key, *args: tasks.append(key)):  # type: ignore[no-untyped-call]
         yield tasks
+
+
+def _native_oracle(
+    source: xr.DataArray,
+    domain: xr.DataArray,
+    *,
+    rename: dict[str, str] | None = None,
+    dims_map: dict[str, str] | None = None,
+    field: bool = False,
+) -> Callable[[xr.DataArray], None]:
+    rename, dims_map = rename or {}, dims_map or {}
+    transform = source.rf.coordinate_transform
+    axes = transform.source.axes
+    names = tuple(rename.get(name, name) for name in axes)
+    dims = tuple(
+        dims_map.get(d, rename.get(d, d))
+        for d in source.rf.geometry_dims
+        if dims_map.get(d, rename.get(d, d)) in domain.dims
+    )
+    domain = domain.copy(deep=True)
+
+    def labels(array: xr.DataArray, names: tuple[str, ...], dims: tuple[str, ...]) -> Any:
+        coords = [xr.DataArray(array.coords[n].values, dims=array.coords[n].dims) for n in names]
+        return np.stack([c.transpose(*dims).values for c in xr.broadcast(*coords)], axis=-1)
+
+    old_labels = labels(source, axes, source.rf.geometry_dims)
+    old_points = transform.transform_point(old_labels)
+    saved = dict(
+        zip(map(tuple, old_labels.reshape(-1, len(axes))), old_points.reshape(-1, 2), strict=True)
+    )
+    expected_transform = transform
+    if rename:
+        original = transform.source
+        expected_transform = transform.with_endpoints(
+            source=ArrayCoordinates(
+                names,
+                original.units,
+                axis_types=original.axis_types,
+                sample_offset=original.sample_offset,
+            )
+        )
+
+    def check(result: xr.DataArray) -> None:
+        assert dict(result.sizes) == dict(domain.sizes)
+        for name, coordinate in domain.coords.items():
+            assert result.coords[name].dims == coordinate.dims
+            assert_array_equal(result.coords[name], coordinate)
+        assert result.rf.is_framed
+        assert result.rf.reference_frame == transform.target
+        assert result.rf.coordinate_transform == expected_transform
+        assert result.rf.coordinate_transform.source.axes == names
+        assert result.rf.geometry_dims == dims
+        index = result.xindexes[names[0]]
+        assert isinstance(index, BindingIndex)
+        assert all(result.xindexes[name] is index for name in names)
+        assert set(index.fixed) == {name for name in names if domain.coords[name].ndim == 0}
+        points = (
+            result.copy(data=np.empty(result.shape)).rf.geometry.points().transpose(*dims, "axis")
+        )
+        current = labels(result, names, dims)
+        assert points.shape == (*[domain.sizes[d] for d in dims], 2)
+        # 1e-12 mm covers rounding of the small affine and bilinear fixtures only.
+        assert_allclose(points.values, transform.transform_point(current), rtol=0, atol=1e-12)
+        if field:
+            y, x = current[..., 0], current[..., 1]
+            assert_allclose(
+                points.values, np.stack((y + y * x / 100, x + x / 10), axis=-1), rtol=0, atol=1e-12
+            )
+        for label, point in zip(
+            current.reshape(-1, len(names)), points.values.reshape(-1, 2), strict=True
+        ):
+            if tuple(label) in saved:
+                assert_allclose(point, saved[tuple(label)], rtol=0, atol=1e-12)
+
+    return check
+
+
+def _assert_native_unframed(result: xr.DataArray) -> None:
+    assert not result.rf.is_framed
+    assert not any(isinstance(index, BindingIndex) for index in result.xindexes.values())
+
+
+@pytest.fixture
+def audit_profile() -> xr.DataArray:
+    return xr.DataArray([10, 20, 30, 40], dims="x", coords={"x": [3, 6, 9, 12]}, name="profile")
+
+
+@pytest.fixture
+def audit_ordered(image: xr.DataArray, transform: AffineTransform) -> xr.DataArray:
+    ordered = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("x", "y"), ("1", "1")),
+        target=transform.target,
+        matrix=[[2.0, 0.5], [-1.0, 3.0]],
+        translation=[11, -7],
+    )
+    return cast(xr.DataArray, image.rf.frame(ordered, dims=("x", "y")))
+
+
+@pytest.fixture
+def audit_field(image: xr.DataArray, transform: AffineTransform) -> xr.DataArray:
+    from xarrayrf import DisplacementFieldTransform
+
+    frame = transform.target
+    assert isinstance(frame, ReferenceFrame)
+    grid_transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("y", "x"), ("1", "1"), sample_offset=(0.5, 0.5)),
+        target=frame,
+        matrix=np.eye(2),
+        translation=np.zeros(2),
+    )
+    grid = Grid(grid_transform, {"y": ("y", [0, 2, 4]), "x": ("x", [0, 3, 6, 9])})
+    yy, xx = np.meshgrid(
+        np.array([0, 2, 4], dtype=np.float64),
+        np.array([0, 3, 6, 9], dtype=np.float64),
+        indexing="ij",
+    )
+    warp = DisplacementFieldTransform(
+        source=frame,
+        target=ReferenceFrame.local(frame.coordinate_system),
+        field=np.stack((yy * xx / 100, xx / 10), axis=-1),
+        grid=grid,
+        outside="raise",
+    )
+    return cast(xr.DataArray, image.rf.frame(CompositeTransform(transform, warp), dims=("y", "x")))
+
+
+def _refuses_partial_scalar_drop() -> bool:
+    frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
+    transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("y", "x"), ("1", "1")),
+        target=frame,
+        matrix=np.eye(2),
+        translation=np.zeros(2),
+    )
+    source = xr.DataArray(
+        np.ones((1, 2)), dims=("y", "x"), coords={"y": [2], "x": [0, 3]}
+    ).rf.frame(transform, dims=("y", "x"))
+    try:
+        source.isel(y=0, drop=True)
+    except ValueError as exc:
+        return type(exc) is ValueError and "would corrupt the following index" in str(exc)
+    return False
 
 
 def test_import_registers_accessor_only_in_native_module() -> None:
@@ -632,6 +775,74 @@ def test_align_override_raises(framed: xr.DataArray, order: str, fixed: bool) ->
         xr.align(*operands, join="override")
 
 
+@_NEEDS_HOOKS
+@pytest.mark.parametrize("case", ["N01", "N02", "N03", "N04", "N05"])
+def test_native_audit_partial_alignment(
+    framed: xr.DataArray,
+    image: xr.DataArray,
+    audit_profile: xr.DataArray,
+    case: str,
+) -> None:
+    px = audit_profile
+    if case == "N04":
+        before = framed.copy(deep=True)
+        with pytest.raises(
+            ValueError, match=re.escape("coordinate 'x' differs for join='exact'")
+        ) as exc:
+            xr.align(px, framed, join="exact")
+        assert type(exc.value) is ValueError
+        xr.testing.assert_identical(framed, before)
+        return
+    domain = image.reindex(x=[0, 3, 6, 9, 12]) if case == "N03" else image.sel(x=[3, 6, 9])
+    check = _native_oracle(framed, domain)
+    if case == "N05":
+        result = xr.merge([px.to_dataset(), framed.to_dataset(name="owner")], join="inner")
+        check(result["owner"])
+        _assert_native_unframed(result["profile"])
+        assert dict(result["profile"].sizes) == {"x": 3}
+        assert_array_equal(result["profile"].x, [3, 6, 9])
+    else:
+        operations = {
+            "N01": lambda: framed + px,
+            "N02": lambda: px + framed,
+            "N03": lambda: xr.align(framed, px, join="outer")[0],
+        }
+        check(operations[case]())
+
+
+@_NEEDS_HOOKS
+@pytest.mark.parametrize("case", ["N06", "N08"])
+def test_native_audit_unindexed_conflict(
+    framed: xr.DataArray,
+    image: xr.DataArray,
+    case: str,
+) -> None:
+    ds = framed.to_dataset(name="owner")
+    incoming = image.assign_coords(x=[1, 4, 7, 10]).drop_indexes("x").to_dataset(name="incoming")
+    before, incoming_before = ds.copy(deep=True), incoming.copy(deep=True)
+    with pytest.raises(ValueError, match=re.escape("conflicting unindexed coordinate 'x'")) as exc:
+        if case == "N06":
+            xr.merge([ds, incoming])
+        else:
+            ds.update(incoming)
+    assert type(exc.value) is ValueError
+    xr.testing.assert_identical(ds, before)
+    xr.testing.assert_identical(incoming, incoming_before)
+    assert ds.xindexes["x"].equals(before.xindexes["x"])
+
+
+@_NEEDS_HOOKS
+def test_native_audit_broadcast_excluded_geometry(
+    framed: xr.DataArray, image: xr.DataArray
+) -> None:
+    # N33 has no established series-4 fix: a failure here remains a finding.
+    check = _native_oracle(framed, image.expand_dims(channel=2))
+    first, second = xr.broadcast(framed, xr.DataArray([1, 2], dims="channel"), exclude={"x"})
+    check(first)
+    assert dict(second.sizes) == {"channel": 2, "y": 3}
+    _assert_native_unframed(second)
+
+
 def _dataset_reduction_drops_whole_binding() -> bool:
     """Probe the xarray fix that drops a multi-coordinate index whole in Dataset reductions."""
     frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
@@ -793,6 +1004,72 @@ def test_pickle_round_trip(framed: xr.DataArray) -> None:
     assert restored.rf.geometry.dims == framed.rf.geometry.dims
 
 
+@_NEEDS_UPDATE_INDEX_PRIORITY
+@pytest.mark.parametrize("lazy", [False, True], ids=["N07", "N30"])
+def test_native_audit_update_preserves_values(
+    framed: xr.DataArray,
+    image: xr.DataArray,
+    lazy: bool,
+) -> None:
+    with pixel_tasks() as tasks:
+        source = framed.chunk({"y": 2, "x": 2}) if lazy else framed
+        ds = source.to_dataset(name="owner")
+        incoming = (image * 2).to_dataset(name="extra")
+        if lazy:
+            incoming = incoming.chunk({"x": 2})
+        check = _native_oracle(source, image)
+        ds.update(incoming)
+        for name in ("owner", "extra"):
+            check(ds[name])
+            if lazy:
+                assert isinstance(ds[name].data, da.Array)
+    assert not tasks
+    computed = ds.compute()
+    for name in ("owner", "extra"):
+        check(computed[name])
+    assert_allclose(computed["owner"], image, rtol=0, atol=1e-12)
+    assert_allclose(computed["extra"], image * 2, rtol=0, atol=1e-12)
+
+
+@_NEEDS_HOOKS
+def test_native_audit_indexed_update_refuses_without_mutation(
+    framed: xr.DataArray,
+    image: xr.DataArray,
+) -> None:
+    # N09: patch 7 refuses unequal replacement indexes; 7b only accepts equal labels.
+    ds = framed.to_dataset(name="owner")
+    incoming = image.assign_coords(x=[3, 6, 9, 12]).to_dataset(name="incoming")
+    before, incoming_before = ds.copy(deep=True), incoming.copy(deep=True)
+    with pytest.raises(
+        xr.AlignmentError, match=re.escape("cannot update Dataset: coordinate")
+    ) as exc:
+        ds.update(incoming)
+    assert type(exc.value) is xr.AlignmentError
+    assert "Drop the incoming index first" in str(exc.value)
+    xr.testing.assert_identical(ds, before)
+    xr.testing.assert_identical(incoming, incoming_before)
+    assert ds.xindexes["x"].equals(before.xindexes["x"])
+
+
+@pytest.mark.parametrize("coordinate", [False, True], ids=["N11", "N12"])
+def test_native_audit_partial_extraction(framed: xr.DataArray, coordinate: bool) -> None:
+    ds = xr.Dataset({"owner": framed, "profile": ("x", np.arange(4))})
+    result = ds.coords["x"] if coordinate else ds["profile"]
+    _assert_native_unframed(result)
+    assert dict(result.sizes) == {"x": 4}
+    assert_array_equal(result.x, [0, 3, 6, 9])
+
+
+@_NEEDS_WHOLE_INDEX_REDUCTION
+def test_native_audit_reduction_removes_fixed_binding(framed: xr.DataArray) -> None:
+    # N14: the fixed y term must not survive a reduction of the last geometry axis.
+    ds = framed.expand_dims(channel=[0, 1]).to_dataset(name="owner")
+    result = ds.sel(y=2).mean("x")["owner"]
+    _assert_native_unframed(result)
+    assert dict(result.sizes) == {"channel": 2}
+    assert result.y.item() == 2
+
+
 def test_fixed_and_auxiliary_source_coordinates(transform: AffineTransform) -> None:
     source = ArrayCoordinates(("y", "x"), ("1", "1"))
     mapped = AffineTransform.from_matrix(
@@ -819,6 +1096,30 @@ def test_fixed_and_auxiliary_source_coordinates(transform: AffineTransform) -> N
 def test_index_constructor_is_private(framed: xr.DataArray) -> None:
     with pytest.raises(ValueError, match=r"rf\.frame"):
         type(framed.xindexes["x"]).from_variables({}, options={})
+
+
+def test_native_audit_field_rename_refusal(audit_field: xr.DataArray) -> None:
+    # N31 construction and refusal must still run without SciPy.
+    before = audit_field.copy(deep=True)
+    with pytest.raises(
+        ValueError, match=re.escape("this transform cannot rename source axes")
+    ) as exc:
+        audit_field.rename(x="column")
+    assert type(exc.value) is ValueError
+    xr.testing.assert_identical(audit_field, before)
+
+
+@_NEEDS_SWAP_DIMS_HOOK
+def test_native_audit_field_dimension_swap(audit_field: xr.DataArray, image: xr.DataArray) -> None:
+    # N32 evaluation is the only field branch that requires the resample extra.
+    pytest.importorskip("scipy", minversion="1.18")
+    check = _native_oracle(
+        audit_field,
+        image.swap_dims(x="column").isel(column=[3, 1]),
+        dims_map={"x": "column"},
+        field=True,
+    )
+    check(audit_field.swap_dims({"x": "column"}).isel(column=[3, 1]))
 
 
 def test_non_affine_source_rename_is_refused(
@@ -851,6 +1152,82 @@ def test_unframe_removes_binding_without_deleting_coordinates(framed: xr.DataArr
     assert not plain.rf.is_framed
     assert plain.coords["y"].item() == 2
     assert "x" in plain.xindexes
+
+
+@pytest.mark.parametrize("case", ["N19", "N20", "N22"])
+def test_native_audit_fixed_coordinate_ownership(framed: xr.DataArray, case: str) -> None:
+    plane = framed.isel(y=1)
+    if case == "N22":
+        result = plane.drop_indexes(["y", "x"])
+        _assert_native_unframed(result)
+        assert dict(result.sizes) == {"x": 4}
+        assert_array_equal(result.x, [0, 3, 6, 9])
+        assert result.y.item() == 2
+        return
+    before = plane.copy(deep=True)
+    with pytest.raises(ValueError, match=re.escape("would corrupt the following index")) as exc:
+        if case == "N19":
+            plane.assign_coords(y=2)
+        else:
+            plane.drop_vars("y")
+    assert type(exc.value) is ValueError
+    assert "coordinate(s) 'y'" in str(exc.value)
+    xr.testing.assert_identical(plane, before)
+
+
+@pytest.mark.xfail(
+    not _refuses_partial_scalar_drop(),
+    strict=True,
+    reason="N34 requires patch 2 partial scalar drop refusal",
+)
+def test_native_audit_singleton_drop_refuses(framed: xr.DataArray) -> None:
+    one = framed.isel(y=slice(1, 2))
+    before = one.copy(deep=True)
+    with pytest.raises(ValueError, match=re.escape("would corrupt the following index")) as exc:
+        one.isel(y=0, drop=True)
+    assert type(exc.value) is ValueError
+    assert "coordinate(s) 'y'" in str(exc.value)
+    xr.testing.assert_identical(one, before)
+
+
+@pytest.mark.parametrize("case", ["N15", "N16", "N18"])
+def test_native_audit_scalar_geometry(framed: xr.DataArray, image: xr.DataArray, case: str) -> None:
+    point = framed.isel(y=1, x=2)
+    if case == "N16":
+        before = point.copy(deep=True)
+        with pytest.raises(
+            KeyError, match=re.escape("source axis 'y' is fixed and cannot be selected by label")
+        ) as exc:
+            point.sel(y=2)
+        assert type(exc.value) is KeyError
+        xr.testing.assert_identical(point, before)
+        return
+    check = _native_oracle(framed, image.isel(y=1, x=2))
+    if case == "N15":
+        check(point + 3)
+    else:
+        one = framed.expand_dims(channel=[0, 1]).isel(y=slice(1, 2), x=slice(2, 3))
+        check(one.squeeze(("y", "x")).mean("channel"))
+
+
+@pytest.mark.parametrize("lazy", [False, True], ids=["N13", "N29"])
+def test_native_audit_selected_channel_reduction(
+    framed: xr.DataArray,
+    image: xr.DataArray,
+    lazy: bool,
+) -> None:
+    with pixel_tasks() as tasks:
+        source = framed.chunk({"y": 2, "x": 2}) if lazy else framed
+        channel = source.expand_dims(channel=[0, 1])
+        if lazy:
+            channel = channel.chunk({"channel": 1})
+        check = _native_oracle(source, image.sel(y=2, x=[9, 3]))
+        result = channel.sel(y=2, x=[9, 3]).mean("channel")
+        check(result)
+        if lazy:
+            assert isinstance(result.data, da.Array)
+    assert not tasks
+    check(result.compute())
 
 
 def test_rename_retained_fixed_axis(framed: xr.DataArray) -> None:
@@ -930,6 +1307,18 @@ def test_roll_empty_keeps_binding_and_geometry(framed: xr.DataArray, roll_coords
     assert points.dims == ("y", "x", "axis")
     assert points.shape == (3, 0, 2)
     xr.testing.assert_identical(points, empty.rf.geometry.points())
+
+
+@pytest.mark.xfail(
+    not _supports_indexed_empty_roll(),
+    strict=True,
+    raises=ZeroDivisionError,
+    reason="N17 requires #11613 empty roll",
+)
+def test_native_audit_empty_geometry(framed: xr.DataArray, image: xr.DataArray) -> None:
+    empty = framed.isel(y=slice(1, 2), x=slice(0, 0))
+    check = _native_oracle(framed, image.isel(y=slice(1, 2), x=slice(0, 0)))
+    check(empty.roll(x=1, roll_coords=True))
 
 
 def _assert_same_binding_and_points(result: xr.DataArray, original: xr.DataArray) -> None:
@@ -1196,6 +1585,53 @@ def test_resampling_without_scipy_validates_frames_before_loading_extra(
         framed.rf.resample_to(framed)
 
 
+@pytest.mark.parametrize("case", ["N24", "N25", "N26", "N27", "N28"])
+def test_native_audit_identity(
+    framed: xr.DataArray,
+    image: xr.DataArray,
+    transform: AffineTransform,
+    audit_profile: xr.DataArray,
+    case: str,
+    request: pytest.FixtureRequest,
+) -> None:
+    assert isinstance(transform.target, ReferenceFrame)
+    system = transform.target.coordinate_system
+    anonymous = image.rf.frame(
+        transform.with_endpoints(target=ReferenceFrame.anonymous(system)), dims=("y", "x")
+    )
+    if case == "N24":
+        request.applymarker(_NEEDS_HOOKS)
+        check = _native_oracle(anonymous, image.sel(x=[3, 6, 9]))
+        check(audit_profile + anonymous)
+    elif case == "N26":
+        derived = anonymous.isel(x=[1, 2])
+        check = _native_oracle(anonymous, image.sel(x=[3, 6]))
+        check(anonymous + derived)
+    else:
+        other = image.rf.frame(
+            transform.with_endpoints(
+                target=ReferenceFrame.local(system)
+                if case == "N25"
+                else ReferenceFrame.anonymous(system)
+            ),
+            dims=("y", "x"),
+        )
+        left, right = (
+            (framed, other) if case == "N25" else (anonymous, framed if case == "N28" else other)
+        )
+        before_left, before_right = left.copy(deep=True), right.copy(deep=True)
+        fragment = (
+            "left operand is anonymous"
+            if case == "N28"
+            else "incompatible framed coordinate mappings"
+        )
+        with pytest.raises(ValueError, match=re.escape(fragment)) as exc:
+            _ = left + right
+        assert type(exc.value) is ValueError
+        xr.testing.assert_identical(left, before_left)
+        xr.testing.assert_identical(right, before_right)
+
+
 def test_anonymous_adoption_keeps_different_grids_and_names_resampling(
     framed: xr.DataArray,
 ) -> None:
@@ -1435,6 +1871,38 @@ def test_anonymous_adoption_retains_declared_support_checks(framed: xr.DataArray
     onto_first = adopted.rf.resample_to(first)
     assert onto_first.rf.grid == adopted.rf.grid
     assert_allclose(onto_first, first, rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("case", ["N10", "N21", "N23", "N35"])
+def test_native_audit_declared_order(
+    audit_ordered: xr.DataArray,
+    image: xr.DataArray,
+    case: str,
+) -> None:
+    ordered = audit_ordered
+    if case == "N35":
+        selected = ordered.isel(y=1)
+        before = selected.copy(deep=True)
+        with pytest.raises(
+            ValueError,
+            match=re.escape("vectorized indexing changes geometry dimensions; call rf.unframe()"),
+        ) as exc:
+            selected.isel(x=xr.Variable("points", [3, 1]))
+        assert type(exc.value) is ValueError
+        xr.testing.assert_identical(selected, before)
+    elif case == "N10":
+        ds = xr.Dataset({"owner": ordered, "series": (("t", "y", "x"), np.ones((2, 3, 4)))})
+        check = _native_oracle(ordered, image)
+        check(ds["series"].isel(t=1))
+    elif case == "N21":
+        selected = ordered.isel(y=1)
+        check = _native_oracle(
+            ordered, image.isel(y=1).rename(y="row", x="column"), rename={"y": "row", "x": "column"}
+        )
+        check(selected.rename(y="row", x="column"))
+    else:
+        check = _native_oracle(ordered, image.isel(x=[3, 1], y=slice(1, None)))
+        check(ordered.isel(x=[3, 1], y=slice(1, None)).transpose("y", "x"))
 
 
 def test_transpose_and_encoding_retain_declared_sampling_order(framed: xr.DataArray) -> None:
