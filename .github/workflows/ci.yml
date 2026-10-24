@@ -41,3 +41,39 @@ jobs:
       - run: uv pip check
       - run: .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('scipy') is None"
       - run: .venv/bin/python -m pytest tests
+
+  patched:
+    runs-on: ubuntu-latest
+    env:
+      UV_PROJECT_ENVIRONMENT: .venv-patched
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked --extra dev --group patched
+      - run: uv pip check --python .venv-patched/bin/python
+      - name: Log installed xarray provenance
+        run: |
+          .venv-patched/bin/python - <<'PY'
+          import json
+          from importlib.metadata import distribution
+          from pathlib import Path
+
+          import xarray
+
+          print(f"xarray_module: {Path(xarray.__file__).resolve()}")
+          print(f"xarray_version: {xarray.__version__}")
+          # Installed metadata records the built revision, independent of the pretend version.
+          source = json.loads(distribution("xarray").read_text("direct_url.json") or "{}")
+          vcs = source.get("vcs_info", {})
+          if vcs.get("vcs") != "git" or not vcs.get("commit_id"):
+              raise SystemExit("xarray installation has no resolved git commit metadata")
+          print(f"xarray_commit: {vcs['commit_id']}")
+          PY
+      - run: .venv-patched/bin/python -m pytest
+      - name: Gate native binding operations
+        shell: bash
+        run: |
+          .venv-patched/bin/python tools/binding_operation_probe.py |
+            .venv-patched/bin/python tools/check_binding_probe.py --environment .venv-patched

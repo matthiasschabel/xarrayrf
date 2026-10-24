@@ -47,13 +47,19 @@ was raised rather than loosening tolerances.
 | minimum-resample | 3.12 | NumPy 2.0.0, SciPy 1.18.0, xarray 2026.7.0 | `make check test build` |
 | current | 3.13 | latest resolution of `.[dev]` | `make check test build` |
 | minimum-core | 3.12 | NumPy 1.26.0, xarray 2026.7.0, adapter extras, pytest, Dask; SciPy absent | `pytest tests` |
+| patched | 3.12 | `uv sync --locked --extra dev --group patched` in `.venv-patched` | Full `pytest` suite, binding probe JSON gate |
 
 Non-locked lanes resolve the full editable extra in a clean environment (downgrading only NumPy
 had left SciPy and Zarr versions requiring NumPy 2) and every lane runs `uv pip check`.
 minimum-core asserts SciPy is absent. Actual sampling and SciPy-NetCDF tests skip there;
 frame/adoption refusals validate before loading SciPy and remain covered by core-only tests.
 Local worktree targets have overrideable source paths; `make test-pinned` uses an isolated
-pinned environment. These are local commands, not hosted lanes.
+pinned environment. `make probe-pinned` syncs that environment from the lock and runs the
+binding probe plus `tools/check_binding_probe.py`. The new `patched` job uses the same
+environment layout and requires a nonempty case list, every classification `ok`, and the
+resolved `xarray_module` path inside that environment. It logs the imported module path,
+version and installed distribution's `direct_url.json` git commit ID: this records the revision
+actually installed, independently of the configured pretend version or a movable tag.
 
 **Hosted validation rechecked 2026-10-24:** both floor lanes had been failing since mid-October
 while the locked lane stayed green. minimum-resample's mypy run rejected annotations that only
@@ -77,7 +83,8 @@ QA on 2026-10-07 passed core 1,559/86 skipped/47 xfailed, resample 1,796/47 xfai
 1,796/47 xfailed, patched 1,843, and current Python 3.13/xarray 2026.9.0 1,800/43 xfailed;
 details belong in the [maintainer changelog](../changelog.md).
 
-No hosted job validates the patched pin yet. Stock expected failures still represent native
+The patched-pin job is configured but still awaits hosted evidence and a bad-pin negative
+control after an approved push; R3 remains open. Stock expected failures still represent native
 operation gaps; green dependency-floor CI does not certify the release invariant.
 
 ### Publishing workflow (`.github/workflows/publish.yml`)
