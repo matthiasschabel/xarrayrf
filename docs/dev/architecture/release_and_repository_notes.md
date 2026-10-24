@@ -1,7 +1,7 @@
 # Release, packaging and repository notes
 
 **Status:** Active
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-24
 **Scope:** Package metadata, CI lanes, dependency floors, the manual TestPyPI workflow and the
 hosted steps still outstanding. The maintainer procedure is [releasing.md](../../releasing.md).
 
@@ -89,9 +89,14 @@ failed after that constructor was replaced. Local wheel validation is recorded i
 
 Hosted setup rechecked 2026-10-07: the `testpypi` environment exists with a selected-branch
 policy allowing only `main`; the GitHub API lists no publishing workflow runs. PyPI and TestPyPI
-project JSON endpoints both return 404 for `xarrayrf`. Pending publishers were previously
-reported added on both services, but their fields remain unverified; a pending publisher does
-not establish a published project.
+project JSON endpoints both return 404 for `xarrayrf`. A pending publisher does not establish a
+published project or reserve the name.
+
+Pending publishers rechecked 2026-10-24 by the maintainer: `xarrayrf` is pending on both TestPyPI
+and PyPI. The TestPyPI publisher's fields are confirmed (project `xarrayrf`, owner
+`matthiasschabel`, repository `xarrayrf`, workflow `publish.yml`, environment `testpypi`). The
+PyPI publisher is unused until a production job exists; that job must match its workflow and
+environment fields.
 
 ## Alternatives Considered
 
@@ -104,7 +109,7 @@ not establish a published project.
 
 ## Deferred Work
 
-- First hosted rehearsal: confirm the pending-publisher fields, run the workflow, inspect the
+- First hosted rehearsal: run the workflow, inspect the
   TestPyPI page and install from it. OIDC upload has never run.
 - A later version number and a production publishing policy, after the release gate.
 - Keep both minimum lanes current as dependency floors move.
