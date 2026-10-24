@@ -39,15 +39,14 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
    [hosted run 40113369020](https://github.com/matthiasschabel/xarrayrf/actions/runs/40113369020)
    passes locked, minimum-core, minimum-resample and current. The floor lanes had regressed from
    mid-October until then ([release notes](architecture/release_and_repository_notes.md)).
-   Hosted validation of the patched
-   pin remains separate work; passing stock CI with known xfails does not meet criterion 1.
+   The `patched` job validates the pinned series on every push ([run 40114374947](https://github.com/matthiasschabel/xarrayrf/actions/runs/40114374947)); passing stock CI with known xfails does not meet criterion 1.
 5. The TestPyPI rehearsal completed ([release notes](architecture/release_and_repository_notes.md),
    [releasing.md](../releasing.md)). Met on 2026-10-24 for `0.0.1.dev0`.
 
 ### Planned work, in rough priority order
 
-- **Release preparation.** Extend the native-operation audit and add hosted validation of the
-  immutable patched pin. The TestPyPI rehearsal and dependency-floor hosted verification are
+- **Release preparation.** Extend the native-operation audit (R1) and rebuild the patch series with consolidated
+  hooks (R2). The TestPyPI rehearsal, dependency-floor and patched-pin hosted verification are
   complete. Steps and order: [release plan](release_plan.md).
 - **xarray upstream.** Respond to review on the open bug-fix PRs, retire duplicate patches when
   a new series baseline includes their merged fixes, verify released-xarray support when fixes

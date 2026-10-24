@@ -19,7 +19,7 @@ APIs are separate workstreams, not release gates.
 
 ### Status on 2026-10-13
 
-R6 (TestPyPI rehearsal) completed on 2026-10-24; R1–R3, R5 and R7 below are open and R4 is
+R3 (patched-pin CI) and R6 (TestPyPI rehearsal) completed on 2026-10-24; R1, R2, R5 and R7 below are open and R4 is
 dropped for the pre-alpha release. Criterion 4
 (dependency-floor CI) is met. Upstream: #11613, #11615 and #11616 are merged (`b335cea`,
 `dfd25c7`, `23c9dd1`); #11613 and #11615 are in v2026.09.0, #11616 is on xarray `main` only.
@@ -85,6 +85,10 @@ together.
 full suite and the probe, and require a nonempty case set with every case `classification ==
 "ok"`; a zero exit code alone is not enough. Show that a bad pin fails the job. Leave the four
 existing jobs unchanged. Pushing needs approval.
+*Done 2026-10-24:* `4ced97e` adds the `patched` job and
+`tools/check_binding_probe.py`. [run 40114374947](https://github.com/matthiasschabel/xarrayrf/actions/runs/40114374947) installs series 4 (`5db75d53`), passes 3,059 tests and
+gates 93/93 `ok`; the negative control [run 40114398033](https://github.com/matthiasschabel/xarrayrf/actions/runs/40114398033) pins the unpatched base `dfd25c72` and fails at
+the gate, naming each hole. Re-point the job's evidence when R2 publishes a new pin.
 
 ### Waiting on others
 

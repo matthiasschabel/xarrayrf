@@ -83,8 +83,8 @@ QA on 2026-10-07 passed core 1,559/86 skipped/47 xfailed, resample 1,796/47 xfai
 1,796/47 xfailed, patched 1,843, and current Python 3.13/xarray 2026.9.0 1,800/43 xfailed;
 details belong in the [maintainer changelog](../changelog.md).
 
-The patched-pin job is configured but still awaits hosted evidence and a bad-pin negative
-control after an approved push; R3 remains open. Stock expected failures still represent native
+Patched-pin evidence 2026-10-24: [run 40114374947](https://github.com/matthiasschabel/xarrayrf/actions/runs/40114374947) installed `5db75d53`, passed the suite and gated
+93/93; a throwaway branch pinned to `dfd25c72` failed at the gate ([run 40114398033](https://github.com/matthiasschabel/xarrayrf/actions/runs/40114398033)), then was deleted. Stock expected failures still represent native
 operation gaps; green dependency-floor CI does not certify the release invariant.
 
 ### Publishing workflow (`.github/workflows/publish.yml`)
