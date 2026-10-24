@@ -55,6 +55,13 @@ frame/adoption refusals validate before loading SciPy and remain covered by core
 Local worktree targets have overrideable source paths; `make test-pinned` uses an isolated
 pinned environment. These are local commands, not hosted lanes.
 
+**Hosted validation rechecked 2026-10-24:** both floor lanes had been failing since mid-October
+while the locked lane stayed green. minimum-resample's mypy run rejected annotations that only
+NumPy 2.0's stubs treat as errors, and minimum-core ran 135 field-transform and resampling tests
+without SciPy. After `548f700`, [run 40113369020](https://github.com/matthiasschabel/xarrayrf/actions/runs/40113369020) passes all four jobs again. Only the locked lane runs
+locally by default, so check new numeric annotations and SciPy-dependent tests against both
+floors before relying on a green local run.
+
 **Hosted validation checked 2026-10-07:**
 [run 37668735524](https://github.com/matthiasschabel/xarrayrf/actions/runs/37668735524) on
 `da5f627d7e822de647273b14afb42d659c97d3bb` passes all four jobs: locked, minimum-core,

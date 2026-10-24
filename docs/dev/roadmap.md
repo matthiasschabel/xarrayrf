@@ -35,8 +35,9 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
    provisional and gains new record kinds within it
    ([persistence design](architecture/persistence_design.md)). Freezing it is a gate for the
    first release users are expected to keep files from.
-4. All supported dependency-floor CI lanes pass. This criterion is met on `da5f627`:
-   [hosted run 37668735524](https://github.com/matthiasschabel/xarrayrf/actions/runs/37668735524)
+4. All supported dependency-floor CI lanes pass. This criterion is met on `548f700`:
+   [hosted run 40113369020](https://github.com/matthiasschabel/xarrayrf/actions/runs/40113369020)
+   (it regressed between 2026-10-13 and 2026-10-24; see the release notes)
    passes locked, minimum-core, minimum-resample and current. Hosted validation of the patched
    pin remains separate work; passing stock CI with known xfails does not meet criterion 1.
 5. The TestPyPI rehearsal completed ([release notes](architecture/release_and_repository_notes.md),
