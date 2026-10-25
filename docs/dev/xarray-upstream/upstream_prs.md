@@ -1,7 +1,7 @@
 # Upstream xarray bug-fix pull requests
 
 **Status:** Active
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Scope:** The five independent bug-fix PRs split from the local patch series: #11613 and #11615
 and #11616 merged, #11617 and #11621 open. No hook API is proposed here.
 

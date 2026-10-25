@@ -164,7 +164,7 @@ def observations() -> tuple[Observation, ...]:
 
 def main() -> None:
     """Print a compact comparison table."""
-    lane = "patched (Index hooks)" if hasattr(xr.Index, "check_override") else "stock/upstream"
+    lane = "patched (Index hooks)" if hasattr(xr.Index, "check_drop") else "stock/upstream"
     print(f"xarray {xr.__version__}, lane: {lane}")
     print("| case | library + version | observed outcome | xarrayrf outcome |")
     print("|---|---|---|---|")

@@ -81,8 +81,10 @@ reasons. The stable documents are [the design](../design.md),
 
 - [binding_design.md](binding/binding_design.md): the native `.rf` binding, why a joint index
   was chosen over other carriers, the Dataset rule, and how operations carry or refuse it.
-- [binding_operation_inventory.md](binding/binding_operation_inventory.md): the 93-case probe
-  matrix across the stock, upstream and patched xarray lanes.
+- [binding_operation_inventory.md](binding/binding_operation_inventory.md): the 132-case probe
+  results across the stock, upstream and patched xarray lanes, with an owner for each hole.
+- [native_operation_audit_matrix.md](binding/native_operation_audit_matrix.md): the reviewed
+  audit cases N01-N39 and their expected outcomes.
 
 ## xarray-upstream/
 
@@ -92,6 +94,8 @@ reasons. The stable documents are [the design](../design.md),
   what remains open on each.
 - [index_hook_design.md](xarray-upstream/index_hook_design.md): reducing the lifecycle hook
   patches to two `Index` methods, and the cross-extension reproducers that motivate them.
+- [extension_hook_survey.md](xarray-upstream/extension_hook_survey.md): measured failures in
+  pint-xarray, rasterix, xproj and cf-xarray, and which hook resolves each.
 
 ## napari-3783/
 

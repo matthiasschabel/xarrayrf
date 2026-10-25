@@ -139,8 +139,12 @@ docs = [
     "requests>=2.32",
 ]
 patched = ["xarray"]
-# Dev-only: the geospatial extensions compared in tools/geo_failure_modes.py.
+# Dev-only: the extensions compared in tools/geo_failure_modes.py and
+# tools/extension_hook_survey.py. Install into its own environment, e.g.
+# `UV_PROJECT_ENVIRONMENT=.venv-priorart uv sync --extra dev --group priorart`.
 priorart = [
+    "cf-xarray>=0.11.3",
+    "pint-xarray>=0.6.1",
     "rasterix>=0.2.2",
     "rioxarray>=0.23",
     "xproj>=0.2.1",

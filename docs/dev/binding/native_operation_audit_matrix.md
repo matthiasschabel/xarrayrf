@@ -1,7 +1,7 @@
 # Native-operation audit matrix
 
 **Status:** Implemented
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Scope:** R1a design for the R1 native-operation release gate; 35 additional cases, with
 contract-derived expectations written before execution. Implemented in the probe and
 `tests/test_native.py`; results are in the [inventory](binding_operation_inventory.md).
@@ -250,6 +250,20 @@ or uses observed lane outcomes as its expected behavior.
   terms, swapped source axes and wrong identity. Source-label and structural checks are required.
 - A field crop alone follows the affine `isel` path. N31/N32 instead distinguish source-name
   rewriting from dimension-only rewriting in the same non-affine binding.
+
+### Addendum: N36-N39 (2026-10-25)
+
+The extension survey found a `RasterIndex` split when a 1-D array with equal `x` labels comes
+first; the same path splits the binding, which N01/N02 (unequal labels, so reindexed) and the
+legacy reverse cases (plain operand covering both dimensions) never reached. Contract as for
+N02 (design §3: framed plus plain is framed whatever the order):
+
+| ID | Operation (`px_equal = px.assign_coords(x=[0, 3, 6, 9])`) | Expected |
+|---|---|---|
+| N36 | `px_equal + f` | **preserve** on the full grid |
+| N37 | `xr.where(px_equal > 0, px_equal, f)` | **preserve** on the full grid |
+| N38 | `xr.Dataset({"profile": px_equal, "owner": f})` | **preserve** `owner`; **unframe** `profile` |
+| N39 | `xr.merge([px_equal.to_dataset(), f.to_dataset(name="owner")])` | as N38 |
 
 ## Deferred Work
 

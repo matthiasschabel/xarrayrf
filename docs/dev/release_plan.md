@@ -1,7 +1,7 @@
 # Release plan
 
 **Status:** Active
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Scope:** The remaining release gates in the [roadmap](roadmap.md#release-criteria), their
 upstream xarray dependencies and the packaging rehearsal. Packaging, CI lanes and the publishing
 workflow themselves are in [release and repository notes](architecture/release_and_repository_notes.md);
@@ -20,7 +20,8 @@ APIs are separate workstreams, not release gates.
 ### Status on 2026-10-24
 
 R1 (audit), R3 (patched-pin CI) and R6 (TestPyPI rehearsal) are complete. R2's series 5 is
-published and pinned; its extension evidence and drafts remain open, as do R5 and R7. R4 is
+published and pinned and its extension evidence is recorded; a series-6 fix found by that
+evidence awaits publication, and the upstream drafts remain open, as do R5 and R7. R4 is
 dropped for the pre-alpha release. Criterion 4
 (dependency-floor CI) is met. Upstream: #11613, #11615 and #11616 are merged (`b335cea`,
 `dfd25c7`, `23c9dd1`); #11613 and #11615 are in v2026.09.0, #11616 is on xarray `main` only.
@@ -88,8 +89,9 @@ publication approval, after which update the patched group pin, pretend version 
 together.
 *Series 5 done 2026-10-24:* tag `xarrayrf-patches-5` (`a6576179`, [manifest](xarray-upstream/xarray_patches.md))
 implements the two-hook design on `b2acc77a` with the fix halves as separate commits, and the
-pin, lock and `BindingIndex` moved to it. Still open: the extension evidence
-(pint-xarray/cf-xarray), the #11607 prototype check, and the design-issue and fix-PR drafts;
+pin, lock and `BindingIndex` moved to it. *Evidence done 2026-10-25:* [extension survey](xarray-upstream/extension_hook_survey.md) and the
+#11607 check (see the hook design). It found N36-N39, fixed on the unpublished series-6
+candidate. Still open: publishing series 6, and the design-issue and fix-PR drafts;
 the maintainer decisions on the hook contract are in the
 [hook design](xarray-upstream/index_hook_design.md).
 

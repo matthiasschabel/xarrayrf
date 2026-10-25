@@ -585,6 +585,21 @@ def _native_case(number: int) -> Case:
     f = raw.rf.frame(transform, dims=("y", "x"))
     px = xr.DataArray([10, 20, 30, 40], dims="x", coords={"x": [3, 6, 9, 12]}, name="profile")
     bad = raw.assign_coords(x=[1, 4, 7, 10]).drop_indexes("x")
+    if number in (36, 37, 38, 39):
+        # The lower-dimensional plain operand comes first with labels equal to the binding's,
+        # so alignment needs no reindexing (the survey's RasterIndex finding).
+        px_equal = px.assign_coords(x=[0, 3, 6, 9])
+        if number in (36, 37):
+            operation = {
+                36: lambda: px_equal + f,
+                37: lambda: xr.where(px_equal > 0, px_equal, f),
+            }[number]
+            return Case(operation, [Output(raw, f)])
+        build = {
+            38: lambda: xr.Dataset({"profile": px_equal, "owner": f}),
+            39: lambda: xr.merge([px_equal.to_dataset(), f.to_dataset(name="owner")]),
+        }[number]
+        return Case(build, [Output(px_equal, None), Output(raw, f)])
     if number in (1, 2, 3, 4, 5):
         domain = raw.reindex(x=[0, 3, 6, 9, 12]) if number == 3 else raw.sel(x=[3, 6, 9])
         if number == 4:
@@ -827,7 +842,7 @@ def run() -> dict[str, object]:
     """Report the 93 original cases and reviewed N01-N35 without relaxing outcomes."""
     names = [name for name, *_ in _legacy_cases()]
     rows = [_measure(name, partial(_legacy_case, name)) for name in names]
-    rows += [_measure(f"N{number:02}", partial(_native_case, number)) for number in range(1, 36)]
+    rows += [_measure(f"N{number:02}", partial(_native_case, number)) for number in range(1, 40)]
     return {
         "xarray_version": xr.__version__,
         "xarray_module": str(Path(xr.__file__).resolve()),

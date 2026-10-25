@@ -810,6 +810,50 @@ def test_native_audit_partial_alignment(
         check(operations[case]())
 
 
+def _lower_dimensional_subset_keeps_binding() -> bool:
+    """Probe the xarray fix that drops a shadowed subset index when no reindexing is needed."""
+    frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
+    transform = AffineTransform.from_matrix(
+        source=ArrayCoordinates(("y", "x"), ("1", "1")),
+        target=frame,
+        matrix=np.eye(2),
+        translation=np.zeros(2),
+    )
+    plain = xr.DataArray(np.ones((2, 2)), dims=("y", "x"), coords={"y": [0, 1], "x": [0, 1]})
+    framed = plain.rf.frame(transform, dims=("y", "x"))
+    profile = xr.DataArray(np.ones(2), dims="x", coords={"x": [0, 1]})
+    try:
+        result = profile + framed
+    except ValueError:
+        return False
+    return result.xindexes["x"] is result.xindexes["y"]
+
+
+@pytest.mark.xfail(
+    not _lower_dimensional_subset_keeps_binding(),
+    strict=True,
+    reason="this xarray lane keeps a shadowed subset index on the no-reindex alignment path",
+)
+@pytest.mark.parametrize("case", ["N36", "N37", "N38", "N39"])
+def test_native_audit_equal_label_profile_first(
+    framed: xr.DataArray, image: xr.DataArray, audit_profile: xr.DataArray, case: str
+) -> None:
+    profile = audit_profile.assign_coords(x=[0, 3, 6, 9])
+    check = _native_oracle(framed, image)
+    if case == "N36":
+        check(profile + framed)
+    elif case == "N37":
+        check(xr.where(profile > 0, profile, framed))  # type: ignore[no-untyped-call]
+    else:
+        result = (
+            xr.Dataset({"profile": profile, "owner": framed})
+            if case == "N38"
+            else xr.merge([profile.to_dataset(), framed.to_dataset(name="owner")])
+        )
+        check(result["owner"])
+        _assert_native_unframed(result["profile"])
+
+
 @_NEEDS_HOOKS
 @pytest.mark.parametrize("case", ["N06", "N08"])
 def test_native_audit_unindexed_conflict(

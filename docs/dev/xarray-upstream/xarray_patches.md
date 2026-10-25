@@ -1,7 +1,7 @@
 # Maintained xarray patches
 
 **Status:** Active
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Scope:** The local xarray patch series that implements xarrayrf's native-operation contract,
 its pin in `pyproject.toml`, and its validation.
 
@@ -18,6 +18,16 @@ Repositories: upstream `https://github.com/pydata/xarray`; public fork
 `origin` push URL is `DISABLED`; push only to `fork`, and only with authorization.
 
 ## Current Decision
+
+### Series 6 candidate (local, unpublished)
+
+Branch `index-hooks-6` at `~/GitHub/xarray-hooks-6`: series 5 plus one commit,
+`b13b0a6b` "Drop a shadowed subset index on the no-reindex
+alignment path" (fixes inventory N36-N39 and the rasterix join case in the
+[extension survey](extension_hook_survey.md)). xarray full suite 21,284 passed, same
+skip/xfail/xpass as series 5; xarrayrf on it 3,112 passed, probe 132/132. Tag, pin and push
+await the maintainer's approval; series 5 stays the pin until then. The fix belongs in hook B
+(commit 6) when the series is next rebuilt.
 
 ### Series 5 (current, published)
 
@@ -127,9 +137,9 @@ Symptom: custom scalar index `tag=10` vs plain `tag=20` keeps 10 silently throug
 | merge + alignment, same dims only | 2 | zarr `test_region_write` (lazy coordinate read: 6 store reads, 5 allowed); `test_merge_multiindex_level` (error precedence) |
 
 Upstream status: issue #11607 (links #2996). A maintainer asked for a PR (2026-10-12) and
-suggested a deprecation first. Branch `pr/index-coord-conflict-warning` in `xarray-upstream`
-(not yet pushed) emits a `FutureWarning` in `Aligner._get_indexes_and_vars`, where the index is
-assigned. It does not cover the `join="exact", copy=False` fast path (`apply_ufunc`, `where`,
+suggested a deprecation first. PR #11716 (branch `pr/index-coord-conflict-warning`, head
+`f91c7064`, open since 2026-10-12, no review yet) emits a `FutureWarning` in
+`Aligner._get_indexes_and_vars`, where the index is assigned. It does not cover the `join="exact", copy=False` fast path (`apply_ufunc`, `where`,
 `merge` under the new combine defaults), which is left as an open question for maintainers.
 
 ## Alternatives Considered

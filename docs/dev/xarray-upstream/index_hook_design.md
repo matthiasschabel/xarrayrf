@@ -1,7 +1,7 @@
 # Index hook consolidation design
 
 **Status:** Active
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Scope:** Local xarray patches 3, 4, 5, 9 and 10 and the matching `BindingIndex` methods in
 `src/xarrayrf/_binding.py`. Goal: the same native-operation contract with two new `Index`
 methods instead of seven, on a future series 5, plus the cross-extension evidence a design
@@ -274,6 +274,16 @@ decision), and broadcast keeps an index off outputs that lack an excluded dimens
 keeping their surviving labels (commit 8). The hook-free regressions fail on the unfixed
 tree; `BindingIndex` implements only the two hooks. See the
 [manifest](xarray_patches.md#series-5-current-published).
+
+Survey and #11607 check, 2026-10-25. The [extension survey](extension_hook_survey.md) finds
+two extensions needing `check_drop` (pint-xarray, rasterix) and two needing the override veto
+(pint-xarray, xproj); validation and joins have one each besides xarrayrf. The join case exposed
+an alignment defect present since series 4, fixed on the series-6 candidate. Combining series 5
+with #11716's warning (`f91c7064`) applies cleanly but reports twice: the `FutureWarning` fires
+before `join_overlapping(how=None)` runs, so an index that refuses the conflict still warns
+that behavior will change; 12 hook tests fail under xarray's warnings-as-errors. If both land,
+validate first and warn only when the index returned `None`; a non-`None` result means the
+index checked the values itself.
 
 1. Maintainer settles the public names and the validation-only contract (`how=None`,
    `how="override"` with ignored returns), and whether the exact/no-copy fast path and the
