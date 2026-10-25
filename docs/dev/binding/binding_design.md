@@ -88,7 +88,7 @@ arrays through `frame_array` in `xarrayrf.native`.
 - **stock**: released xarray (2026.7.0 at the time of measurement). Cases needing an xarray fix
   are strict xfails naming it.
 - **upstream-main**: unmodified upstream `main` via `PYTHONPATH`.
-- **patched**: the published local series (currently series 5, tag `xarrayrf-patches-5`), pinned
+- **patched**: the published local series (currently series 6, tag `xarrayrf-patches-6`), pinned
   through the `patched` dependency group. Manifest and upstream status:
   [xarray-upstream notes](../xarray-upstream/).
 

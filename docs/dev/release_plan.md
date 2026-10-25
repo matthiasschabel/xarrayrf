@@ -19,9 +19,10 @@ APIs are separate workstreams, not release gates.
 
 ### Status on 2026-10-24
 
-R1 (audit), R3 (patched-pin CI) and R6 (TestPyPI rehearsal) are complete. R2's series 5 is
-published and pinned and its extension evidence is recorded; a series-6 fix found by that
-evidence awaits publication, and the upstream drafts remain open, as do R5 and R7. R4 is
+R1 (audit), R3 (patched-pin CI) and R6 (TestPyPI rehearsal) are complete. R2's series 6 is
+published and pinned and its extension evidence is recorded; the upstream design issue and fix
+PRs are drafted but deliberately not filed yet (maintainer decision 2026-10-25). R5 and R7 remain
+open. R4 is
 dropped for the pre-alpha release. Criterion 4
 (dependency-floor CI) is met. Upstream: #11613, #11615 and #11616 are merged (`b335cea`,
 `dfd25c7`, `23c9dd1`); #11613 and #11615 are in v2026.09.0, #11616 is on xarray `main` only.
@@ -90,9 +91,9 @@ together.
 *Series 5 done 2026-10-24:* tag `xarrayrf-patches-5` (`a6576179`, [manifest](xarray-upstream/xarray_patches.md))
 implements the two-hook design on `b2acc77a` with the fix halves as separate commits, and the
 pin, lock and `BindingIndex` moved to it. *Evidence done 2026-10-25:* [extension survey](xarray-upstream/extension_hook_survey.md) and the
-#11607 check (see the hook design). It found N36-N39, fixed on the unpublished series-6
-candidate. Still open: publishing series 6, and the design-issue and fix-PR drafts;
-the maintainer decisions on the hook contract are in the
+#11607 check (see the hook design). It found N36-N39, fixed in series 6 (`xarrayrf-patches-6`, `b13b0a6b`, now the pin).
+Drafts of the design issue and the two fix PRs exist locally; filing them is deferred. The
+maintainer decisions on the hook contract stay open in the
 [hook design](xarray-upstream/index_hook_design.md).
 
 **R3: hosted CI for the patched pin** [supports criterion 1]. Add a separate job using the
@@ -167,8 +168,8 @@ From the xarrayrf root, after `uv sync --locked --extra dev`:
 ```sh
 make check test
 .venv/bin/python tools/binding_operation_probe.py
-make test-patched XARRAY_PATCHED="$HOME/GitHub/xarray-hooks-5"
-PYTHONPATH="$HOME/GitHub/xarray-hooks-5" .venv/bin/python tools/binding_operation_probe.py
+make test-patched XARRAY_PATCHED="$HOME/GitHub/xarray-hooks-6"
+PYTHONPATH="$HOME/GitHub/xarray-hooks-6" .venv/bin/python tools/binding_operation_probe.py
 make test-pinned   # provisions .venv-patched from the published pin
 ```
 

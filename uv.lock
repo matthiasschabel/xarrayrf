@@ -296,7 +296,7 @@ version = "0.11.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "xarray", version = "2026.7.0", source = { registry = "https://pypi.org/simple" }, marker = "extra != 'group-8-xarrayrf-patched' or extra == 'group-8-xarrayrf-stock'" },
-    { name = "xarray", version = "2026.9.1.dev146+xarrayrf.patches.5", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5#a657617942f5c6f6b6bba88d2aeb2f10691af386" }, marker = "extra == 'group-8-xarrayrf-patched'" },
+    { name = "xarray", version = "2026.9.1.dev147+xarrayrf.patches.6", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6#b13b0a6b302c0042b63001fc9c2a74421d259ac4" }, marker = "extra == 'group-8-xarrayrf-patched'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/13/07f02aa2abb9204caa31f713ef5b3402f8344e0c962d28ca17d1ca9587c8/cf_xarray-0.11.3.tar.gz", hash = "sha256:0a896112fca0b09e449a45133d1ce1509c0e525606f41206aab8bddb17b4c7fa", size = 693996, upload-time = "2026-06-12T18:21:19.251Z" }
 wheels = [
@@ -2162,7 +2162,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pint" },
     { name = "xarray", version = "2026.7.0", source = { registry = "https://pypi.org/simple" }, marker = "extra != 'group-8-xarrayrf-patched' or extra == 'group-8-xarrayrf-stock'" },
-    { name = "xarray", version = "2026.9.1.dev146+xarrayrf.patches.5", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5#a657617942f5c6f6b6bba88d2aeb2f10691af386" }, marker = "extra == 'group-8-xarrayrf-patched'" },
+    { name = "xarray", version = "2026.9.1.dev147+xarrayrf.patches.6", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6#b13b0a6b302c0042b63001fc9c2a74421d259ac4" }, marker = "extra == 'group-8-xarrayrf-patched'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a1/92/b402b6e58a4f9ea2718ada67171586dc2ebd494ffcaf0c08f2b634714ad5/pint_xarray-0.6.1.tar.gz", hash = "sha256:a0febf909b69342fde39b8e053875c52bb75a65e4fc56d95bd146f74449aed84", size = 57668, upload-time = "2026-03-23T20:58:41.476Z" }
 wheels = [
@@ -2738,7 +2738,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "xarray", version = "2026.7.0", source = { registry = "https://pypi.org/simple" }, marker = "extra != 'group-8-xarrayrf-patched' or extra == 'group-8-xarrayrf-stock'" },
-    { name = "xarray", version = "2026.9.1.dev146+xarrayrf.patches.5", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5#a657617942f5c6f6b6bba88d2aeb2f10691af386" }, marker = "extra == 'group-8-xarrayrf-patched'" },
+    { name = "xarray", version = "2026.9.1.dev147+xarrayrf.patches.6", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6#b13b0a6b302c0042b63001fc9c2a74421d259ac4" }, marker = "extra == 'group-8-xarrayrf-patched'" },
     { name = "xproj" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b7/f7/22a616c59845a5fa8369148aa4855b377b9ca32bad850b05554c4fb21d5c/rasterix-0.2.2.tar.gz", hash = "sha256:6d1d189a45934c4c7ac87e0d0311f7b8fba5146908db4983f297b5ab10b311d4", size = 103620, upload-time = "2026-06-03T15:10:59.972Z" }
@@ -2785,7 +2785,7 @@ dependencies = [
     { name = "pyproj" },
     { name = "rasterio" },
     { name = "xarray", version = "2026.7.0", source = { registry = "https://pypi.org/simple" }, marker = "extra != 'group-8-xarrayrf-patched' or extra == 'group-8-xarrayrf-stock'" },
-    { name = "xarray", version = "2026.9.1.dev146+xarrayrf.patches.5", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5#a657617942f5c6f6b6bba88d2aeb2f10691af386" }, marker = "extra == 'group-8-xarrayrf-patched'" },
+    { name = "xarray", version = "2026.9.1.dev147+xarrayrf.patches.6", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6#b13b0a6b302c0042b63001fc9c2a74421d259ac4" }, marker = "extra == 'group-8-xarrayrf-patched'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c9/8d/9e5ab7525d2e81f9963a9192637ba8808e214f1c93a5ed000048447d626f/rioxarray-0.23.0.tar.gz", hash = "sha256:800fc3ae2405ff535edf657f3f0a6bda5a70e72282883ce18c7daecd8e0bfc58", size = 61638, upload-time = "2026-07-27T19:33:29.281Z" }
 wheels = [
@@ -3183,8 +3183,8 @@ wheels = [
 
 [[package]]
 name = "xarray"
-version = "2026.9.1.dev146+xarrayrf.patches.5"
-source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5#a657617942f5c6f6b6bba88d2aeb2f10691af386" }
+version = "2026.9.1.dev147+xarrayrf.patches.6"
+source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6#b13b0a6b302c0042b63001fc9c2a74421d259ac4" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
@@ -3209,7 +3209,7 @@ source = { editable = "." }
 dependencies = [
     { name = "numpy" },
     { name = "xarray", version = "2026.7.0", source = { registry = "https://pypi.org/simple" }, marker = "extra != 'group-8-xarrayrf-patched' or extra == 'group-8-xarrayrf-stock'" },
-    { name = "xarray", version = "2026.9.1.dev146+xarrayrf.patches.5", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5#a657617942f5c6f6b6bba88d2aeb2f10691af386" }, marker = "extra == 'group-8-xarrayrf-patched'" },
+    { name = "xarray", version = "2026.9.1.dev147+xarrayrf.patches.6", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6#b13b0a6b302c0042b63001fc9c2a74421d259ac4" }, marker = "extra == 'group-8-xarrayrf-patched'" },
 ]
 
 [package.optional-dependencies]
@@ -3278,7 +3278,7 @@ docs = [
     { name = "requests" },
 ]
 patched = [
-    { name = "xarray", version = "2026.9.1.dev146+xarrayrf.patches.5", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5#a657617942f5c6f6b6bba88d2aeb2f10691af386" } },
+    { name = "xarray", version = "2026.9.1.dev147+xarrayrf.patches.6", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6#b13b0a6b302c0042b63001fc9c2a74421d259ac4" } },
 ]
 priorart = [
     { name = "cf-xarray" },
@@ -3340,7 +3340,7 @@ docs = [
     { name = "nbformat", specifier = ">=5.10" },
     { name = "requests", specifier = ">=2.32" },
 ]
-patched = [{ name = "xarray", git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5" }]
+patched = [{ name = "xarray", git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6" }]
 priorart = [
     { name = "cf-xarray", specifier = ">=0.11.3" },
     { name = "pint-xarray", specifier = ">=0.6.1" },
@@ -3357,7 +3357,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyproj" },
     { name = "xarray", version = "2026.7.0", source = { registry = "https://pypi.org/simple" }, marker = "extra != 'group-8-xarrayrf-patched' or extra == 'group-8-xarrayrf-stock'" },
-    { name = "xarray", version = "2026.9.1.dev146+xarrayrf.patches.5", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-5#a657617942f5c6f6b6bba88d2aeb2f10691af386" }, marker = "extra == 'group-8-xarrayrf-patched'" },
+    { name = "xarray", version = "2026.9.1.dev147+xarrayrf.patches.6", source = { git = "https://github.com/matthiasschabel/xarray?tag=xarrayrf-patches-6#b13b0a6b302c0042b63001fc9c2a74421d259ac4" }, marker = "extra == 'group-8-xarrayrf-patched'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/48/33/8c2bcceedfa13122916b6a582eedf9581682dbee329d95bcfb4c69542ade/xproj-0.2.1.tar.gz", hash = "sha256:d520c7a0df402f6a5922108ed614c8ea0ce6b04bec12c91aceb75fe3c1d3c5c3", size = 31781, upload-time = "2025-07-07T09:05:48.022Z" }
 wheels = [

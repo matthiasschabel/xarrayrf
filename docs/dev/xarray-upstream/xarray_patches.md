@@ -19,17 +19,26 @@ Repositories: upstream `https://github.com/pydata/xarray`; public fork
 
 ## Current Decision
 
-### Series 6 candidate (local, unpublished)
+### Series 6 (current, published)
 
-Branch `index-hooks-6` at `~/GitHub/xarray-hooks-6`: series 5 plus one commit,
-`b13b0a6b` "Drop a shadowed subset index on the no-reindex
-alignment path" (fixes inventory N36-N39 and the rasterix join case in the
-[extension survey](extension_hook_survey.md)). xarray full suite 21,284 passed, same
-skip/xfail/xpass as series 5; xarrayrf on it 3,112 passed, probe 132/132. Tag, pin and push
-await the maintainer's approval; series 5 stays the pin until then. The fix belongs in hook B
-(commit 6) when the series is next rebuilt.
+| Item | Value |
+|---|---|
+| Base | series 5 (upstream `main` `b2acc77a` plus series-5 commits 1-8) |
+| Checkout | `~/GitHub/xarray-hooks-6`, branch `index-hooks-6` (immutable) |
+| Tag | annotated `xarrayrf-patches-6` -> `b13b0a6b` on the fork |
+| `git describe --tags --match 'v*'` | `v2026.09.0-147-gb13b0a6b` |
+| Pin | `tag = "xarrayrf-patches-6"`; `SETUPTOOLS_SCM_PRETEND_VERSION = "2026.9.1.dev147+xarrayrf.patches.6"` |
 
-### Series 5 (current, published)
+Series 6 adds one commit to series 5, 9: `b13b0a6b` "Drop a shadowed subset index on the
+no-reindex alignment path". A lower-dimensional operand placed first with equal labels kept its
+own index on the fast path, and the following merge then split the joint index (inventory
+N36-N39, the rasterix join case in the [extension survey](extension_hook_survey.md)). It
+belongs in hook B (commit 6) when the series is next rebuilt. Reviewed in three passes; the
+regressions cover `copy=True`, a partially excluded subset index, and dropping one subset
+index while keeping another whole. Validation: xarray full suite 21,284 passed, same
+skip/xfail/xpass as series 5; xarrayrf on the installed tag 3,115 passed, probe 132/132.
+
+### Series 5 (published 2026-10-24)
 
 | Item | Value |
 |---|---|
@@ -81,7 +90,7 @@ PYTHONPATH=$PWD ~/GitHub/xarray-upstream/.venv/bin/pytest xarray/tests -n 6 -q
 # xarrayrf lanes
 make test            # stock .venv
 make test-upstream   # ~/GitHub/xarray-upstream (set XARRAY_UPSTREAM to a main checkout)
-make test-patched    # ~/GitHub/xarray-hooks-5 by path
+make test-patched    # ~/GitHub/xarray-hooks-6 by path
 make test-pinned     # published tag in .venv-patched
 make probe-pinned    # probe plus gate against the published tag
 make check
@@ -96,6 +105,7 @@ remain in Git history rather than competing with the current manifest.
 
 | Series | Tag target | Historical base |
 |---|---|---|
+| `xarrayrf-patches-5` | `a657617942f5c6f6b6bba88d2aeb2f10691af386` | `b2acc77a` |
 | `xarrayrf-patches-4` | `5db75d53f5515fabb3ca5ffc8419eb9c982cf4a2` | `dfd25c72` |
 | `xarrayrf-patches-3` | `9ca40562c9f292d482ee653f1dc18e0ed11b9a4c` | `56a5d370` |
 | `xarrayrf-patches-2` | `2af8cfea3d530b2e7f0c4d6c805bea8c5fbfc509` | `8de862c29544c2fb1957ce20985745952bc81de7` |

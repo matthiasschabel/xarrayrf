@@ -12,7 +12,7 @@ records measured failures in four extensions and whether a hook resolves each on
 `tools/extension_hook_survey.py` (JSON output with the imported xarray path and commit); run it
 in the `priorart` environment on each lane. Versions measured on 2026-10-25: pint-xarray 0.6.1
 (pint 0.26.2), rasterix 0.2.2, xproj 0.2.1, cf-xarray 0.11.3, pyproj 3.8.0. Lanes: stock xarray
-2026.7.0; upstream `main` (`b2acc77a`); series 5 (`a6576179`); the series-6 candidate (`b13b0a6b`, series 5 plus the
+2026.7.0; upstream `main` (`b2acc77a`); series 5 (`a6576179`); series 6 (`b13b0a6b`, series 5 plus the
 alignment fix below).
 
 A hook is credited only by a same-tree control: the operation runs on the extension's own index
@@ -61,7 +61,7 @@ Per hook:
   hook is called but the split remains; xarrayrf's binding split the same way
   ([inventory](../binding/binding_operation_inventory.md) N36-N39). The no-reindex alignment path
   kept the lower-dimensional operand's own index for a coordinate the join had taken over, so the
-  following merge chose it. The series-6 candidate drops that index as the reindexing path
+  following merge chose it. Series 6 drops that index as the reindexing path
   already does, and the case resolves.
 - **Broadcast fix (no hook):** pint-xarray and rasterix both keep their index through
   `broadcast` on series 5; upstream `main` loses it, and 2026.7.0 loses it or raises.
@@ -95,5 +95,4 @@ override, align crs; cf-xarray coarsen bounds, bounds index.
 
 ## Next Steps
 
-1. Publish series 6 (the alignment fix) once approved, re-pin, and land N36-N39.
-2. Use this table in the design-issue draft; re-run the survey when an extension releases.
+1. Use this table if the design issue is filed; re-run the survey when an extension releases.

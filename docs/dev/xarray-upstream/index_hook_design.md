@@ -273,12 +273,12 @@ additions from the R1 audit: `interp` is a fourth `check_drop` call site (mainta
 decision), and broadcast keeps an index off outputs that lack an excluded dimension while
 keeping their surviving labels (commit 8). The hook-free regressions fail on the unfixed
 tree; `BindingIndex` implements only the two hooks. See the
-[manifest](xarray_patches.md#series-5-current-published).
+[manifest](xarray_patches.md#series-5-published-2026-10-24).
 
 Survey and #11607 check, 2026-10-25. The [extension survey](extension_hook_survey.md) finds
 two extensions needing `check_drop` (pint-xarray, rasterix) and two needing the override veto
 (pint-xarray, xproj); validation and joins have one each besides xarrayrf. The join case exposed
-an alignment defect present since series 4, fixed on the series-6 candidate. Combining series 5
+an alignment defect present since series 4, fixed in series 6. Combining series 5
 with #11716's warning (`f91c7064`) applies cleanly but reports twice: the `FutureWarning` fires
 before `join_overlapping(how=None)` runs, so an index that refuses the conflict still warns
 that behavior will change; 12 hook tests fail under xarray's warnings-as-errors. If both land,

@@ -14,8 +14,8 @@ reviewed before any run; N36-N39 were added after the
 [extension survey](../xarray-upstream/extension_hook_survey.md) found the same split in rasterix. Design and rationale: [binding_design.md](binding_design.md).
 
 Lanes at measurement (2026-10-24): stock xarray 2026.7.0 wheel; upstream `main` at `b2acc77a`;
-patched series 5 (tag `xarrayrf-patches-5`, `a6576179`); the unpublished series-6 candidate
-(`b13b0a6b`). The reported xarray version can be stale
+series 5 (tag `xarrayrf-patches-5`, `a6576179`); patched series 6 (tag `xarrayrf-patches-6`,
+`b13b0a6b`), the pin. The reported xarray version can be stale
 editable-install metadata under `PYTHONPATH`; the probe's `xarray_module` identifies the lane.
 
 Every case states one outcome per output. **preserve**: the binding survives and world points,
@@ -30,11 +30,11 @@ and compute failures are reported separately. A case the contract does not decid
 ## Current Decision
 
 Totals: stock 74/132 `ok` (58 holes), upstream 85/132 (47), series 5 128/132 (N36-N39),
-series-6 candidate 132/132. Patched-lane
+series 6 132/132. Patched-lane
 evidence is a release precondition, not a release pass; stock and upstream holes are the
 reason the patched pin exists.
 
-Owners of the stock and upstream holes, all fixed on the series-6 candidate
+Owners of the stock and upstream holes, all fixed on series 6
 ([manifest](../xarray-upstream/xarray_patches.md)):
 
 | Holes | Owner on series 5 |
@@ -57,7 +57,7 @@ own refusals (an alignment conflict, a corrupt-index error), since no binding re
 `rolling` must preserve; `interp` must refuse at the operation (maintainer decision
 2026-10-24).
 
-| Case | Expected | Stock | Upstream | Series 5 | Series 6 candidate |
+| Case | Expected | Stock | Upstream | Series 5 | Series 6 |
 |---|---|---|---|---|---|
 | isel_scalar | preserve | ok | ok | ok | ok |
 | isel_slice | preserve | ok | ok | ok | ok |

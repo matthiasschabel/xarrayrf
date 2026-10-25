@@ -78,11 +78,15 @@
 
 ### Changed
 
-- With patched xarray (now series 5, tag `xarrayrf-patches-5`), `interp` and `interp_like` on a
+- With patched xarray (from series 5, tag `xarrayrf-patches-5`), `interp` and `interp_like` on a
   geometry dimension raise `ValueError` at the call, pointing to `rf.resample_to`, instead of
   returning an array whose binding fails when next inspected. `BindingIndex` implements the
   consolidated xarray hooks `check_drop` and `join_overlapping`; series 4 is no longer
   supported as the patched lane.
+- With patched xarray (series 6, tag `xarrayrf-patches-6`), arithmetic, `where`, Dataset
+  construction and `merge` keep the binding when a lower-dimensional plain array with equal
+  labels comes first, as in `profile + framed`; before, the binding was split and failed when
+  next inspected.
 - With patched xarray, `xr.broadcast(..., exclude=...)` that excludes one geometry dimension no
   longer carries the binding onto outputs lacking that dimension; they are unframed and keep
   their labels.

@@ -155,9 +155,9 @@ stock = []
 conflicts = [[{ group = "patched" }, { group = "stock" }]]
 
 [tool.uv.sources]
-xarray = { git = "https://github.com/matthiasschabel/xarray", tag = "xarrayrf-patches-5", group = "patched" }
+xarray = { git = "https://github.com/matthiasschabel/xarray", tag = "xarrayrf-patches-6", group = "patched" }
 
 # uv's git checkout has no release tags, so setuptools-scm cannot derive xarray's version;
-# keep it equal to `git describe` of the tag (v2026.09.0-146) plus the series label.
+# keep it equal to `git describe` of the tag (v2026.09.0-147) plus the series label.
 [tool.uv.extra-build-variables]
-xarray = { SETUPTOOLS_SCM_PRETEND_VERSION = "2026.9.1.dev146+xarrayrf.patches.5" }
+xarray = { SETUPTOOLS_SCM_PRETEND_VERSION = "2026.9.1.dev147+xarrayrf.patches.6" }
