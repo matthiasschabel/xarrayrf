@@ -353,7 +353,7 @@ NumPy 2; the core supports NumPy 1.26.
 To use the patched xarray:
 
 ```sh
-python -m pip install "xarray @ git+https://github.com/matthiasschabel/xarray@xarrayrf-patches-4"
+python -m pip install "xarray @ git+https://github.com/matthiasschabel/xarray@xarrayrf-patches-5"
 ```
 
 ## Contributing

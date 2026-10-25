@@ -268,21 +268,24 @@ others in a separate environment (`UV_PROJECT_ENVIRONMENT`) so `.venv` stays the
 
 ## Next Steps
 
-1. Local critic reviews the six-call-site mapping and exact hunk split. Maintainer settles
-   the public names/validation-only contract and whether fast-path/multiple-unindexed-candidate
-   coverage changes belong in a separate fix; keep #11607's general warning policy separate.
-2. In the rebuild task, execute the two hook-free regressions on `b2acc77a` and each isolated
-   fix. Only then hand the broadcast and coarsen fixes to [upstream_prs.md](upstream_prs.md).
-   Joined-index propagation remains in B; do not advertise it as a standalone generic fix.
-3. Build `index-hooks-5` on `b2acc77a` in the order above, update `BindingIndex` and capability
-   detection together, run focused/full/lane validation, compare series-4 outcomes, and update
-   the manifest. R2 remains open until those gates pass.
-4. Turn the six verified observations into reproducers with code paths and hook
+Done 2026-10-24: series 5 (`xarrayrf-patches-5`) was built in this order, with two
+additions from the R1 audit: `interp` is a fourth `check_drop` call site (maintainer
+decision), and broadcast keeps an index off outputs that lack an excluded dimension while
+keeping their surviving labels (commit 8). The hook-free regressions fail on the unfixed
+tree; `BindingIndex` implements only the two hooks. See the
+[manifest](xarray_patches.md#series-5-current-published).
+
+1. Maintainer settles the public names and the validation-only contract (`how=None`,
+   `how="override"` with ignored returns), and whether the exact/no-copy fast path and the
+   multiple-unindexed-candidate map get a separate fix; keep #11607's warning policy separate.
+2. Hand the broadcast fix (commit 3 with 8 squashed in) and the coarsen fix (commit 4) to
+   [upstream_prs.md](upstream_prs.md). Joined-index propagation stays with hook B.
+3. Turn the six verified observations into reproducers with code paths and hook
    classification; add pint-xarray and cf-xarray reproducers and tracker searches.
-5. Write an evidence note (`docs/dev/extension_hook_survey.md`, one row per reproducer with
+4. Write an evidence note (`docs/dev/extension_hook_survey.md`, one row per reproducer with
    paired pinned tests) and a design-issue draft for the author to rewrite and post: the two
    methods and defaults, a table of extensions and the failure each hook fixes, the xarray code
    paths, related threads, xarrayrf named once. Under 500 words, at most one dash.
-6. List extension maintainers or threads where a co-sponsor might be sought, with evidence. The
+5. List extension maintainers or threads where a co-sponsor might be sought, with evidence. The
    maintainer decides whether to approach anyone, and whether patch 5 goes to #8911 as a comment
    (recommended first) or a dependent PR.

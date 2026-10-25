@@ -1,202 +1,204 @@
 # Native binding operation inventory
 
 **Status:** Active
-**Last updated:** 2026-10-04
-**Scope:** Measured outcome of 93 native xarray operations on a framed DataArray, on stock
-xarray, upstream `main` and the patched series; the release gate for the private `BindingIndex`.
+**Last updated:** 2026-10-24
+**Scope:** Measured outcome of 128 native xarray operations on framed arrays, on stock xarray,
+upstream `main` and the patched series; the release gate for the private `BindingIndex`.
 
 ## Context
 
-The probe is `tools/binding_operation_probe.py` (`make probe`; it prints JSON, and this
-table is transcribed from it). Lanes at measurement: stock xarray 2026.7.0; upstream `main` at
-`dfd25c72`; patched series 4 (tag `xarrayrf-patches-4`, `5db75d53`). The reported xarray
-version can be stale editable-install metadata under `PYTHONPATH`; the probe's import paths
-identify the lanes. Design and rationale: [binding_design.md](binding_design.md).
+The probe is `tools/binding_operation_probe.py`; `tools/check_binding_probe.py` gates its JSON
+in CI (`make probe-pinned` locally). The first 93 cases use one 2-D affine fixture; N01-N35 are
+the [audit matrix](native_operation_audit_matrix.md), whose expected outcomes were written and
+reviewed before any run. Design and rationale: [binding_design.md](binding_design.md).
 
-Every preserved result is checked against the original transform and against the original
-world points at matching source-coordinate labels, with absolute tolerance `1e-12` world units
-(the synthetic grid is integer-spaced, so this covers affine rounding without accepting a moved
-sample).
+Lanes at measurement (2026-10-24): stock xarray 2026.7.0 wheel; upstream `main` at `b2acc77a`;
+patched series 5 (tag `xarrayrf-patches-5`, `a6576179`). The reported xarray version can be stale
+editable-install metadata under `PYTHONPATH`; the probe's `xarray_module` identifies the lane.
 
-Classification: `ok` means preserved with matching world points, a permitted refusal, or an
-unframed result with no geometry in the source frame. `hole` blocks the native-operation
-contract. Required refusals and absence of a sibling binding are checked separately; a partial
-tuple result is `unframed`. The point oracle checks placement, not conflict history, so
-operand-conflict and override cases require refusal even when points look valid. The probe
-accepts any exception for may-refuse cases; focused tests in `tests/test_native.py` assert the
-exact error type and message.
+Every case states one outcome per output. **preserve**: the binding survives and world points,
+evaluated with the *original* transform at the result's source labels, match within `1e-12`
+(the synthetic grids are integer-spaced, so this covers affine rounding without accepting a
+moved sample), together with structural checks of identity, axis order, fixed terms and index
+ownership. **unframe**: no binding remains and the expected labels do. **refuse**: the exact
+exception class and a message fragment, with inputs unchanged. Setup, operation, inspection
+and compute failures are reported separately. A case the contract does not decide is
+`pending_review` and never counts as `ok`; none remain.
 
 ## Current Decision
 
-One row per probe case. "Remaining hole / owner" names the fixing patch (series 1/2 commit ids
-or patch numbers; see the patch table in [binding_design.md](binding_design.md)). "Fault path"
-and the reproducer were established on upstream `8de862c`. Totals: stock 67/93 `ok`
-(26 holes), upstream 64/93 (29), patched 93/93 (0). The patched lane is an experiment, not a
-release pass.
+Totals: stock 74/128 `ok` (54 holes), upstream 85/128 (43), series 5 128/128. Patched-lane
+evidence is a release precondition, not a release pass; stock and upstream holes are the
+reason the patched pin exists.
 
-Fixture used by the reproducers:
+Owners of the stock and upstream holes, all fixed on series 5
+([manifest](../xarray-upstream/xarray_patches.md)):
 
-```python
-import numpy as np
-import xarray as xr
-from xarrayrf import AffineTransform, ArrayCoordinates, CoordinateSystem, ReferenceFrame
-import xarrayrf.native
+| Holes | Owner on series 5 |
+|---|---|
+| scalar `drop=True` (`isel_drop_true`, `sel_drop_true`, N34) | #11617 |
+| `Dataset.update` replacing the binding (`dataset_setitem_labelled`, N07-N09, N30) | #11621 and `join_overlapping` update acceptance |
+| mixed framed/plain alignment, operand order, `where`, `ufunc`, partial alignment and merge (N01-N06, N24) | `join_overlapping` joins and validation; stock also lacks merged #11532 |
+| `join="override"` | `join_overlapping(how="override")` |
+| unindexed coordinate and unit conflicts | `join_overlapping(how=None)` |
+| `broadcast`, N33 (excluded dimension) | broadcast common-index fix and label retention |
+| `stack`, `pad`, `coarsen`, `interp` | `Index.check_drop` |
+| coarsen of nongeometry dimensions | coarsen index-retention fix |
+| `swap_dims`, field-backed swap (N32) | per-index `swap_dims` |
+| Dataset geometry reductions (stock only; N14) | merged #11616 |
+| empty roll (stock only; N17) | merged #11613 |
 
-frame = ReferenceFrame.local(CoordinateSystem(("a", "b"), ("mm", "mm")))
-transform = AffineTransform.from_matrix(
-    source=ArrayCoordinates(("y", "x"), ("1", "1")),
-    target=frame,
-    matrix=np.eye(2),
-    translation=np.zeros(2),
-)
-raw = xr.DataArray(
-    np.arange(12).reshape(3, 4),
-    dims=("y", "x"),
-    coords={"y": [0, 2, 4], "x": [0, 3, 6, 9]},
-)
-raw = raw.assign_coords(y=raw.y.assign_attrs(units="1"), x=raw.x.assign_attrs(units="1"))
-f = raw.rf.frame(transform, dims=("y", "x"))
-plane = f.isel(y=1)
-shifted = raw.assign_coords(x=[1, 4, 7, 10]).rf.frame(transform, dims=("y", "x"))
-conflict = xr.DataArray(np.ones(4), dims="x", coords={"x": [0, 3, 6, 9], "y": 4})
-wrong_units = raw.assign_coords(x=raw.x.assign_attrs(units="cm"))
-```
+Review decisions recorded in the probe: `broadcast_plane_volume` and `groupby` accept xarray's
+own refusals (an alignment conflict, a corrupt-index error), since no binding results;
+`rolling` must preserve; `interp` must refuse at the operation (maintainer decision
+2026-10-24).
 
-Cells marked "was: preserved, incorrect" were re-measured after split-binding detection was
-added: a binding that lost a coordinate to another index now raises on inspection instead of
-reading as preserved.
-
-| Case | Stock outcome | Stock | Upstream outcome | Upstream | Patched outcome | Patched | Remaining hole / owner | Fault path on 8de862c | Minimal reproducer |
-|---|---|---|---|---|---|---|---|---|---|
-| isel_scalar | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| isel_slice | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| isel_array | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| isel_vectorized | raises ValueError: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | raises ValueError: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | raises ValueError: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | — | — | — |
-| isel_drop_true | preserved, correct | hole | preserved, correct | hole | raises ValueError: cannot remove coordinate(s) 'y', which would corrupt the following index built from coordinates 'y', 'x': | ok | — | core/dataarray.py:DataArray.isel | `f.isel(y=1, drop=True)` |
-| sel_scalar | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| sel_slice | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| sel_nearest | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| sel_array | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| sel_vectorized | raises ValueError: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | raises ValueError: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | raises ValueError: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | — | — | — |
-| sel_drop_true | preserved, correct | hole | preserved, correct | hole | raises ValueError: cannot remove coordinate(s) 'y', which would corrupt the following index built from coordinates 'y', 'x': | ok | — | core/dataarray.py:DataArray.sel → DataArray.isel | `f.sel(y=2, drop=True)` |
-| head | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| tail | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| thin | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| transpose | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| rename | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| swap_dims | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u (was: preserved, incorrect; the split binding is now detected on inspection) | hole | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u (was: preserved, incorrect; the split binding is now detected on inspection) | hole | preserved, correct | ok | xarray `Index.swap_dims` hook (`20036f16`) | core/dataset.py:Dataset.swap_dims | `f.swap_dims({"x": "column"})` |
-| expand_dims | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| squeeze | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| squeeze_geometry | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| add_framed | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| add_different_transform | raises ValueError: incompatible framed coordinate mappings: the operands sample the same frame on different grids; resample one onto the other with rf.resample_to | ok | raises ValueError: incompatible framed coordinate mappings: the operands sample the same frame on different grids; resample one onto the other with rf.resample_to | ok | raises ValueError: incompatible framed coordinate mappings: the operands sample the same frame on different grids; resample one onto the other with rf.resample_to | ok | — | — | — |
-| add_unframed | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | preserved, correct | ok | preserved, correct | ok | — | structure/alignment.py:Aligner.align_indexes | `f + raw` |
-| add_unframed_reverse | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | unframed | hole | preserved, correct | ok | — | structure/alignment.py:Aligner.align_indexes | `raw + f` |
-| add_unframed_shifted_labels | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | hole | preserved, correct | ok | — | structure/alignment.py:Aligner.align_indexes | `f + raw.assign_coords(x=[3, 6, 9, 12])` |
-| add_unframed_conflict | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | ok | preserved, correct | hole | raises ValueError: conflicting unindexed coordinate 'y' | ok | — | structure/merge.py:merge_collected | `plane + conflict` |
-| add_unframed_conflict_reverse | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | ok | preserved, correct | hole | raises ValueError: conflicting unindexed coordinate 'y' | ok | — | — | — |
-| add_unframed_unit_conflict | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | preserved, correct | hole | raises ValueError: coordinate 'x' declares attrs['units'] = 'cm', but the transform's source declares that axis in '1'; convert a | ok | — | structure/merge.py:merge_collected | `f + wrong_units` |
-| add_unframed_unit_conflict_reverse | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | unframed | hole | raises ValueError: coordinate 'x' declares attrs['units'] = 'cm', but the transform's source declares that axis in '1'; convert a | ok | — | — | — |
-| add_unindexed_unit_conflict | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | preserved, correct | hole | raises ValueError: coordinate 'x' declares attrs['units'] = 'cm', but the transform's source declares that axis in '1'; convert a | ok | — | — | — |
-| add_unindexed_unit_conflict_reverse | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | preserved, correct | hole | raises ValueError: coordinate 'x' declares attrs['units'] = 'cm', but the transform's source declares that axis in '1'; convert a | ok | — | — | — |
-| add_scalar | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| add_scalar_reverse | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| ufunc_framed | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| ufunc_unframed | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | preserved, correct | ok | preserved, correct | ok | — | structure/alignment.py:Aligner.align_indexes | `np.add(f, raw)` |
-| ufunc_unframed_reverse | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | unframed | hole | preserved, correct | ok | — | structure/alignment.py:Aligner.align_indexes | `np.add(raw, f)` |
-| ufunc_scalar | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| ufunc_scalar_reverse | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| ufunc_unary | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| ufunc_unframed_conflict | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | ok | preserved, correct | hole | raises ValueError: conflicting unindexed coordinate 'y' | ok | — | structure/merge.py:merge_collected | `np.add(plane, conflict)` |
-| ufunc_unframed_conflict_reverse | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | ok | preserved, correct | hole | raises ValueError: conflicting unindexed coordinate 'y' | ok | — | — | — |
-| where_method | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| where_function | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| where_unframed_x | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | preserved, correct | ok | preserved, correct | ok | — | structure/alignment.py:Aligner.align_indexes | `xr.where(f > 2, raw, f)` |
-| where_unframed_y | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | preserved, correct | ok | preserved, correct | ok | — | structure/alignment.py:Aligner.align_indexes | `xr.where(f > 2, f, raw)` |
-| where_unframed_condition | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| where_framed_x | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | unframed | hole | preserved, correct | ok | — | — | — |
-| where_framed_y | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | unframed | hole | preserved, correct | ok | — | — | — |
-| where_conflicting_coordinate | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | ok | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u | ok | raises ValueError: conflicting unindexed coordinate 'y' | ok | — | structure/merge.py:merge_collected | `xr.where(conflict > 0, plane, 0)` |
-| align_inner | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| align_outer | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| align_exact | raises AlignmentError: cannot align objects with join='exact' where index/labels/sizes are not equal along these coordinates (dimensions): 'y' ('y',), 'x' ('x',) | ok | raises AlignmentError: cannot align objects with join='exact' where index/labels/sizes are not equal along these coordinates (dimensions): 'y' ('y',), 'x' ('x',) | ok | raises AlignmentError: cannot align objects with join='exact' where index/labels/sizes are not equal along these coordinates (dimensions): 'y' ('y',), 'x' ('x',) | ok | — | — | — |
-| align_override | preserved, correct | hole | preserved, correct | hole | raises ValueError: join='override' is unsupported for framed coordinates | ok | — | structure/alignment.py:Aligner.override_indexes | `xr.align(f, shifted, join="override")` |
-| align_unframed | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | unframed | hole | preserved, correct | ok | — | structure/alignment.py:Aligner.align_indexes | `xr.align(f, raw)` |
-| align_unframed_reverse | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | unframed | hole | preserved, correct | ok | — | — | — |
-| align_unframed_shifted_right | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | hole | preserved, correct | ok | — | structure/alignment.py:Aligner._reindex_one | `xr.align(f, raw.assign_coords(x=[3, 6, 9, 12]), join="right")` |
-| align_override_framed_first | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | unframed | hole | raises ValueError: join='override' is unsupported for framed coordinates | ok | — | — | — |
-| align_override_framed_second | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | unframed | hole | raises ValueError: join='override' is unsupported for framed coordinates | ok | — | — | — |
-| broadcast | raises ValueError: new dimensions {'y': 3, 'channel': 2} must be a superset of existing dimensions ('y', 'x') | hole | unframed | hole | preserved, correct | ok | — | structure/alignment.py:broadcast | `xr.broadcast(f, xr.DataArray([1, 2], dims="channel"))` |
-| broadcast_plane_volume | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | ok | — | — | — |
-| sum_geometry | unframed | ok | unframed | ok | unframed | ok | — | — | — |
-| sum_nongeometry | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| coarsen | unframed | hole | unframed | hole | raises ValueError: cannot coarsen geometry dimensions; call rf.unframe() | ok | local patch 9 and binding preflight | core/dataset.py:Dataset.coarsen | `f.coarsen(x=2).mean()` |
-| rolling | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| groupby | raises ValueError: cannot drop or update coordinate(s) 'y', which would corrupt the following index built from coordinates 'y', 'x': | ok | raises ValueError: cannot drop or update coordinate(s) 'y', which would corrupt the following index built from coordinates 'y', 'x': | ok | raises ValueError: cannot drop or update coordinate(s) 'y', which would corrupt the following index built from coordinates 'y', 'x': | ok | — | — | — |
-| resample | unframed | ok | unframed | ok | unframed | ok | — | — | — |
-| stack | unframed | hole | unframed | hole | raises ValueError: cannot stack geometry dimensions; call rf.unframe() | ok | local patch 10 and binding preflight | core/dataset.py:Dataset._stack_once | `f.stack(pixel=("y", "x"))` |
-| unstack | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | Stack and unstack nongeometry dimensions; the binding remains on its geometry dimensions. |
-| interp | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u | ok | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u | ok | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u | ok | — | — | — |
-| reindex | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | ok | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | ok | raises AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes | ok | — | — | — |
-| reindex_like | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| shift | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| roll_values | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| roll_coords | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| roll_empty | raises ZeroDivisionError: integer modulo by zero | hole | preserved, correct | ok | preserved, correct | ok | merged upstream #11613 (was local patch 8) | core/variable.py:Variable._roll_one_dim | `f.isel(x=slice(0, 0)).roll(x=1, roll_coords=True)` |
-| pad | unframed | hole | unframed | hole | raises ValueError: cannot pad geometry dimensions; call rf.unframe() | ok | local patch 10 and binding preflight | core/dataset.py:Dataset.pad | `f.pad(x=(1, 1))` |
-| concat_geometry | raises ValueError: concatenation of framed arrays is unsupported; call rf.unframe() | ok | raises ValueError: concatenation of framed arrays is unsupported; call rf.unframe() | ok | raises ValueError: concatenation of framed arrays is unsupported; call rf.unframe() | ok | — | — | — |
-| concat_nongeometry | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| merge | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| to_dataset_extract_owner | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| dataset_extract_sibling | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | preserved, correct | ok | preserved, correct | ok | — (shared grid, [binding_design.md](binding_design.md)); stock needs #11532 | — | `xr.Dataset({"owner": f, "sibling": raw})["sibling"]` |
-| dataset_mean_geometry | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u (was: preserved, incorrect; the split binding is now detected on inspection) | hole | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u (was: preserved, incorrect; the split binding is now detected on inspection) | hole | unframed | ok | xarray `4b250c41` | core/dataset.py:Dataset.reduce | `xr.Dataset({"owner": f}).mean("x")` |
-| dataset_quantile_geometry | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u (was: preserved, incorrect; the split binding is now detected on inspection) | hole | raises ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor unframed. Call rf.u (was: preserved, incorrect; the split binding is now detected on inspection) | hole | unframed | ok | xarray `4b250c41` | core/dataset.py:Dataset.quantile | `xr.Dataset({"owner": f}).quantile(0.5, dim="x")` |
-| dataset_setitem_labelled | raises AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes | hole | unframed | hole | preserved, correct | ok | xarray `35f13b39` | structure/merge.py:dataset_update_method | `xr.Dataset({"owner": f}).assign(sibling=raw * 2)` |
-| assign_coords | raises ValueError: cannot drop or update coordinate(s) 'x', which would corrupt the following index built from coordinates 'y', 'x': | ok | raises ValueError: cannot drop or update coordinate(s) 'x', which would corrupt the following index built from coordinates 'y', 'x': | ok | raises ValueError: cannot drop or update coordinate(s) 'x', which would corrupt the following index built from coordinates 'y', 'x': | ok | — | — | — |
-| drop_vars | raises ValueError: cannot remove coordinate(s) 'x', which would corrupt the following index built from coordinates 'y', 'x': | ok | raises ValueError: cannot remove coordinate(s) 'x', which would corrupt the following index built from coordinates 'y', 'x': | ok | raises ValueError: cannot remove coordinate(s) 'x', which would corrupt the following index built from coordinates 'y', 'x': | ok | — | — | — |
-| copy | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| astype | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| chunk | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| compute | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| dask_isel | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| dask_add | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-| pickle | preserved, correct | ok | preserved, correct | ok | preserved, correct | ok | — | — | — |
-
-### Interpretation
-
-- Stock mixed labelled operations fail alignment before #11532. On upstream `main` (with
-  #11532) the forward order works, but reverse order and `align(f, raw)` lose the frame, and
-  indexed-vs-plain conflicts resolve silently (#11607). The patched lane preserves the joined
-  binding in both orders and refuses conflicts.
-- `sum_geometry` and this probe's `resample` aggregate over a geometry dimension; their results
-  have no geometry in the source frame, so whole-binding loss is allowed. `coarsen(x=2)` would
-  keep representative positions, so it must refuse rather than unframe.
-- Unpatched geometry `stack`, `pad` and `coarsen` drop the index without calling it; the
-  patched preflights refuse first. Nongeometry stack, unstack, pad and coarsen preserve the
-  binding. The earlier `unstack` case stacked geometry first (losing the binding in `stack`);
-  it was replaced by a nongeometry unstack check.
-- Unpatched `swap_dims` and Dataset reductions split the index; this is now detected and
-  refused on inspection.
-- The original `broadcast` failure is generic: `_get_broadcast_dims_map_common_coords` skipped
-  a dimension once any index claimed a coordinate of that name, so any index spanning several
-  dimensions hit it. Merged #11615 lets the operation run; upstream then unframes, while the
-  patched series keeps the custom index.
-- Stock `roll` of a zero-length indexed dimension raised `ZeroDivisionError`; fixed by merged
-  #11613, now on upstream `main`.
-- Persistence is not an operation row: `rf.encode()` / `rf.decode()` round trips through netCDF
-  and Zarr are tested in `tests/test_native_encoding.py`.
+| Case | Expected | Stock | Upstream | Series 5 |
+|---|---|---|---|---|
+| isel_scalar | preserve | ok | ok | ok |
+| isel_slice | preserve | ok | ok | ok |
+| isel_array | preserve | ok | ok | ok |
+| isel_vectorized | refuse `ValueError`: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | ok | ok |
+| isel_drop_true | refuse `ValueError`: would corrupt the following index | hole (preserved) | hole (preserved) | ok |
+| sel_scalar | preserve | ok | ok | ok |
+| sel_slice | preserve | ok | ok | ok |
+| sel_nearest | preserve | ok | ok | ok |
+| sel_array | preserve | ok | ok | ok |
+| sel_vectorized | refuse `ValueError`: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | ok | ok |
+| sel_drop_true | refuse `ValueError`: would corrupt the following index | hole (preserved) | hole (preserved) | ok |
+| head | preserve | ok | ok | ok |
+| tail | preserve | ok | ok | ok |
+| thin | preserve | ok | ok | ok |
+| transpose | preserve | ok | ok | ok |
+| rename | preserve | ok | ok | ok |
+| swap_dims | preserve | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | ok |
+| expand_dims | preserve | ok | ok | ok |
+| squeeze | preserve | ok | ok | ok |
+| squeeze_geometry | preserve | ok | ok | ok |
+| add_framed | preserve | ok | ok | ok |
+| add_different_transform | refuse `ValueError`: incompatible framed coordinate mappings | ok | ok | ok |
+| add_unframed | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | ok | ok |
+| add_unframed_reverse | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| add_unframed_shifted_labels | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| add_unframed_conflict | refuse `ValueError`: conflicting unindexed coordinate 'y' | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (preserved) | ok |
+| add_unframed_conflict_reverse | refuse `ValueError`: conflicting unindexed coordinate 'y' | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (preserved) | ok |
+| add_unframed_unit_conflict | refuse `ValueError`: coordinate 'x' declares attrs['units'] = 'cm' | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (preserved) | ok |
+| add_unframed_unit_conflict_reverse | refuse `ValueError`: coordinate 'x' declares attrs['units'] = 'cm' | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (unframed) | ok |
+| add_unindexed_unit_conflict | refuse `ValueError`: coordinate 'x' declares attrs['units'] = 'cm' | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (preserved) | ok |
+| add_unindexed_unit_conflict_reverse | refuse `ValueError`: coordinate 'x' declares attrs['units'] = 'cm' | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (preserved) | ok |
+| add_scalar | preserve | ok | ok | ok |
+| add_scalar_reverse | preserve | ok | ok | ok |
+| ufunc_framed | preserve | ok | ok | ok |
+| ufunc_unframed | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | ok | ok |
+| ufunc_unframed_reverse | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| ufunc_scalar | preserve | ok | ok | ok |
+| ufunc_scalar_reverse | preserve | ok | ok | ok |
+| ufunc_unary | preserve | ok | ok | ok |
+| ufunc_unframed_conflict | refuse `ValueError`: conflicting unindexed coordinate 'y' | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (preserved) | ok |
+| ufunc_unframed_conflict_reverse | refuse `ValueError`: conflicting unindexed coordinate 'y' | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (preserved) | ok |
+| where_method | preserve | ok | ok | ok |
+| where_function | preserve | ok | ok | ok |
+| where_unframed_x | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | ok | ok |
+| where_unframed_y | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | ok | ok |
+| where_unframed_condition | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | ok | ok |
+| where_framed_x | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| where_framed_y | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| where_conflicting_coordinate | refuse `ValueError`: conflicting unindexed coordinate 'y' | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | ok |
+| align_inner | preserve; preserve | ok | ok | ok |
+| align_outer | preserve; preserve | ok | ok | ok |
+| align_exact | refuse `AlignmentError`: cannot align objects with join='exact' | ok | ok | ok |
+| align_override | refuse `ValueError`: join='override' is unsupported for framed coordinates | hole (preserved) | hole (preserved) | ok |
+| align_unframed | preserve; preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| align_unframed_reverse | preserve; preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| align_unframed_shifted_right | preserve; preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| align_override_framed_first | refuse `ValueError`: join='override' is unsupported for framed coordinates | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (preserved) | ok |
+| align_override_framed_second | refuse `ValueError`: join='override' is unsupported for framed coordinates | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (unframed) | ok |
+| broadcast | preserve | hole (ValueError: new dimensions {'y': 3, 'channel': 2} must be a superset of existing dimensions ('y', 'x')) | hole (AssertionError: expected preserved binding) | ok |
+| broadcast_plane_volume | refuse `AlignmentError`: cannot align objects on coordinate 'y' because of conflicting indexes | ok | ok | ok |
+| sum_geometry | unframe | ok | ok | ok |
+| sum_nongeometry | preserve | ok | ok | ok |
+| coarsen | refuse `ValueError`: cannot coarsen geometry dimensions; call rf.unframe() | hole (unframed) | hole (unframed) | ok |
+| rolling | preserve | ok | ok | ok |
+| groupby | refuse `ValueError`: would corrupt the following index | ok | ok | ok |
+| resample | unframe | ok | ok | ok |
+| stack | refuse `ValueError`: cannot stack geometry dimensions; call rf.unframe() | hole (unframed) | hole (unframed) | ok |
+| unstack | preserve | ok | ok | ok |
+| interp | refuse `ValueError`: cannot interpolate geometry dimensions; use rf.resample_to or call rf.unframe() | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | ok |
+| reindex | refuse `AlignmentError`: cannot align objects on coordinate 'x' because of conflicting indexes | ok | ok | ok |
+| reindex_like | preserve | ok | ok | ok |
+| shift | preserve | ok | ok | ok |
+| roll_values | preserve | ok | ok | ok |
+| roll_coords | preserve | ok | ok | ok |
+| roll_empty | preserve | hole (ZeroDivisionError: integer modulo by zero) | ok | ok |
+| pad | refuse `ValueError`: cannot pad geometry dimensions; call rf.unframe() | hole (unframed) | hole (unframed) | ok |
+| concat_geometry | refuse `ValueError`: concatenation of framed arrays is unsupported; call rf.unframe() | ok | ok | ok |
+| concat_nongeometry | preserve | ok | ok | ok |
+| merge | preserve; preserve | ok | ok | ok |
+| to_dataset_extract_owner | preserve | ok | ok | ok |
+| dataset_extract_sibling | preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | ok | ok |
+| dataset_mean_geometry | unframe | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | ok | ok |
+| dataset_quantile_geometry | unframe | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | ok | ok |
+| dataset_setitem_labelled | preserve; preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| assign_coords | refuse `ValueError`: would corrupt the following index | ok | ok | ok |
+| drop_vars | refuse `ValueError`: would corrupt the following index | ok | ok | ok |
+| copy | preserve | ok | ok | ok |
+| astype | preserve | ok | ok | ok |
+| chunk | preserve | ok | ok | ok |
+| compute | preserve | ok | ok | ok |
+| dask_isel | preserve | ok | ok | ok |
+| dask_add | preserve | ok | ok | ok |
+| pickle | preserve | ok | ok | ok |
+| N01 | preserve | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| N02 | preserve | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| N03 | preserve | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| N04 | refuse `ValueError`: coordinate 'x' differs for join='exact' | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| N05 | unframe; preserve | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| N06 | refuse `ValueError`: conflicting unindexed coordinate 'x' | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (preserved) | ok |
+| N07 | preserve; preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| N08 | refuse `ValueError`: conflicting unindexed coordinate 'x' | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (ValueError: the binding no longer owns its source coordinate(s) ['y']; the array is neither framed nor) | ok |
+| N09 | refuse `AlignmentError`: cannot update Dataset: coordinate | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| N10 | preserve | ok | ok | ok |
+| N11 | unframe | ok | ok | ok |
+| N12 | unframe | ok | ok | ok |
+| N13 | preserve | ok | ok | ok |
+| N14 | unframe | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | ok | ok |
+| N15 | preserve | ok | ok | ok |
+| N16 | refuse `KeyError`: source axis 'y' is fixed and cannot be selected by label | ok | ok | ok |
+| N17 | preserve | hole (ZeroDivisionError: integer modulo by zero) | ok | ok |
+| N18 | preserve | ok | ok | ok |
+| N19 | refuse `ValueError`: would corrupt the following index | ok | ok | ok |
+| N20 | refuse `ValueError`: would corrupt the following index | ok | ok | ok |
+| N21 | preserve | ok | ok | ok |
+| N22 | unframe | ok | ok | ok |
+| N23 | preserve | ok | ok | ok |
+| N24 | preserve | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | hole (AlignmentError: cannot align objects on coordinate 'x' because of conflicting indexes) | ok |
+| N25 | refuse `ValueError`: incompatible framed coordinate mappings | ok | ok | ok |
+| N26 | preserve | ok | ok | ok |
+| N27 | refuse `ValueError`: incompatible framed coordinate mappings | ok | ok | ok |
+| N28 | refuse `ValueError`: left operand is anonymous | ok | ok | ok |
+| N29 | preserve | ok | ok | ok |
+| N30 | preserve; preserve | hole (AlignmentError: cannot align objects on coordinate 'y' because of conflicting indexes) | hole (AssertionError: expected preserved binding) | ok |
+| N31 | refuse `ValueError`: this transform cannot rename source axes | ok | ok | ok |
+| N32 | preserve | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | hole (ValueError: the binding no longer owns its source coordinate(s) ['x']; the array is neither framed nor) | ok |
+| N33 | preserve; unframe | hole (CoordinateValidationError: coordinate x has dimensions ('x',), but these are not a subset of the DataArray dimensions) | hole (CoordinateValidationError: coordinate x has dimensions ('x',), but these are not a subset of the DataArray dimensions) | ok |
+| N34 | refuse `ValueError`: would corrupt the following index | hole (preserved) | hole (preserved) | ok |
+| N35 | refuse `ValueError`: vectorized indexing changes geometry dimensions; call rf.unframe() | ok | ok | ok |
 
 ## Alternatives Considered
 
-None; the probe design is recorded in [binding_design.md](binding_design.md).
+None; the probe design is recorded in [binding_design.md](binding_design.md) and the matrix
+note.
 
 ## Deferred Work
 
-Geometry-aware coarsen, stack and pad need explicit output-domain semantics before native
-support can replace the refusals.
+- Geometry-aware coarsen, stack, pad and interpolation need explicit output-domain semantics
+  before native support can replace the refusals.
+- Matrix Q1: the transform-index update candidate in
+  [upstream PR notes](../xarray-upstream/upstream_prs.md#deferred-work) still lacks a
+  reproducer.
 
 ## Next Steps
 
-Re-run all three lanes and update this table when the patch series or `BindingIndex` changes.
-Keep stock and patched claims distinct: the inventory measures 93 paths and certifies neither
-unprobed operations nor a release.
+Re-run all three lanes and regenerate this table when the patch series, `BindingIndex` or the
+probe changes. The inventory measures 128 paths; it certifies neither unprobed operations nor
+a release.

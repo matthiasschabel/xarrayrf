@@ -78,6 +78,14 @@
 
 ### Changed
 
+- With patched xarray (now series 5, tag `xarrayrf-patches-5`), `interp` and `interp_like` on a
+  geometry dimension raise `ValueError` at the call, pointing to `rf.resample_to`, instead of
+  returning an array whose binding fails when next inspected. `BindingIndex` implements the
+  consolidated xarray hooks `check_drop` and `join_overlapping`; series 4 is no longer
+  supported as the patched lane.
+- With patched xarray, `xr.broadcast(..., exclude=...)` that excludes one geometry dimension no
+  longer carries the binding onto outputs lacking that dimension; they are unframed and keep
+  their labels.
 - `resample` fills target samples that a field declared `outside="raise"` does not map with
   `fill_value`, for scalars and declared components, instead of refusing the whole resampling.
   Inside a chain, such a sample never reaches a later member. Direct `transform_point` and

@@ -1,9 +1,10 @@
 # Native-operation audit matrix
 
-**Status:** Active
+**Status:** Implemented
 **Last updated:** 2026-10-24
 **Scope:** R1a design for the R1 native-operation release gate; 35 additional cases, with
-contract-derived expectations. No cases have been executed for this proposal.
+contract-derived expectations written before execution. Implemented in the probe and
+`tests/test_native.py`; results are in the [inventory](binding_operation_inventory.md).
 
 ## Context
 

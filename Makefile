@@ -1,6 +1,6 @@
 UV ?= uv
 XARRAY_UPSTREAM ?= $(HOME)/GitHub/xarray-upstream
-XARRAY_PATCHED ?= $(HOME)/GitHub/xarray-patched-4
+XARRAY_PATCHED ?= $(HOME)/GitHub/xarray-hooks-5
 
 .PHONY: check test test-upstream test-patched test-pinned tour relativity probe probe-pinned probe-tensor build
 check:

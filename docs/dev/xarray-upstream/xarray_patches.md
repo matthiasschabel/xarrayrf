@@ -1,7 +1,7 @@
 # Maintained xarray patches
 
 **Status:** Active
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-24
 **Scope:** The local xarray patch series that implements xarrayrf's native-operation contract,
 its pin in `pyproject.toml`, and its validation.
 
@@ -19,63 +19,49 @@ Repositories: upstream `https://github.com/pydata/xarray`; public fork
 
 ## Current Decision
 
-### Series 4 (current, published)
+### Series 5 (current, published)
 
 | Item | Value |
 |---|---|
-| Base | upstream `main` `dfd25c7252e71a47e789aa24b8a06dd911a56461` (includes merged #11613 `b335cea0` and #11615 `dfd25c72`) |
-| Checkout | `~/GitHub/xarray-patched-4`, branch `index-hooks-4` (immutable; build changes on a new branch) |
-| Tag | annotated `xarrayrf-patches-4` -> `5db75d53f5515fabb3ca5ffc8419eb9c982cf4a2` on the fork |
-| `git describe --tags --match 'v*'` | `v2026.07.0-80-g5db75d53` |
-| Pin | `patched` dependency group, `tag = "xarrayrf-patches-4"`; `SETUPTOOLS_SCM_PRETEND_VERSION = "2026.7.1.dev80+xarrayrf.patches.4"` (uv's git checkout lacks release tags) |
+| Base | upstream `main` `b2acc77ab2ca4a0caedce527c8cce2e0d9737c2c` (includes merged #11613, #11615, #11616) |
+| Checkout | `~/GitHub/xarray-hooks-5`, branch `index-hooks-5` (immutable; build changes on a new branch) |
+| Tag | annotated `xarrayrf-patches-5` -> `a657617942f5c6f6b6bba88d2aeb2f10691af386` on the fork |
+| `git describe --tags --match 'v*'` | `v2026.09.0-146-ga6576179` |
+| Pin | `patched` dependency group, `tag = "xarrayrf-patches-5"`; `SETUPTOOLS_SCM_PRETEND_VERSION = "2026.9.1.dev146+xarrayrf.patches.5"` |
 | Default dependency | stock `xarray>=2026.7.0`; `.venv` stays stock, `.venv-patched` holds the pin |
 
-Patch numbers are stable across series. Patch 1 retired (#11615 is in the base); patch 8 retired
-in series 3 (#11613 merged). Ordered manifest:
+Series 5 replaces series 4's seven optional `Index` hooks with two (`check_drop`,
+`join_overlapping`), following the [hook design](index_hook_design.md), and splits the generic
+fixes out of the old patches 4 and 9. Patch 6 retired (#11616 is in the base). Ordered
+manifest:
 
 | # | Commit | Purpose | Upstream reference |
 |---|---|---|---|
-| 2 | `f3d6dd3f28b490c2a9375153495b26c2e5828737` | `isel`/`sel(drop=True)` drops index-owned scalar coordinates; raises on a partial drop | [PR #11617](upstream_prs.md) |
-| 3 | `e84aa71bdaaf62a20147f8d50747484d3c839972` | optional `Index.join_overlapping`, `check_unindexed_coord_conflicts`, `check_override` hooks | local; see hook design |
-| 4 | `edd934dc3e3d16fba05072bd55e8f08e17dc416c` | alignment hook refinements plus broadcast custom-index preservation; depends on 3 | local; fix half to be split out |
-| 5 | `3634c8748161b7f1d2637b54b33da92753006b11` | `Dataset.swap_dims` decides per index via optional `Index.swap_dims` | local; relates to #8911, #11100 |
-| 6 | `ee3dd5592d9ed1399142b00338ead87b31f1d356` | Dataset reductions drop a multi-coordinate index whole | [PR #11616](upstream_prs.md) |
-| 7 | `4b628738757b5e08445fce485952efbbd75a64f1` | `Dataset.update` raises when an incoming index of another type would replace the Dataset's | [PR #11621](upstream_prs.md) |
-| 9 | `f0d55c1c7be753627a32710fbe84c80f49906d3e` | coarsen retains unaffected indexes; `Index.check_coarsen` veto | local; fix half to be split out |
-| 10 | `c6fa89ce66256391327cc4c4c6e2c8732a046f4e` | `Index.check_stack` and `Index.check_pad` vetoes | local |
-| 7b | `5db75d53f5515fabb3ca5ffc8419eb9c982cf4a2` | before #11621's raise, `update` asks the Dataset's index through `join_overlapping(how="left")`; if it accepts and labels are equal, the incoming indexes are dropped. Default hook returns `None`, so behavior equals #11621. Depends on 3 and 7 | local; stays after #11621 merges |
+| 1 | `26d1e1159ca6697dc0df5205a1497c6a8419d0b4` | `isel`/`sel(drop=True)` drops index-owned scalar coordinates; raises on a partial drop (old patch 2) | [PR #11617](upstream_prs.md); code identical apart from a merged import line, since `main` moved |
+| 2 | `9b1bf4ea236ddf4364a9bfebbede56f894570099` | `Dataset.update` raises when an incoming index of another type would replace the Dataset's (old patch 7) | [PR #11621](upstream_prs.md); same patch ID as head `e52d7fa4` |
+| 3 | `67b0647b905063f3ad3e1fda25fc2abee4d3dea6` | broadcast and `broadcast_like` keep common indexes; an index on an excluded dimension stays off outputs lacking it (generic half of old patch 4) | local; candidate fix PR |
+| 4 | `49c93abdedfdb29681e2cbf51cd68206de84f2aa` | coarsen retains unaffected indexes (generic half of old patch 9) | local; candidate fix PR |
+| 5 | `87732447217dd480b18d9873420fcafd76fc1a29` | `Index.check_drop(operation, dims)`, consulted before stack, pad, coarsen and interp drop an index (replaces `check_stack`, `check_pad`, `check_coarsen`) | local; hook A |
+| 6 | `23874f092c53e147cbffb529f785b4ce81d8624e` | `Index.join_overlapping(..., how)` for overlapping joins, `how="override"` vetoes and `how=None` unindexed validation, plus update acceptance (replaces patch 3, the hook half of 4, and 7b) | local; hook B |
+| 7 | `36959c6a218a14a69a5fab299a6e51c15247cfad` | `Dataset.swap_dims` decides per index via optional `Index.swap_dims` (old patch 5) | local; relates to #8911, #11100 |
+| 8 | `a657617942f5c6f6b6bba88d2aeb2f10691af386` | broadcast keeps a joint index's surviving labels, with default indexes, when an excluded dimension stops the index itself | local; squash into 3 before any upstream PR |
 
-Retained patches other than refreshed patch 6 have the same patch IDs as series 3 (a negative
-control confirmed different patches do not share IDs). PR-derived patches match the revisions
-used to publish this immutable series, without their whats-new bullets. Current merge/review
-state and newer remote heads live in [upstream_prs.md](upstream_prs.md); refresh changed PR
-patches in a new series rather than modifying the published tag.
-
-#### Sync check (2026-10-08)
-
-Patches 2 and 7 have the same `git patch-id --stable` as the posted #11617 (`81a8f22c`) and
-#11621 (`13be639d`) code diffs, excluding whats-new (a negative control differs); neither needs
-refreshing. Against upstream `main` `4929aa90`, `git cherry` marks only patch 6 as upstream
-(#11616, `23c9dd1`, not in v2026.09.0); the other eight are still needed. #11613 and #11615 are
-in v2026.09.0. The minimal next series is series 4 without patch 6, on a base containing
-`23c9dd1`. Lanes: xarrayrf on `main` `4929aa90` 1,908 passed, 42 xfailed, probe 66 ok / 27
-holes; on series 4 by path 1,950 passed, probe 93 ok / 0 holes.
-
-#### Series 4 validation (2026-09-28)
+#### Series 5 validation (2026-10-24)
 
 | Lane | Result |
 |---|---|
-| xarray full suite, base `dfd25c72` | 19,879 passed, 1,097 skipped, 187 xfailed, 31 xpassed |
-| xarray full suite, series 4 | 20,077 passed, same skip/xfail/xpass, 0 failed |
-| xarray focused patched tests | 971 passed, 7 skipped, 1 xfailed, 1 xpassed |
-| xarrayrf on upstream `main` | 1,044 passed, 1 skipped, 49 xfailed; probe 64 ok / 29 holes |
-| xarrayrf on series 4 (path and installed tag) | 1,083 passed, 1 skipped, 10 xfailed; probe 93 ok / 0 holes |
-| xarrayrf on stock 2026.7.0 | 1,040 passed, 54 xfailed; probe 67 ok / 26 holes |
-| `make check`, `make build` | pass |
+| xarray full suite, base `b2acc77a` | 20,929 passed, 1,111 skipped, 187 xfailed, 31 xpassed |
+| xarray full suite, series 5 | 21,273 passed, same skip/xfail/xpass, 0 failed |
+| every series-5 commit | ruff check clean; `test_index_hooks.py` and `test_coarsen.py` pass |
+| new commit-3/4 regressions on the unfixed tree | fail, as required |
+| xarrayrf on series 5 (path) | 3,108 passed; probe 128/128 `ok` |
+| xarrayrf on upstream `b2acc77a` | 3,046 passed, 62 xfailed; probe 85 ok / 43 holes |
+| xarrayrf on stock 2026.7.0 | 3,039 passed, 69 xfailed; probe 74 ok / 54 holes |
+| `make check` | pass |
 
-Upstream `broadcast` now returns an unframed result (a contract hole); series 4 preserves the
-binding. When `PYTHONPATH` overrides an editable install, xarray's reported version can be stale;
-identify the tree by `xarray.__file__`.
+Series 5 drops series 4's hook names, so series 4 is no longer a supported lane for
+`BindingIndex`. Remaining maintainer decisions on the hook contract are in the
+[hook design](index_hook_design.md) Next Steps.
 
 Commands:
 
@@ -84,10 +70,10 @@ Commands:
 PYTHONPATH=$PWD ~/GitHub/xarray-upstream/.venv/bin/pytest xarray/tests -n 6 -q
 # xarrayrf lanes
 make test            # stock .venv
-make test-upstream   # ~/GitHub/xarray-upstream main
-make test-patched    # ~/GitHub/xarray-patched-4 by path
+make test-upstream   # ~/GitHub/xarray-upstream (set XARRAY_UPSTREAM to a main checkout)
+make test-patched    # ~/GitHub/xarray-hooks-5 by path
 make test-pinned     # published tag in .venv-patched
-make probe           # 93-case native-operation probe
+make probe-pinned    # probe plus gate against the published tag
 make check
 ```
 
@@ -100,13 +86,15 @@ remain in Git history rather than competing with the current manifest.
 
 | Series | Tag target | Historical base |
 |---|---|---|
+| `xarrayrf-patches-4` | `5db75d53f5515fabb3ca5ffc8419eb9c982cf4a2` | `dfd25c72` |
 | `xarrayrf-patches-3` | `9ca40562c9f292d482ee653f1dc18e0ed11b9a4c` | `56a5d370` |
 | `xarrayrf-patches-2` | `2af8cfea3d530b2e7f0c4d6c805bea8c5fbfc509` | `8de862c29544c2fb1957ce20985745952bc81de7` |
 | `xarrayrf-patches-1` | `35f13b39` | See the tag's history |
 
 The original patch 7 kept Dataset indexes through internal `merge_core` priority overrides.
-Upstream review replaced that with a raise; patch 7b retains opt-in keep behavior through the
-hook. This distinction matters when refreshing the update patches.
+Upstream review replaced that with a raise; series 4's patch 7b, now part of series 5's
+`join_overlapping` commit, retains opt-in keep behavior through the hook. This distinction
+matters when refreshing the update patches.
 
 ### Tracker searches recorded for local patches
 
@@ -156,7 +144,7 @@ assigned. It does not cover the `join="exact", copy=False` fast path (`apply_ufu
 - #11607: the warning PR leaves the exact/no-copy path (`merge_collected`'s `TODO(shoyer)`
   branch) and the eventual raise for follow-ups, pending maintainer review. The opt-in hook catches
   unindexed conflicts for `BindingIndex`.
-- No hosted CI lane runs the patched pin yet.
+- The `patched` CI job validates the pinned series with the probe gate on every push.
 - Retirement: re-evaluate each patch once a released xarray contains the fix and xarrayrf's
   contract tests pass on that release; only then raise the stock floor.
 
@@ -164,9 +152,9 @@ assigned. It does not cover the `join="exact", copy=False` fast path (`apply_ufu
 
 1. When an open PR changes in review, refresh the matching patch from the PR head in the next
    numbered series.
-2. Rebase a new series onto merged fixes recorded in [upstream_prs.md](upstream_prs.md),
-   retire duplicate patches (keep 7b), tag, re-pin and revalidate. The current series remains
-   unchanged until that separate upstream-development task is undertaken.
-3. Split the fix halves out of patches 4 and 9, and split patch 10 into stack and pad, before any
-   upstream PR (see [index_hook_design.md](index_hook_design.md)).
+2. When fixes merge upstream, build the next series on a base containing them, retire the
+   duplicate commits (keep the update acceptance in `join_overlapping`), tag, re-pin and
+   revalidate. Series 5 stays unchanged.
+3. Before a fix PR for commit 3, squash commit 8 into it; commits 3 and 4 are the
+   standalone fix candidates (see [index_hook_design.md](index_hook_design.md)).
 4. Search the tracker before any further xarray change.

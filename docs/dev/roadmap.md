@@ -45,9 +45,9 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 
 ### Planned work, in rough priority order
 
-- **Release preparation.** Extend the native-operation audit (R1) and rebuild the patch series with consolidated
-  hooks (R2). The TestPyPI rehearsal, dependency-floor and patched-pin hosted verification are
-  complete. Steps and order: [release plan](release_plan.md).
+- **Release preparation.** The 128-case audit (R1) and patch series 5 with consolidated
+  hooks (R2) are done; R2's extension evidence and drafts remain. The TestPyPI rehearsal,
+  dependency-floor and patched-pin hosted verification are complete. Steps and order: [release plan](release_plan.md).
 - **xarray upstream.** Respond to review on the open bug-fix PRs, retire duplicate patches when
   a new series baseline includes their merged fixes, verify released-xarray support when fixes
   ship, and reduce the lifecycle hook patches to two `Index` methods before

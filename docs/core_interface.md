@@ -52,15 +52,17 @@ destination[{"y": slice(0, 2)}] = source.isel(y=slice(0, 2))
 # destination keeps its original binding; the selected pixel values come from source.
 ```
 
-With the [pinned native-operation patches](dev/xarray-upstream/xarray_patches.md#series-4-current-published),
+With the [pinned native-operation patches](dev/xarray-upstream/xarray_patches.md#series-5-current-published),
 stacking, padding (including zero width), or coarsening a geometry dimension raises
 `ValueError` before losing its binding; the message directs callers to `rf.unframe()`.
+Interpolating a geometry dimension with `interp` or `interp_like` raises `ValueError` the same
+way and points to `rf.resample_to`, which resamples with the frame.
 This includes stacking a geometry dimension together with a nongeometry dimension and
 constructing coarsen windows along geometry dimensions. Stack/unstack and pad of only
 nongeometry dimensions preserve the binding. Nongeometry coarsen reductions and `construct`
 preserve the exact binding on both DataArray and Dataset. Indexed empty rolls preserve the
 empty geometry with either `roll_coords` setting. These fixes are included in the
-`xarrayrf-patches-4` tag (the empty-roll and broadcast fixes are also on upstream xarray
+`xarrayrf-patches-5` tag (the empty-roll and broadcast fixes are also on upstream xarray
 `main`); strict conditional xfails record absent capabilities on other lanes.
 
 `array.rf.encode()` returns an unframed copy sharing pixel data, with the reserved

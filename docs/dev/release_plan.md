@@ -17,9 +17,10 @@ wrong binding blocks release even for an operation described as unsupported. Gre
 stock-lane strict xfails are not release approval. Viewer, nonlinear geometry and convenience
 APIs are separate workstreams, not release gates.
 
-### Status on 2026-10-13
+### Status on 2026-10-24
 
-R3 (patched-pin CI) and R6 (TestPyPI rehearsal) completed on 2026-10-24; R1, R2, R5 and R7 below are open and R4 is
+R1 (audit), R3 (patched-pin CI) and R6 (TestPyPI rehearsal) are complete. R2's series 5 is
+published and pinned; its extension evidence and drafts remain open, as do R5 and R7. R4 is
 dropped for the pre-alpha release. Criterion 4
 (dependency-floor CI) is met. Upstream: #11613, #11615 and #11616 are merged (`b335cea`,
 `dfd25c7`, `23c9dd1`); #11613 and #11615 are in v2026.09.0, #11616 is on xarray `main` only.
@@ -57,6 +58,12 @@ acceptance with assertions on the actual error. Assess the three unfiled bug can
 their paths.
 *Done when* the reviewed matrix runs, every failure has an owner and release impact in the
 inventory, and confirmed blockers are in the roadmap. Do not loosen strict xfails to get there.
+*Done 2026-10-24:* the [matrix](binding/native_operation_audit_matrix.md) (35 cases, N09
+corrected in review) and exact expectations for the 93 legacy cases run in the probe and
+`tests/test_native.py`. The run found one series-4 blocker, N33 (broadcast with an excluded
+geometry dimension), fixed in series 5, and led to the maintainer decision that `interp`
+refuses at the operation. Series 5 is 128/128; every stock and upstream hole has an owner in
+the [inventory](binding/binding_operation_inventory.md).
 
 **R2: next xarray series and consolidated hooks** [criterion 1]. Record a new upstream base in
 a fresh worktree. Drop patch 6 (the base will include #11616). Re-verify that patches 2 and 7
@@ -79,6 +86,12 @@ feedback. Write the manifest and the design-issue and generic-fix drafts for the
 `index-hooks-4` and `xarrayrf-patches-4` stay unchanged; a new tag and pin bump need
 publication approval, after which update the patched group pin, pretend version and lock
 together.
+*Series 5 done 2026-10-24:* tag `xarrayrf-patches-5` (`a6576179`, [manifest](xarray-upstream/xarray_patches.md))
+implements the two-hook design on `b2acc77a` with the fix halves as separate commits, and the
+pin, lock and `BindingIndex` moved to it. Still open: the extension evidence
+(pint-xarray/cf-xarray), the #11607 prototype check, and the design-issue and fix-PR drafts;
+the maintainer decisions on the hook contract are in the
+[hook design](xarray-upstream/index_hook_design.md).
 
 **R3: hosted CI for the patched pin** [supports criterion 1]. Add a separate job using the
 `patched` group (`make test-pinned`). Log the imported xarray path, version and commit. Run the
@@ -150,8 +163,8 @@ From the xarrayrf root, after `uv sync --locked --extra dev`:
 ```sh
 make check test
 .venv/bin/python tools/binding_operation_probe.py
-make test-patched XARRAY_PATCHED="$HOME/GitHub/xarray-patched-4"
-PYTHONPATH="$HOME/GitHub/xarray-patched-4" .venv/bin/python tools/binding_operation_probe.py
+make test-patched XARRAY_PATCHED="$HOME/GitHub/xarray-hooks-5"
+PYTHONPATH="$HOME/GitHub/xarray-hooks-5" .venv/bin/python tools/binding_operation_probe.py
 make test-pinned   # provisions .venv-patched from the published pin
 ```
 
@@ -173,7 +186,6 @@ non-release work.
 
 ## Next Steps
 
-1. Confirm the review workflow, then start R1's matrix proposal and R2's merge-path analysis in
-   parallel.
+1. Finish R2's evidence and drafts; settle the hook-contract decisions with the maintainer.
 2. Keep status in the roadmap and evidence in the area notes; update this note when a thread
    closes and mark it `Implemented` after R7.
