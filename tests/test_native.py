@@ -835,11 +835,13 @@ def test_native_audit_unindexed_conflict(
 def test_native_audit_broadcast_excluded_geometry(
     framed: xr.DataArray, image: xr.DataArray
 ) -> None:
-    # N33 has no established series-4 fix: a failure here remains a finding.
+    # N33: the excluded x must not drag the binding onto an output that lacks x.
     check = _native_oracle(framed, image.expand_dims(channel=2))
     first, second = xr.broadcast(framed, xr.DataArray([1, 2], dims="channel"), exclude={"x"})
     check(first)
     assert dict(second.sizes) == {"channel": 2, "y": 3}
+    assert "x" not in second.coords
+    np.testing.assert_array_equal(second["y"].values, framed["y"].values)
     _assert_native_unframed(second)
 
 
@@ -1357,6 +1359,20 @@ def test_binding_drop_refusal_messages(framed: xr.DataArray, operation: str, mes
     with pytest.raises(ValueError) as error:
         index.check_drop(operation, ("x",))
     assert str(error.value) == message
+
+
+@pytest.mark.xfail(
+    not _HAS_CHECK_DROP,
+    strict=True,
+    raises=pytest.fail.Exception,
+    reason="this xarray lane lacks Index.check_drop preflight",
+)
+def test_interp_geometry_is_refused(framed: xr.DataArray) -> None:
+    if not _HAS_CHECK_DROP:
+        # Without the preflight, interpolation itself runs and needs SciPy.
+        pytest.importorskip("scipy", minversion="1.18")
+    with pytest.raises(ValueError, match="cannot interpolate geometry dimensions"):
+        framed.interp(x=[1.5])
 
 
 @pytest.mark.xfail(

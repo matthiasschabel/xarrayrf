@@ -477,6 +477,11 @@ def _legacy_case(name: str) -> Case:
         ),
         "assign_coords": (ValueError, ("would corrupt the following index", "coordinate(s) 'x'")),
         "drop_vars": (ValueError, ("would corrupt the following index", "coordinate(s) 'x'")),
+        # Maintainer decision 2026-10-24: refuse at the operation through Index.check_drop.
+        "interp": (
+            ValueError,
+            ("cannot interpolate geometry dimensions; use rf.resample_to or call rf.unframe()",),
+        ),
         "reindex": (
             xr.AlignmentError,
             ("cannot align objects on coordinate 'x' because of conflicting indexes",),
@@ -502,12 +507,6 @@ def _legacy_case(name: str) -> Case:
     if name in refusals:
         error, fragments = refusals[name]
         return Case(call, error=error, fragments=fragments, unchanged=[source])
-    if name == "interp":
-        reason = (
-            "Design §4 records inspection-time split binding, but specifies no operation-time "
-            "refusal type/message."
-        )
-        return Case(call, pending=reason)
     # These domains come from selection/alignment semantics, never the framed result.
     domains = {
         "isel_scalar": lambda: raw.isel(y=1),
