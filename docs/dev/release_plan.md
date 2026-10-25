@@ -101,7 +101,9 @@ existing jobs unchanged. Pushing needs approval.
 *Done 2026-10-24:* `4ced97e` adds the `patched` job and
 `tools/check_binding_probe.py`. [run 40114374947](https://github.com/matthiasschabel/xarrayrf/actions/runs/40114374947) installs series 4 (`5db75d53`), passes 3,059 tests and
 gates 93/93 `ok`; the negative control [run 40114398033](https://github.com/matthiasschabel/xarrayrf/actions/runs/40114398033) pins the unpatched base `dfd25c72` and fails at
-the gate, naming each hole. Re-point the job's evidence when R2 publishes a new pin.
+the gate, naming each hole. On the series-5 pin,
+[run 40152700415](https://github.com/matthiasschabel/xarrayrf/actions/runs/40152700415) installs
+`a6576179`, passes 3,108 tests and gates 128/128.
 
 ### Waiting on others
 
