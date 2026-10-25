@@ -108,7 +108,7 @@ the gate, naming each hole. On the series-5 pin,
 ### Waiting on others
 
 **R5: upstream merges and a released-xarray check** [criterion 1].
-[#11617](https://github.com/pydata/xarray/pull/11617) is open at `81a8f22c` with no reviews;
+[#11617](https://github.com/pydata/xarray/pull/11617) is open at `e22ee16b` (merged from main 2026-10-24) with no reviews;
 the open questions are scalar `drop=True` and partial shared-index refusal.
 [#11621](https://github.com/pydata/xarray/pull/11621) (head `e52d7fa4`) has changes requested:
 the 2026-09-28 review asks that `ds["nir"] = nir` with a conflicting default index raise rather

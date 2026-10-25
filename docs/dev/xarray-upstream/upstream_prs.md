@@ -1,7 +1,7 @@
 # Upstream xarray bug-fix pull requests
 
 **Status:** Active
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-24
 **Scope:** The five independent bug-fix PRs split from the local patch series: #11613 and #11615
 and #11616 merged, #11617 and #11621 open. No hook API is proposed here.
 
@@ -85,10 +85,11 @@ Review notes:
 
 ### #11617 Respect drop=True for scalar coordinates an index keeps (open)
 
-https://github.com/pydata/xarray/pull/11617, head `81a8f22c` (2026-10-08; merged from main
-`4929aa90`). Local patch 2 has the same stable patch ID as the posted code diff, excluding
-whats-new. A merge from main had dropped the whats-new entry; `81a8f22c` restores it under
-v2026.09.1 Bug Fixes.
+https://github.com/pydata/xarray/pull/11617, head `e22ee16b` (2026-10-24; merged from main
+`b2acc77a` to resolve a test-import conflict, mergeable again, no reviews yet). Series-5
+commit 1 has the same stable patch ID as the posted code diff, excluding whats-new. The
+whats-new entry is under v2026.09.1 Bug Fixes; check it after every merge from main, since one
+merge dropped it before.
 
 An index whose `isel` rebuilds the selected position as a 0-d coordinate returns it in
 `index_variables`, and the `isel` paths copy it into the result before `drop` is considered, so
