@@ -1,7 +1,13 @@
-name: TestPyPI rehearsal
+name: Publish
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Package index to upload to
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
 
 permissions:
   contents: read
@@ -64,7 +70,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
-    environment: testpypi
+    # Each index trusts this file only together with its own environment name.
+    environment: ${{ inputs.target }}
     permissions:
       id-token: write
     steps:
@@ -72,6 +79,11 @@ jobs:
         with:
           name: distributions
           path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Upload to TestPyPI
+        if: inputs.target == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+      - name: Upload to PyPI
+        if: inputs.target == 'pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1

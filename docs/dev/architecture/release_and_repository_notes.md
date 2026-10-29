@@ -1,8 +1,8 @@
 # Release, packaging and repository notes
 
 **Status:** Active
-**Last updated:** 2026-10-24
-**Scope:** Package metadata, CI lanes, dependency floors, the manual TestPyPI workflow and the
+**Last updated:** 2026-10-28
+**Scope:** Package metadata, CI lanes, dependency floors, the manual publishing workflow and the
 hosted steps still outstanding. The maintainer procedure is [releasing.md](../../releasing.md).
 
 ## Context
@@ -89,10 +89,14 @@ operation gaps; green dependency-floor CI does not certify the release invariant
 
 ### Publishing workflow (`.github/workflows/publish.yml`)
 
-Manual dispatch, restricted to `main`. The build job runs `make check test build`, Twine
+Manual dispatch, restricted to `main`, with a `target` input of `testpypi` (default) or `pypi`. The build job runs `make check test build`, Twine
 metadata validation (Twine at a fixed version, not a dev dependency), a wheel rebuilt from the
 sdist and a clean wheel-install smoke test. Only the publish job has `id-token: write`; it uploads
-the build artifact through OIDC Trusted Publishing in the `testpypi` environment. Trusted
+the build artifact through OIDC Trusted Publishing in the environment named by `target`. Each
+index trusts `publish.yml` only together with its own environment name, so one file serves both;
+the two upload steps are selected with `if:` rather than a conditional `repository-url`, whose
+empty value is not documented to fall back to PyPI. The `pypi` environment requires reviewer
+approval. Trusted
 Publishing avoids storing an API token. The manual installation check in releasing.md takes
 core dependencies from PyPI and the exact xarrayrf version from TestPyPI with `--no-deps`, then
 runs `pip check`, so a mixed index cannot select the wrong source.
@@ -109,8 +113,9 @@ published project or reserve the name.
 Pending publishers rechecked 2026-10-24 by the maintainer: `xarrayrf` is pending on both TestPyPI
 and PyPI. The TestPyPI publisher's fields are confirmed (project `xarrayrf`, owner
 `matthiasschabel`, repository `xarrayrf`, workflow `publish.yml`, environment `testpypi`). The
-PyPI publisher is unused until a production job exists; that job must match its workflow and
-environment fields.
+PyPI publisher was re-registered 2026-10-28 with the same fields and environment `pypi` after the
+earlier registration lapsed without an upload; the workflow gained its `pypi` target the same
+day.
 
 TestPyPI rehearsal completed 2026-10-24 on `3bc80f2`: local checks in a fresh clone (2994 passed,
 47 stock-lane xfails; build, payload check and `twine check --strict` passed), then [run 40111808490](https://github.com/matthiasschabel/xarrayrf/actions/runs/40111808490)
@@ -132,12 +137,13 @@ download-artifact v8 fails on a digest mismatch instead of warning.
   one consumer.
 - Combining with a boundary-topology package: confuses reference geometry with topology.
 - An API token secret instead of Trusted Publishing: needless credential handling.
-- A production publishing job now: deferred until the native-operation release gate is met.
+- A separate production workflow file: duplicates the build job; a `target` input on one file
+  keeps the validated build shared and each index's trust scoped by environment.
 - Loosening cubic tolerances for older SciPy: would hide a real edge-value error.
 
 ## Deferred Work
 
-- A later version number and a production publishing policy, after the release gate.
+- A release version after the native-operation gate; `0.0.1.dev0` on PyPI only holds the name.
 - Keep both minimum lanes current as dependency floors move.
 
 ## Next Steps

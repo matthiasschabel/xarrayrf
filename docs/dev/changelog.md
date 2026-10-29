@@ -1,5 +1,16 @@
 # Changelog
 
+## [2026-10-28] — PyPI target for the publishing workflow
+
+- **Problem**: The PyPI pending publisher lapsed without an upload, so the name was never
+  established, and `publish.yml` could only upload to TestPyPI.
+- **Resolution**: `publish.yml` takes a `target` input (`testpypi` default, `pypi`) used as the
+  publish job's environment; separate `if:`-gated upload steps choose the index. The PyPI
+  publisher is re-registered for `publish.yml` with environment `pypi`, which requires reviewer
+  approval. `0.0.1.dev0` is to be uploaded to PyPI to establish the name (maintainer decision).
+- **Files affected**: `.github/workflows/publish.yml`, `docs/releasing.md`, `CHANGELOG.md`,
+  `docs/dev/release_plan.md`, `docs/dev/architecture/release_and_repository_notes.md`.
+
 ## [2026-10-17] — CF longitude bounds across the seam
 
 - **Problem**: `cf._intervals` sorts each bounds row, so a seam cell stored as

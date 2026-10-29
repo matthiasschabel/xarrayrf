@@ -282,8 +282,9 @@
   `grid_coordinates`, plus `Grid` targets for core and native resampling. Integer coordinates
   retain int64 values, including values above 2**53; grid equality includes numeric dtype kind.
   Every encoded grid coordinate declares `int64` or `float64` explicitly.
-- Pre-alpha package metadata and a manual TestPyPI rehearsal workflow. This is release
-  preparation; no package release or native-operation release pass is claimed.
+- Pre-alpha package metadata and a manual publishing workflow for TestPyPI and PyPI. This is
+  release preparation; the `0.0.1.dev0` development upload establishes the project name, and
+  no package release or native-operation release pass is claimed.
 - Independent repository scaffold, migrated architecture/review records, and local xarray
   patch guidance.
 - Development-only scalar-binding feasibility probes.

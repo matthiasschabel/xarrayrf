@@ -1,7 +1,7 @@
 # Release plan
 
 **Status:** Active
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-28
 **Scope:** The remaining release gates in the [roadmap](roadmap.md#release-criteria), their
 upstream xarray dependencies and the packaging rehearsal. Packaging, CI lanes and the publishing
 workflow themselves are in [release and repository notes](architecture/release_and_repository_notes.md);
@@ -146,10 +146,11 @@ filenames cannot be reused, so inventory the published files before any retry.
 when the packaging changes before R7.
 
 **R7: production approval**, once R1–R3, R5 and R6 close. Compile one readiness record, rebuild and
-install the final artifacts, and recheck floors, changelog and classifier. Production Trusted
-Publishing does not exist yet; the workflow only uploads to TestPyPI. The PyPI pending
-publisher is registered; the production job must match its workflow and environment fields. A patched-xarray
-distribution is a separate product decision.
+install the final artifacts, and recheck floors, changelog and classifier. `publish.yml` now
+uploads to PyPI with `target: pypi` through the reviewer-gated `pypi` environment, matching the
+registered pending publisher. Its first use uploads the already-rehearsed `0.0.1.dev0` only to
+establish the project name (maintainer decision 2026-10-28); that is not R7 approval, and a
+later release needs a new version. A patched-xarray distribution is a separate product decision.
 
 ### Fixed constraints
 
@@ -158,7 +159,7 @@ distribution is a separate product decision.
 - Keep stock `.venv` and `.venv-patched` separate, and identify a lane by source path plus
   commit (version metadata goes stale under `PYTHONPATH`). Don't create environments inside
   the PR worktrees.
-- No public action (tag, pin publication, CI push, TestPyPI dispatch, upstream post) without
+- No public action (tag, pin publication, CI push, TestPyPI or PyPI dispatch, upstream post) without
   specific approval.
 
 ### Local commands
