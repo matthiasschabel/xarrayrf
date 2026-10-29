@@ -2,7 +2,7 @@
 
 This is the maintainer procedure for uploading xarrayrf to TestPyPI or PyPI with the manual
 **Publish** workflow (`.github/workflows/publish.yml`). The pre-alpha `0.0.1.dev0` build, rehearsed
-on TestPyPI, is also the version that establishes the project name on PyPI; neither upload
+on TestPyPI, is also the version that established the project name on PyPI; neither upload
 certifies the native-operation release contract. The [design's release gate](design.md)
 and [patch manifest](dev/xarray-upstream/xarray_patches.md) describe the current stock and
 patched xarray evidence. In particular, stock xarray still has known paths that return a

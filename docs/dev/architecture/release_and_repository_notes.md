@@ -1,7 +1,7 @@
 # Release, packaging and repository notes
 
 **Status:** Active
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 **Scope:** Package metadata, CI lanes, dependency floors, the manual publishing workflow and the
 hosted steps still outstanding. The maintainer procedure is [releasing.md](../../releasing.md).
 
@@ -10,7 +10,7 @@ hosted steps still outstanding. The maintainer procedure is [releasing.md](../..
 xarrayrf is a standalone repository (`matthiasschabel/xarrayrf`, public, MIT). Runtime
 dependencies are NumPy and xarray; domain producers such as DICOM applications are downstream
 clients or optional adapter extras. Version `0.0.1.dev0` is on TestPyPI from the
-2026-10-24 rehearsal (below); nothing has been published to PyPI. Native-operation gaps on stock
+2026-10-24 rehearsal and on PyPI from the 2026-10-29 name-establishing upload (below). Native-operation gaps on stock
 xarray remain release blockers ([the architecture](../../design.md) §5), so a TestPyPI upload is a
 packaging rehearsal, not a release. Clean fixes belong in xarray itself where appropriate,
 maintained locally as small upstream-sized changes ([upstream workflow](../../upstream.md)).
@@ -130,6 +130,17 @@ README and CHANGELOG and no `docs/dev`. The run warned that `actions/checkout@v4
 now use Node.js 24 releases: `checkout@v7`, `upload-artifact@v7`, `download-artifact@v8` and
 `setup-uv@v10.3.2`. setup-uv no longer publishes floating major tags, so it is pinned exactly.
 download-artifact v8 fails on a digest mismatch instead of warning.
+
+PyPI upload completed 2026-10-29 on `1052415`: [run 40818931584](https://github.com/matthiasschabel/xarrayrf/actions/runs/40818931584)
+built, waited for reviewer approval in the `pypi` environment and uploaded through OIDC with
+attestations, creating the PyPI project. Uploaded files:
+`xarrayrf-0.0.1.dev0-py3-none-any.whl` (sha256 `3ef547dc50414fba…`) and
+`xarrayrf-0.0.1.dev0.tar.gz` (`c9ff10c6f88b125c…`). The hashes differ from the TestPyPI files
+because the build is not byte-reproducible across runs; the source differs only in the workflow
+and docs. A fresh Python 3.12 environment outside the checkout installed
+`xarrayrf==0.0.1.dev0` from PyPI with xarray 2026.9.0; `pip check` and the workflow smoke test
+passed, and the metadata shows MIT and `>=3.12`. The JSON API still returned 404 shortly after
+upload while the simple index listed both files.
 
 ## Alternatives Considered
 

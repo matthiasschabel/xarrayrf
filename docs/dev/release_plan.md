@@ -1,7 +1,7 @@
 # Release plan
 
 **Status:** Active
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 **Scope:** The remaining release gates in the [roadmap](roadmap.md#release-criteria), their
 upstream xarray dependencies and the packaging rehearsal. Packaging, CI lanes and the publishing
 workflow themselves are in [release and repository notes](architecture/release_and_repository_notes.md);
@@ -148,8 +148,9 @@ when the packaging changes before R7.
 **R7: production approval**, once R1–R3, R5 and R6 close. Compile one readiness record, rebuild and
 install the final artifacts, and recheck floors, changelog and classifier. `publish.yml` now
 uploads to PyPI with `target: pypi` through the reviewer-gated `pypi` environment, matching the
-registered pending publisher. Its first use uploads the already-rehearsed `0.0.1.dev0` only to
-establish the project name (maintainer decision 2026-10-28); that is not R7 approval, and a
+registered pending publisher. Its first use uploaded the already-rehearsed `0.0.1.dev0` only to
+establish the project name (maintainer decision 2026-10-28; done 2026-10-29,
+[run 40818931584](https://github.com/matthiasschabel/xarrayrf/actions/runs/40818931584)); that is not R7 approval, and a
 later release needs a new version. A patched-xarray distribution is a separate product decision.
 
 ### Fixed constraints

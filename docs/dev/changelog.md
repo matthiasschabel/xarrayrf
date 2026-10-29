@@ -7,7 +7,8 @@
 - **Resolution**: `publish.yml` takes a `target` input (`testpypi` default, `pypi`) used as the
   publish job's environment; separate `if:`-gated upload steps choose the index. The PyPI
   publisher is re-registered for `publish.yml` with environment `pypi`, which requires reviewer
-  approval. `0.0.1.dev0` is to be uploaded to PyPI to establish the name (maintainer decision).
+  approval. `0.0.1.dev0` was uploaded to PyPI on 2026-10-29 to establish the name (maintainer decision);
+  a clean install and the smoke test passed.
 - **Files affected**: `.github/workflows/publish.yml`, `docs/releasing.md`, `CHANGELOG.md`,
   `docs/dev/release_plan.md`, `docs/dev/architecture/release_and_repository_notes.md`.
 
