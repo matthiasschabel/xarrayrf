@@ -1,7 +1,7 @@
 # Maintained xarray patches
 
 **Status:** Active
-**Last updated:** 2026-10-25
+**Last updated:** 2026-11-02
 **Scope:** The local xarray patch series that implements xarrayrf's native-operation contract,
 its pin in `pyproject.toml`, and its validation.
 
@@ -19,7 +19,27 @@ Repositories: upstream `https://github.com/pydata/xarray`; public fork
 
 ## Current Decision
 
-### Series 6 (current, published)
+### Series 7 (current, published 2026-11-02)
+
+| Item | Value |
+|---|---|
+| Base | upstream `main` `dba03ede` (series 6 rebased; 28 upstream commits past `b2acc77a`, none touching the series' files) |
+| Checkout | `~/GitHub/xarray-hooks-7`, branch `index-hooks-7` (immutable) |
+| Tag | annotated `xarrayrf-patches-7` -> `803eb861` on the fork |
+| `git describe --tags --match 'v*'` | `v2026.09.0-175-g803eb861` |
+| Pin | `tag = "xarrayrf-patches-7"`; `SETUPTOOLS_SCM_PRETEND_VERSION = "2026.9.1.dev175+xarrayrf.patches.7"` |
+
+Series 7 is series 6 on the new base with one correction folded into the broadcast commit
+(commit 3): the Dataset branch of `_broadcast_helper` assembled variables with
+`{**data_vars, **coords}`, so a data variable sharing a name with a broadcast coordinate was
+silently dropped where `main` raises "found in both data_vars and coords". It now raises the
+same error, with a regression test. Found in review of the standalone broadcast PR; the same
+fix is on `pr/broadcast-common-indexes`. Validation: xarray suites touched by the series
+(dataarray, dataset, coarsen, rolling, merge, concat, indexes, computation, interp, missing,
+coordinate transform, range and ND point indexes, index hooks) 5,714 passed; xarrayrf 3,115
+passed, probe 132/132; extension survey verdicts unchanged.
+
+### Series 6 (published 2026-10-24)
 
 | Item | Value |
 |---|---|
@@ -90,7 +110,7 @@ PYTHONPATH=$PWD ~/GitHub/xarray-upstream/.venv/bin/pytest xarray/tests -n 6 -q
 # xarrayrf lanes
 make test            # stock .venv
 make test-upstream   # ~/GitHub/xarray-upstream (set XARRAY_UPSTREAM to a main checkout)
-make test-patched    # ~/GitHub/xarray-hooks-6 by path
+make test-patched    # ~/GitHub/xarray-hooks-7 by path
 make test-pinned     # published tag in .venv-patched
 make probe-pinned    # probe plus gate against the published tag
 make check

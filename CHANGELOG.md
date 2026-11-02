@@ -87,6 +87,9 @@
   construction and `merge` keep the binding when a lower-dimensional plain array with equal
   labels comes first, as in `profile + framed`; before, the binding was split and failed when
   next inspected.
+- With patched xarray (series 7, tag `xarrayrf-patches-7`), `xr.broadcast` with a Dataset whose
+  data variable shares a name with a broadcast coordinate raises `ValueError`, as released
+  xarray does, instead of dropping the data variable.
 - With patched xarray, `xr.broadcast(..., exclude=...)` that excludes one geometry dimension no
   longer carries the binding onto outputs lacking that dimension; they are unframed and keep
   their labels.

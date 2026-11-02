@@ -1,7 +1,7 @@
 # Release plan
 
 **Status:** Active
-**Last updated:** 2026-10-29
+**Last updated:** 2026-11-02
 **Scope:** The remaining release gates in the [roadmap](roadmap.md#release-criteria), their
 upstream xarray dependencies and the packaging rehearsal. Packaging, CI lanes and the publishing
 workflow themselves are in [release and repository notes](architecture/release_and_repository_notes.md);
@@ -91,7 +91,7 @@ together.
 *Series 5 done 2026-10-24:* tag `xarrayrf-patches-5` (`a6576179`, [manifest](xarray-upstream/xarray_patches.md))
 implements the two-hook design on `b2acc77a` with the fix halves as separate commits, and the
 pin, lock and `BindingIndex` moved to it. *Evidence done 2026-10-25:* [extension survey](xarray-upstream/extension_hook_survey.md) and the
-#11607 check (see the hook design). It found N36-N39, fixed in series 6 (`xarrayrf-patches-6`, `b13b0a6b`, now the pin).
+#11607 check (see the hook design). It found N36-N39, fixed in series 6 (`xarrayrf-patches-6`, `b13b0a6b`). Series 7 (`xarrayrf-patches-7`, `803eb861`, now the pin) rebases onto `dba03ede` and fixes a broadcast data-loss bug found while preparing the broadcast PR.
 Drafts of the design issue and the two fix PRs exist locally; filing them is deferred. The
 maintainer decisions on the hook contract stay open in the
 [hook design](xarray-upstream/index_hook_design.md).
@@ -170,8 +170,8 @@ From the xarrayrf root, after `uv sync --locked --extra dev`:
 ```sh
 make check test
 .venv/bin/python tools/binding_operation_probe.py
-make test-patched XARRAY_PATCHED="$HOME/GitHub/xarray-hooks-6"
-PYTHONPATH="$HOME/GitHub/xarray-hooks-6" .venv/bin/python tools/binding_operation_probe.py
+make test-patched XARRAY_PATCHED="$HOME/GitHub/xarray-hooks-7"
+PYTHONPATH="$HOME/GitHub/xarray-hooks-7" .venv/bin/python tools/binding_operation_probe.py
 make test-pinned   # provisions .venv-patched from the published pin
 ```
 

@@ -1,7 +1,7 @@
 # Roadmap
 
 **Status:** Active
-**Last updated:** 2026-10-25
+**Last updated:** 2026-11-02
 **Scope:** Project-wide: release criteria, planned work, parked work and the decisions a new
 maintainer is most likely to revisit. Area-specific detail lives in the linked notes.
 
@@ -19,7 +19,7 @@ The [five-stage codebase audit](codebase_audit_review.md) is complete; no furthe
 is queued. Deferred conveniences and release/viewer work below are separate.
 
 A release requires the invariant in [the design](../design.md): no native operation may return
-a valid-looking incorrect binding. On the patched xarray lane (series 6) all 132 probed operations
+a valid-looking incorrect binding. On the patched xarray lane (series 7) all 132 probed operations
 are correct ([inventory](binding/binding_operation_inventory.md)); on released xarray several are
 not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/upstream_prs.md).
 
@@ -45,7 +45,7 @@ not, pending the upstream pull requests in [upstream_prs.md](xarray-upstream/ups
 
 ### Planned work, in rough priority order
 
-- **Release preparation.** The 132-case audit (R1) and patch series 6 with consolidated
+- **Release preparation.** The 132-case audit (R1) and patch series 7 with consolidated
   hooks and extension evidence (R2) are done; filing the upstream design issue is deferred. The TestPyPI rehearsal,
   dependency-floor and patched-pin hosted verification are complete. Steps and order: [release plan](release_plan.md).
 - **xarray upstream.** Respond to review on the open bug-fix PRs, retire duplicate patches when
