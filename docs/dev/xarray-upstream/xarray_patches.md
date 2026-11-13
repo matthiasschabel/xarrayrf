@@ -58,6 +58,13 @@ regressions cover `copy=True`, a partially excluded subset index, and dropping o
 index while keeping another whole. Validation: xarray full suite 21,284 passed, same
 skip/xfail/xpass as series 5; xarrayrf on the installed tag 3,115 passed, probe 132/132.
 
+#### Upstream sync check (2026-11-02)
+
+Series 6 cherry-picks cleanly onto upstream `main` `dba03ede` (28 commits past `b2acc77a`,
+none touching the series' files; no release since v2026.09.0). On that rebased tree: xarray
+full suite 21,356 passed, 1,116 skipped, 187 xfailed, 31 xpassed; xarrayrf 3,115 passed.
+xarrayrf on plain `dba03ede`: 3,049 passed, 66 xfailed. No new series needed.
+
 ### Series 5 (published 2026-10-24)
 
 | Item | Value |
@@ -168,9 +175,12 @@ Symptom: custom scalar index `tag=10` vs plain `tag=20` keeps 10 silently throug
 
 Upstream status: issue #11607 (links #2996). A maintainer asked for a PR (2026-10-12) and
 suggested a deprecation first. PR #11716 (branch `pr/index-coord-conflict-warning`, head
-`f91c7064`, open since 2026-10-12, no review yet) emits a `FutureWarning` in
+`171b6eb1` after a 2026-10-28 merge from main, opened 2026-10-12, ready for review since
+2026-10-28, no review yet as of 2026-11-02) emits a `FutureWarning` in
 `Aligner._get_indexes_and_vars`, where the index is assigned. It does not cover the `join="exact", copy=False` fast path (`apply_ufunc`, `where`,
 `merge` under the new combine defaults), which is left as an open question for maintainers.
+Competing PR #11666 (another contributor) offered on 2026-10-28 to close in favor of #11716
+and contribute its regression tests; unanswered as of 2026-11-02.
 
 ## Alternatives Considered
 
